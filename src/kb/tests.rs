@@ -36,8 +36,8 @@ fn ensure_node_stable() {
 #[test]
 fn gap_next_flow() {
     let kb = open_test();
-    kb.add_gap("s", "r1", "ep1", "낮음", 0.4).unwrap();
-    let id2 = kb.add_gap("s", "r2", "ep2", "높음", 0.9).unwrap();
+    kb.add_gap("s", "r1", "ep1", "low", 0.4).unwrap();
+    let id2 = kb.add_gap("s", "r2", "ep2", "high", 0.9).unwrap();
     let g = kb.next("s").unwrap().unwrap();
     assert_eq!(g.subject, "ep2");
     kb.record_attempt(&AttemptInput {
@@ -68,13 +68,13 @@ fn finding_fts_and_evidence() {
         })
         .unwrap();
     let fid = kb
-        .add_finding("s", "POST /api/x는 Referer 없으면 403", 0.9, &[aid])
+        .add_finding("s", "POST /api/x returns 403 without Referer", 0.9, &[aid])
         .unwrap();
     let (nodes, edges) = kb.subgraph(fid, 1).unwrap();
     assert!(nodes.len() >= 2 && !edges.is_empty());
     let got = kb.search_findings("s", "Referer", 10).unwrap();
     assert_eq!(got.len(), 1);
-    let got = kb.search_findings("s", "존재하지않는말", 10).unwrap();
+    let got = kb.search_findings("s", "nonexistentterm", 10).unwrap();
     assert!(got.is_empty());
 }
 
@@ -91,8 +91,8 @@ fn fsck_catches() {
             ..Default::default()
         })
         .unwrap();
-    kb.add_finding("s", "증거 없는 교훈", 0.8, &[]).unwrap();
-    kb.add_finding("s", "증거 있는 교훈", 0.9, &[aid]).unwrap();
+    kb.add_finding("s", "finding without evidence", 0.8, &[]).unwrap();
+    kb.add_finding("s", "finding with evidence", 0.9, &[aid]).unwrap();
     let issues = kb.fsck("s").unwrap();
     let kinds: Vec<&str> = issues.iter().map(|i| i.kind.as_str()).collect();
     assert!(kinds.contains(&"attempt-less-target"));

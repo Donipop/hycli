@@ -4,7 +4,7 @@ use hycli::apperr::{self, AppError};
 use hycli::output::Emitter;
 
 #[derive(Parser)]
-#[command(name = "hycli", version, about = "Websites, ready for AI.")]
+#[command(name = "hycli", version, about = "Automate any website.")]
 struct Cli {
     #[arg(long, global = true)]
     kb: Option<String>,
@@ -16,7 +16,7 @@ struct Cli {
     #[arg(long, global = true)]
     allow_local: bool,
     #[command(subcommand)]
-    cmd: Cmd,
+    cmd: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
@@ -26,12 +26,22 @@ enum Cmd {
         url: String,
         #[arg(long, default_value = "go")]
         tls_profile: String,
-        /// 브라우저 관찰 — "stealth"=런치(예정), 실무는 --cdp
+        /// Observe using a local Chromium browser instance.
         #[arg(long)]
         browser: Option<String>,
         /// CDP attach: auto | ws://… | http://127.0.0.1:9222
         #[arg(long)]
         cdp: Option<String>,
+    },
+    /// Deterministic fast recon: mine SSR state, documented routes, and JS bundle APIs without an AI loop.
+    Recon {
+        url: String,
+        /// Write a draft SiteSpec v2 YAML file to this path.
+        #[arg(long)]
+        draft: Option<String>,
+        /// Maximum number of JS bundles to scan for API routes.
+        #[arg(long, default_value_t = 4)]
+        max_bundles: usize,
     },
     /// Inspect the local evidence and activity database.
     Kb {
@@ -65,12 +75,16 @@ enum Cmd {
     Try {
         site: String,
         op: String,
-        /// --arg k=v 반복
+        /// Pass --arg key=value (may be repeated).
         #[arg(long = "arg")]
         args: Vec<String>,
     },
-    /// Check a website using an available read that requires no inputs.
-    Health { site: String },
+    /// Replay recorded reads without AI: tells an expired sign-in from a changed website.
+    #[command(visible_alias = "health")]
+    Check {
+        /// Installed website ID; omit to check every website.
+        site: Option<String>,
+    },
     /// Describe websites, actions, typed inputs and expected results as JSON.
     Describe {
         site: Option<String>,
@@ -137,12 +151,25 @@ enum Cmd {
         #[arg(long)]
         only_site: Option<String>,
     },
-    /// Open the local website and account dashboard.
+    /// Open Hycli, starting its background engine only when needed.
+    Open {
+        #[arg(long, default_value_t = 4318)]
+        port: u16,
+        #[arg(long)]
+        no_open: bool,
+    },
+    /// Show whether the local dashboard is running.
+    Status,
+    /// Stop the local dashboard after its active work has finished.
+    Stop,
+    /// Run the local dashboard in the foreground (for development or servers).
     Dashboard {
         #[arg(long, default_value_t = 4318)]
         port: u16,
         #[arg(long)]
         no_open: bool,
+        #[arg(long, hide = true)]
+        auto_port: bool,
     },
 }
 
@@ -251,7 +278,15 @@ async fn main() {
         allow_local: cli.allow_local,
     };
     let emit = Emitter::new(deps.force_json);
-    let code = run(deps, cli.cmd, &emit).await;
+    let code = run(
+        deps,
+        cli.cmd.unwrap_or(Cmd::Open {
+            port: 4318,
+            no_open: false,
+        }),
+        &emit,
+    )
+    .await;
     std::process::exit(code);
 }
 
@@ -297,7 +332,7 @@ fn find_spec(name: &str) -> Result<hycli::spec::Spec, AppError> {
     if !path.exists() {
         return Err(apperr::spec(
             format!("Website is not installed: {name}"),
-            "Use `hycli prepare URL`, open `hycli dashboard`, or install a definition with `hycli spec install FILE`.",
+            "Use `hycli prepare URL`, open `hycli open`, or install a definition with `hycli spec install FILE`.",
         ));
     }
     let spec = hycli::spec::parse(&hycli::util::read_bounded(&path, 2 * 1024 * 1024)?)?;
@@ -341,7 +376,7 @@ fn hycli_sites() -> Vec<(String, hycli::spec::Spec)> {
 
 fn load_file_spec(file: &str) -> Result<hycli::spec::Spec, AppError> {
     let data = std::fs::read(file)
-        .map_err(|e| apperr::spec(format!("파일 읽기 실패 ({e})"), "경로 확인"))?;
+        .map_err(|e| apperr::spec(format!("Failed to read file ({e})"), "Check the file path."))?;
     hycli::spec::parse(&data)
 }
 
@@ -358,7 +393,7 @@ fn blocked_err(defense: &str, signal: &str) -> AppError {
     } else {
         format!(" ({signal})")
     };
-    apperr::blocked(format!("차단 감지: {defense}{sig}"), cls.remedy())
+    apperr::blocked(format!("Access blocked: {defense}{sig}"), cls.remedy())
 }
 
 async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> {
@@ -507,8 +542,34 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             emit.data(&result.mapped.or(result.body));
             Ok(())
         }
-        Cmd::Dashboard { port, no_open } => {
-            hycli::dashboard::serve(runtime(&deps, true, deps.allow_local)?, port, !no_open).await
+        Cmd::Open { port, no_open } => {
+            let instance =
+                hycli::desktop::open(port, !no_open, deps.allow_local, deps.kb.as_deref()).await?;
+            emit.data(&serde_json::json!({"running": true, "url": instance.url()}));
+            Ok(())
+        }
+        Cmd::Status => {
+            let instance = hycli::desktop::running(&hycli::platform::data_dir()).await;
+            emit.data(&serde_json::json!({"running": instance.is_some(), "url": instance.map(|i| i.url())}));
+            Ok(())
+        }
+        Cmd::Stop => {
+            hycli::desktop::stop(&hycli::platform::data_dir()).await?;
+            emit.data(&serde_json::json!({"running": false}));
+            Ok(())
+        }
+        Cmd::Dashboard {
+            port,
+            no_open,
+            auto_port,
+        } => {
+            hycli::dashboard::serve_with_options(
+                runtime(&deps, true, deps.allow_local)?,
+                port,
+                !no_open,
+                auto_port,
+            )
+            .await
         }
         Cmd::Mcp {
             sites_only,
@@ -533,15 +594,15 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
         } => {
             if browser.is_some() && cdp.is_some() {
                 return Err(apperr::usage(
-                    "--browser와 --cdp는 동시에 못 쓴다",
-                    "하나만 지정",
+                    "--browser and --cdp cannot be used together",
+                    "Specify only one.",
                 ));
             }
             let core = runner(&deps)?;
             let (result, _) = if cdp.is_some() {
                 return Err(apperr::usage(
-                    "CDP attach는 대시보드의 Accounts 페어링을 사용한다",
-                    "hycli dashboard",
+                    "Use Accounts pairing in the dashboard for browser sessions",
+                    "hycli open",
                 ));
             } else if browser.is_some() {
                 core.probe_browser_stealth(&deps.site, &url).await?
@@ -558,6 +619,26 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             }
             Ok(())
         }
+        Cmd::Recon {
+            url,
+            draft,
+            max_bundles,
+        } => {
+            let core = runner(&deps)?;
+            let (mut report, spec) = core.recon(&deps.site, &url, max_bundles.min(4)).await?;
+            if let Some(out_path) = draft {
+                let yaml = serde_yaml::to_string(&spec)
+                    .map_err(|e| apperr::spec(format!("Failed to serialize YAML ({e})"), ""))?;
+                std::fs::write(&out_path, yaml).map_err(|e| {
+                    apperr::runtime(e, "Failed to write file", &out_path)
+                })?;
+                if let Some(obj) = report.as_object_mut() {
+                    obj.insert("draft_file".into(), serde_json::Value::String(out_path));
+                }
+            }
+            emit.data(&report);
+            Ok(())
+        }
         Cmd::Kb { cmd } => kb_cmd(deps, cmd, emit).await,
         Cmd::Spec { cmd } => spec_cmd(deps, cmd, emit).await,
         Cmd::Auth { cmd } => auth_cmd(cmd, emit),
@@ -569,7 +650,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             limit,
         } => capture_run(deps, from, site, base, out, limit, emit).await,
         Cmd::Try { site, op, args } => try_run(deps, site, op, args, emit).await,
-        Cmd::Health { site } => health_run(deps, site, emit).await,
+        Cmd::Check { site } => check_run(deps, site, emit).await,
         Cmd::Site(rest) => site_run(deps, rest, emit).await,
     }
 }
@@ -592,7 +673,7 @@ async fn kb_cmd(deps: Deps, cmd: KbCmd, emit: &Emitter) -> Result<(), AppError> 
                 Ok(())
             }
             None => {
-                emit.data(&serde_json::json!({"action": "none", "detail": "열린 갭 없음 — 커버리지 충족"}));
+                emit.data(&serde_json::json!({"action": "none", "detail": "No open gaps; coverage satisfied"}));
                 Ok(())
             }
         },
@@ -615,8 +696,8 @@ async fn kb_cmd(deps: Deps, cmd: KbCmd, emit: &Emitter) -> Result<(), AppError> 
                 Ok(())
             }
             None => Err(apperr::spec(
-                format!("노드 없음: {kind} {key}"),
-                "kb node-ls로 확인",
+                format!("Node not found: {kind} {key}"),
+                "Check with hycli kb node-ls.",
             )),
         },
         KbCmd::Graph { node_id, depth } => {
@@ -688,7 +769,7 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"status": format!("{} issues", issues.len()), "issues": issues}));
-                return Err(apperr::spec("스펙 검증 실패", "issues 항목 수정"));
+                return Err(apperr::spec("Spec validation failed", "Fix the reported issues."));
             }
             emit.data(&serde_json::json!({"status": "ok", "site": sp.site.name, "ops": sp.operations.len()}));
             Ok(())
@@ -699,7 +780,7 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"issues": issues}));
-                return Err(apperr::spec("검증 실패 — 설치 중단", "issues 수정"));
+                return Err(apperr::spec("Validation failed; installation aborted", "Fix the reported issues."));
             }
             let dst = hycli::platform::specs_dir().join(format!("{}.yaml", sp.site.name));
             runner(&deps)?.install(&sp)?;
@@ -743,7 +824,7 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
         AuthCmd::Set { r#ref, value } => {
             let (site, key) = r#ref
                 .split_once('/')
-                .ok_or_else(|| apperr::usage("형식은 <site>/<key>", "예: httpbin/token"))?;
+                .ok_or_else(|| apperr::usage("Format must be <site>/<key>", "Example: httpbin/token"))?;
             let v = match value {
                 Some(v) => v,
                 None => {
@@ -754,7 +835,7 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
                 }
             };
             if v.is_empty() {
-                return Err(apperr::usage("빈 값", "stdin 또는 --value"));
+                return Err(apperr::usage("Empty credential value", "Provide via stdin or --value."));
             }
             st.set(site, key, &v)?;
             emit.data(&serde_json::json!({"stored": r#ref}));
@@ -767,7 +848,7 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
         AuthCmd::Rm { r#ref } => {
             let (site, key) = r#ref
                 .split_once('/')
-                .ok_or_else(|| apperr::usage("형식은 <site>/<key>", "예: httpbin/token"))?;
+                .ok_or_else(|| apperr::usage("Format must be <site>/<key>", "Example: httpbin/token"))?;
             if site == "accounts" || site == "providers" {
                 let core = hycli::runtime::Runtime::open(
                     &hycli::platform::data_dir(),
@@ -803,21 +884,21 @@ async fn capture_run(
 ) -> Result<(), AppError> {
     let kb = open_kb(&deps)?;
     let raw = std::fs::read(&from)
-        .map_err(|e| apperr::spec(format!("HAR 읽기 실패 ({e})"), "경로 확인"))?;
+        .map_err(|e| apperr::spec(format!("Failed to read HAR file ({e})"), "Check the file path."))?;
     let f = hycli::har::parse(&raw)?;
     let clusters = hycli::capture::from_har(&f);
     if clusters.is_empty() {
         return Err(apperr::spec(
-            "클러스터 0개 — XHR/JSON 응답이 없다",
-            "브라우저 캡처 범위 확인",
+            "Zero endpoint clusters found; no XHR/JSON responses in HAR",
+            "Check the browser capture scope.",
         ));
     }
     let draft = hycli::capture::draft_spec(&site, &site, &base, &clusters, limit)
-        .map_err(|e| apperr::spec(format!("{e}"), "draft.yaml을 수동 편집"))?;
+        .map_err(|e| apperr::spec(format!("{e}"), "Edit draft.yaml manually."))?;
     let out_path = out.unwrap_or_else(|| format!("{site}-draft.yaml"));
     let yb =
-        serde_yaml::to_string(&draft).map_err(|e| apperr::runtime(e, "yaml 직렬화 실패", ""))?;
-    std::fs::write(&out_path, yb).map_err(|e| apperr::runtime(e, "초안 쓰기 실패", ""))?;
+        serde_yaml::to_string(&draft).map_err(|e| apperr::runtime(e, "Failed to serialize YAML", ""))?;
+    std::fs::write(&out_path, yb).map_err(|e| apperr::runtime(e, "Failed to write draft", ""))?;
 
     let (aid, sha) = kb.register_artifact(&site, "har", &from)?;
     let mut recorded = 0;
@@ -844,7 +925,7 @@ async fn capture_run(
             &site,
             "replay-unverified",
             &ep_key,
-            "관찰됨, 리플레이 미검증",
+            "Observed in HAR; replay unverified",
             0.8,
         )?;
         kb.link(aid, ep_id, "discovered_via")?;
@@ -853,7 +934,7 @@ async fn capture_run(
     let short: String = sha.chars().take(8).collect();
     emit.data(
         &serde_json::json!({"clusters": clusters.len(), "recorded": recorded, "artifact_sha": short,
-        "draft": out_path, "next": "hycli try로 리플레이 검증 후 갭 done"}),
+        "draft": out_path, "next": "Verify replay with hycli try, then mark gap done"}),
     );
     Ok(())
 }
@@ -877,36 +958,51 @@ async fn try_run(
     Ok(())
 }
 
-async fn health_run(deps: Deps, site: String, emit: &Emitter) -> Result<(), AppError> {
-    let sp = find_spec(&site)?;
-    let usable = |op: &&hycli::spec::Operation| {
-        hycli::policy::operation_effect(op, &Default::default()) == hycli::policy::Effect::Read
-            && hycli::runtime::params(op).iter().all(|(_, p)| !p.required)
+async fn check_run(deps: Deps, site: Option<String>, emit: &Emitter) -> Result<(), AppError> {
+    let core = runner(&deps)?;
+    let sites = match site {
+        Some(site) => vec![find_spec(&site)?.site.name],
+        None => core.specs()?.into_iter().map(|sp| sp.site.name).collect(),
     };
-    let op = if let Some(health) = &sp.health {
-        Some(sp.op(&health.op)?)
-    } else {
-        sp.operations.iter().find(usable)
+    let mut reports = vec![];
+    for site in sites {
+        reports.push(core.check_site(&site).await?);
     }
-    .filter(usable)
-    .ok_or_else(|| {
-        apperr::usage(
-            "No read-only health action is available without inputs",
-            format!("Use `hycli {site} --help` and run a read with its required inputs."),
-        )
-    })?
-    .name
-    .clone();
-    let runner = runner(&deps)?;
-    let (res, _) = runner.run_op(&sp, &op, &Default::default()).await?;
-    emit.data(
-        &serde_json::json!({"site": sp.site.name, "op": op, "status": res.status,
-        "defense": res.defense, "latency_ms": res.latency_ms}),
-    );
-    if res.defense != "none" && !res.defense.is_empty() {
-        return Err(blocked_err(&res.defense, &res.signal));
+    emit.data(&reports);
+    // Exit status follows the most actionable verdict, so scripts can branch without parsing.
+    let worst = [
+        "signed_out",
+        "unknown",
+        "site_changed",
+        "blocked",
+        "unreachable",
+        "no_checks",
+    ]
+    .into_iter()
+    .find(|verdict| reports.iter().any(|report| report.verdict == *verdict));
+    match worst {
+        None => Ok(()),
+        Some("signed_out" | "unknown") => Err(apperr::auth_err(
+            "A website session has expired or could not be confirmed",
+            "Reconnect the account in `hycli dashboard`, then run `hycli check` again.",
+        )),
+        Some("site_changed") => Err(apperr::spec(
+            "A website no longer returns what its actions expect",
+            "Run `hycli request SITE \"Repair the failing reads\"` or prepare the website again.",
+        )),
+        Some("blocked") => Err(apperr::blocked(
+            "A website is limiting or challenging requests",
+            "Wait, or resolve the challenge in your browser.",
+        )),
+        Some("no_checks") => Err(apperr::usage(
+            "No recorded read is available to check",
+            "Prepare the website again to record its checks.",
+        )),
+        Some(_) => Err(apperr::runtime_msg(
+            "A website could not be reached",
+            "Check the connection and retry later.",
+        )),
     }
-    Ok(())
 }
 
 /// Installed website commands share parsing and execution with explicit `run`.

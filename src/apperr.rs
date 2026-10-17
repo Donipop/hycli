@@ -1,4 +1,4 @@
-//! hycli 오류 계약 — 세계일관 exit code + remedy(다음 행동 힌트).
+//! Error contract with consistent exit codes and actionable remedies.
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,12 +63,13 @@ impl AppError {
             code,
             msg: public_code.into(),
             remedy: match public_code {
-                "auth_required" | "identity_unavailable" => "Open `hycli dashboard` and reconnect the website account or configure its website API key.",
-                "provider_missing" | "provider_not_connected" | "provider_required" => "Open `hycli dashboard` and connect an AI provider in AI connections.",
+                "auth_required" | "identity_unavailable" => "Open `hycli open` and reconnect the website account or configure its website API key.",
+                "provider_missing" | "provider_not_connected" | "provider_required" => "Open `hycli open` and connect an AI provider in AI connections.",
                 "query_failed" => "The website reported query errors. Check the inputs and the action definition before retrying.",
                 "response_mismatch" => "The website returned a different response than this action expects. Reconnect if signed out, or prepare the website again.",
                 "site_rate_limited" | "rate_limited" => "Wait for the website's request limit to clear before retrying.",
                 "blocked_by_site" => "Check the website in your browser and resolve any sign-in or challenge before reconnecting.",
+                "writes_disabled" => "Changes are off for this website. Only you can allow them: open the Hycli dashboard, choose the website and turn on Allow changes.",
                 "approval_required" | "approval_expired" => "Run the action again and review its exact inputs in the Hycli dashboard.",
                 "action_outcome_unknown" => "Check the website before trying again; the change may already have happened.",
                 "unsafe_target" | "local_target" => "Check the destination. For a trusted local website, use --allow-local explicitly.",
@@ -135,7 +136,7 @@ impl axum::response::IntoResponse for AppError {
 
 pub type AppResult<T> = Result<T, AppError>;
 
-/// 임의 오류를 Runtime 계약으로 감싼다.
+/// Wrap an arbitrary error into a Runtime AppError.
 pub fn runtime<E: std::error::Error>(
     err: E,
     msg: impl Into<String>,

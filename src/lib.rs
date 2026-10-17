@@ -22,6 +22,7 @@ pub mod progress;
 pub mod runtime;
 pub mod session_recipe;
 pub mod site_images;
+pub mod smoke;
 pub mod spec;
 pub mod state;
 pub mod store;
@@ -29,6 +30,7 @@ pub mod util;
 
 pub mod companion;
 pub mod dashboard;
+pub mod desktop;
 
 pub mod guarded_mcp;
 pub mod html;

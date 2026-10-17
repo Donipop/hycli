@@ -32,15 +32,15 @@ pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
         .build()
         .map_err(|e| {
             apperr::runtime_msg(
-                format!("브라우저 구성 실패: {e}"),
-                "Chrome/Chromium/Edge를 설치하거나 CHROME 환경변수에 실행 파일 경로를 지정하세요",
+                format!("Browser configuration failed: {e}"),
+                "Install Chrome, Chromium, or Edge, or set CHROME to the executable path.",
             )
         })?;
     let (mut browser, mut handler) = Browser::launch(config).await.map_err(|e| {
         apperr::runtime(
             e,
-            "크로뮴 실행 실패",
-            "Chrome/Chromium/Edge를 설치하거나 CHROME 환경변수에 실행 파일 경로를 지정하세요",
+            "Failed to launch Chromium",
+            "Install Chrome, Chromium, or Edge, or set CHROME to the executable path.",
         )
     })?;
     let drive = tokio::spawn(async move { while let Some(_event) = handler.next().await {} });
@@ -55,18 +55,18 @@ async fn observe(browser: &Browser, url: &str) -> Result<Observation, AppError> 
     let page = browser
         .new_page("about:blank")
         .await
-        .map_err(|e| apperr::runtime(e, "페이지 생성 실패", ""))?;
+        .map_err(|e| apperr::runtime(e, "Failed to open browser page", ""))?;
 
     let start = std::time::Instant::now();
     let handle = page
         .goto(url)
         .await
-        .map_err(|e| apperr::runtime(e, format!("탐색 실패: {url}"), "URL 확인"))?;
+        .map_err(|e| apperr::runtime(e, format!("Navigation failed: {url}"), "Check the URL."))?;
     let http_req = handle
         .wait_for_navigation_response()
         .await
-        .map_err(|e| apperr::runtime(e, "응답 대기 실패", ""))?
-        .ok_or_else(|| apperr::runtime_msg("본 응답 미수신", "네트워크/URL 재확인"))?;
+        .map_err(|e| apperr::runtime(e, "Failed waiting for navigation response", ""))?
+        .ok_or_else(|| apperr::runtime_msg("No navigation response received", "Check network connectivity and the URL."))?;
     let latency = start.elapsed().as_millis() as i64;
     let html = page.content().await.unwrap_or_default();
 

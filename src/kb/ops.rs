@@ -1,4 +1,4 @@
-//! 원장 연산. 모든 쓰기는 append 지향, 스키마는 마이그레이션으로만 진화.
+//! Knowledge base operations. Append-oriented ledger evolved via SQL migrations.
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -88,7 +88,7 @@ pub struct AttemptInput {
 impl Kb {
     pub fn open(path: &Path) -> AppResult<Self> {
         let conn = Connection::open(path)
-            .map_err(|e| apperr::runtime(e, "KB 열기 실패", "경로/권한 확인"))?;
+            .map_err(|e| apperr::runtime(e, "Failed to open knowledge base", "Check path and permissions."))?;
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "foreign_keys", "ON").ok();
         conn.busy_timeout(std::time::Duration::from_millis(5000))
@@ -107,7 +107,7 @@ impl Kb {
                 version INTEGER PRIMARY KEY, name TEXT NOT NULL,
                 applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
         )
-        .map_err(|e| apperr::runtime(e, "마이그레이션 테이블 생성 실패", ""))?;
+        .map_err(|e| apperr::runtime(e, "Failed to create schema_migrations table", ""))?;
         let applied: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM schema_migrations WHERE version=1",
@@ -117,12 +117,12 @@ impl Kb {
             .unwrap_or(0);
         if applied == 0 {
             conn.execute_batch(MIGRATION_001)
-                .map_err(|e| apperr::runtime(e, "마이그레이션 001 적용 실패", ""))?;
+                .map_err(|e| apperr::runtime(e, "Failed to apply migration 001", ""))?;
             conn.execute(
                 "INSERT INTO schema_migrations(version, name) VALUES(1, '001_core')",
                 [],
             )
-            .map_err(|e| apperr::runtime(e, "마이그레이션 기록 실패", ""))?;
+            .map_err(|e| apperr::runtime(e, "Failed to record migration", ""))?;
         }
         Ok(())
     }
@@ -160,7 +160,7 @@ impl Kb {
             params![site, kind, key, props],
             |r| r.get(0),
         )
-        .map_err(|e| apperr::runtime(e, "노드 upsert 실패", ""))
+        .map_err(|e| apperr::runtime(e, "Failed to upsert node", ""))
     }
 
     pub fn node(&self, site: &str, kind: &str, key: &str) -> AppResult<Option<Node>> {
@@ -182,7 +182,7 @@ impl Kb {
             },
         )
         .optional()
-        .map_err(|e| apperr::runtime(e, "노드 조회 실패", ""))
+        .map_err(|e| apperr::runtime(e, "Failed to query node", ""))
     }
 
     pub fn link(&self, src: i64, dst: i64, rel: &str) -> AppResult<()> {
@@ -193,7 +193,7 @@ impl Kb {
             params![src, dst, rel],
         )
         .map(|_| ())
-        .map_err(|e| apperr::runtime(e, "엣지 upsert 실패", "src/dst 노드 존재 확인"))
+        .map_err(|e| apperr::runtime(e, "Failed to upsert edge", "Verify src/dst nodes exist."))
     }
 
     pub fn query_nodes(&self, site: &str, kind: &str, limit: i64) -> AppResult<Vec<Node>> {
@@ -221,7 +221,7 @@ impl Kb {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| apperr::runtime(e, "노드 목록 실패", ""))?;
+            .map_err(|e| apperr::runtime(e, "Failed to list nodes", ""))?;
         Ok(rows)
     }
 
@@ -241,7 +241,7 @@ impl Kb {
         let ids: Vec<i64> = stmt
             .query_map(params![root_id, depth], |r| r.get(0))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| apperr::runtime(e, "그래프 순회 실패", ""))?;
+            .map_err(|e| apperr::runtime(e, "Failed to traverse graph", ""))?;
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -275,7 +275,7 @@ impl Kb {
         Ok((nodes, edges))
     }
 
-    /// 시도 1건 기록 — 대상 노드가 지정되면 "targets" 엣지까지. 실행이 곧 기록.
+    /// Record a single execution attempt and link it to its target node if specified.
     pub fn record_attempt(&self, in_: &AttemptInput) -> AppResult<i64> {
         let key = format!(
             "{}|{}|{}",
@@ -308,7 +308,7 @@ impl Kb {
                     if in_.status == 0 { None } else { Some(in_.status) },
                     in_.defense, in_.tls_profile, in_.cost_cents, in_.duration_ms, in_.loop_id,
                 ],
-            ).map_err(|e| apperr::runtime(e, "attempt 기록 실패", ""))?;
+            ).map_err(|e| apperr::runtime(e, "Failed to record attempt", ""))?;
         }
         if !in_.target_kind.is_empty() && !in_.target_key.is_empty() {
             let tid = self.ensure_node(
@@ -337,13 +337,13 @@ impl Kb {
                priority=excluded.priority, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
             params![site, rule, subject, reason, priority],
         )
-        .map_err(|e| apperr::runtime(e, "갭 upsert 실패", ""))?;
+        .map_err(|e| apperr::runtime(e, "Failed to upsert gap", ""))?;
         conn.query_row(
             "SELECT id FROM gap WHERE site=?1 AND rule=?2 AND subject=?3",
             params![site, rule, subject],
             |r| r.get(0),
         )
-        .map_err(|e| apperr::runtime(e, "갭 조회 실패", ""))
+        .map_err(|e| apperr::runtime(e, "Failed to query gap", ""))
     }
 
     pub fn gaps(&self, site: &str, state: &str) -> AppResult<Vec<Gap>> {
@@ -365,11 +365,11 @@ impl Kb {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| apperr::runtime(e, "갭 목록 실패", ""))?;
+            .map_err(|e| apperr::runtime(e, "Failed to list gaps", ""))?;
         Ok(rows)
     }
 
-    /// 다음 행동 1개 — 최우선 열린 갭. AI는 매 턴 이걸 묻는다.
+    /// Return the highest-priority open gap for the given site.
     pub fn next(&self, site: &str) -> AppResult<Option<Gap>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
@@ -389,7 +389,7 @@ impl Kb {
             },
         )
         .optional()
-        .map_err(|e| apperr::runtime(e, "next 조회 실패", ""))
+        .map_err(|e| apperr::runtime(e, "Failed to query next gap", ""))
     }
 
     pub fn set_gap_state(&self, id: i64, state: &str) -> AppResult<()> {
@@ -399,7 +399,7 @@ impl Kb {
             params![state, id],
         )
         .map(|_| ())
-        .map_err(|e| apperr::runtime(e, "갭 상태 변경 실패", ""))
+        .map_err(|e| apperr::runtime(e, "Failed to update gap state", ""))
     }
 
     pub fn add_finding(
@@ -411,8 +411,8 @@ impl Kb {
     ) -> AppResult<i64> {
         if statement.trim().is_empty() {
             return Err(apperr::spec(
-                "교훈 문장이 비어 있다",
-                "관찰 가능한 사실 문장으로 작성",
+                "Finding statement is empty",
+                "Provide a factual statement supported by observations.",
             ));
         }
         let conf = if confidence <= 0.0 || confidence > 1.0 {
@@ -438,7 +438,7 @@ impl Kb {
                 "INSERT INTO finding(node_id, statement, scope, confidence) VALUES(?,?,?,?)
                  ON CONFLICT(node_id) DO UPDATE SET statement=excluded.statement, confidence=excluded.confidence",
                 params![id, statement, "site", conf],
-            ).map_err(|e| apperr::runtime(e, "finding 기록 실패", ""))?;
+            ).map_err(|e| apperr::runtime(e, "Failed to record finding", ""))?;
         }
         for ev in evidence {
             self.link(id, *ev, "evidenced_by")?;
@@ -488,7 +488,7 @@ impl Kb {
         path: &str,
     ) -> AppResult<(i64, String)> {
         let bytes = std::fs::read(path)
-            .map_err(|e| apperr::runtime(e, format!("아티팩트 파일 없음: {path}"), "경로 확인"))?;
+            .map_err(|e| apperr::runtime(e, format!("Artifact file not found: {path}"), "Check the file path."))?;
         let mut h = Sha256::new();
         h.update(&bytes);
         let sum = h
@@ -502,14 +502,14 @@ impl Kb {
              ON CONFLICT(sha256) DO NOTHING",
             params![site, kind, path, sum, bytes.len() as i64],
         )
-        .map_err(|e| apperr::runtime(e, "아티팩트 등록 실패", ""))?;
+        .map_err(|e| apperr::runtime(e, "Failed to register artifact", ""))?;
         let id = conn
             .query_row(
                 "SELECT id FROM artifact WHERE sha256=?1",
                 params![sum],
                 |r| r.get(0),
             )
-            .map_err(|e| apperr::runtime(e, "아티팩트 조회 실패", ""))?;
+            .map_err(|e| apperr::runtime(e, "Failed to query artifact", ""))?;
         Ok((id, sum))
     }
 
@@ -531,7 +531,7 @@ impl Kb {
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| apperr::runtime(e, "집계 실패", ""))?;
+            .map_err(|e| apperr::runtime(e, "Failed to aggregate statistics", ""))?;
         let mut groups: Vec<(String, String, i64, f64)> = Vec::new();
         for (action, defense, verdict, c) in rows {
             let g = groups.iter_mut().find(|g| g.0 == action && g.1 == defense);
@@ -561,7 +561,7 @@ impl Kb {
             .collect())
     }
 
-    /// 무결성 감사: 시도 없는 대상 · 증거 없는 교훈 · 실종 아티팩트.
+    /// Integrity check: targets without attempts, findings without evidence, and missing artifacts.
     pub fn fsck(&self, site: &str) -> AppResult<Vec<Issue>> {
         let conn = self.conn.lock().unwrap();
         let mut out: Vec<Issue> = Vec::new();
@@ -588,7 +588,7 @@ impl Kb {
                     severity: "warn".into(),
                     kind: "attempt-less-target".into(),
                     site: s,
-                    detail: format!("{k} {key} 에 대한 시도가 없다"),
+                    detail: format!("No recorded attempt for {k} {key}"),
                 });
             }
         }
@@ -608,7 +608,7 @@ impl Kb {
                     severity: "error".into(),
                     kind: "evidence-less-finding".into(),
                     site: s,
-                    detail: format!("finding {key} 에 증거 엣지가 없다"),
+                    detail: format!("Finding {key} has no evidence edges"),
                 });
             }
         }
@@ -630,7 +630,7 @@ impl Kb {
                         severity: "error".into(),
                         kind: "missing-artifact".into(),
                         site: s,
-                        detail: format!("{path} ({short}) 파일이 디스크에 없다"),
+                        detail: format!("Artifact file {path} ({short}) is missing on disk"),
                     });
                 }
             }

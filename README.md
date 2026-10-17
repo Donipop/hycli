@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Turn websites into tools your AI can use.</strong>
+  <strong>Automate any website.</strong>
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 
 </details>
 
-Give Hycli a website and a task. It learns the available interface, prepares typed CLI and MCP actions, and checks useful reads. Your AI can then use those actions with the same accounts, approvals and results you see in the local dashboard.
+Give Hycli a website. Add a purpose if you have one. It learns the available interface, prepares typed CLI and MCP actions, and checks useful reads. Your AI can then use those actions with the same accounts, approvals and results you see in the local dashboard.
 
 | Connect | Prepare | Use |
 | --- | --- | --- |
@@ -41,11 +41,25 @@ Give Hycli a website and a task. It learns the available interface, prepares typ
 <p align="center"><sub>Example workspace with sample tools and accounts.</sub></p>
 
 <a id="get-started"></a>
+Enter a domain and, optionally, a purpose beside it. The AI first understands the website and selects useful workflows, then checks their prerequisites, inputs and final results. Missing steps keep the website marked for review.
+
 ## Get started
 
-Hycli is one native executable with an embedded local dashboard. Rust and Node.js are needed to build it; neither is needed to run a packaged release.
+Hycli includes its website engine and local dashboard. The desktop launcher starts the engine for you and opens your default browser. Rust and Node.js are build tools; neither is needed to use a package.
 
 ### Download and run
+
+The next desktop packages are built for **Windows, macOS and Linux**, on both **x64 and ARM64**:
+
+| Platform | Package | Open |
+| --- | --- | --- |
+| Windows | `*-setup.exe` | Install for your account, then click Hycli in Start or on the desktop. |
+| macOS 13+ | `.dmg` with `Hycli.app` | Drag Hycli to Applications, then open it. |
+| Linux | `.deb` and `.tar.gz` | Install the DEB, or extract the archive and run `./install.sh`, then open Hycli from the app menu. |
+
+Click the icon again to reopen the running dashboard. Closing a browser tab leaves Hycli running; **Settings → Quit Hycli** stops it. The next launch starts it again. No terminal, manually managed server, administrator service, or startup-at-login setup is required. CLI users can use `hycli open`, `hycli status` and `hycli stop`; `hycli` alone also opens the app.
+
+Desktop installers are produced by [native CI](https://github.com/Hybirdss/Hycli/actions/workflows/verify.yml) and are separate from the older v0.1.0 release below. Check the exact run before using an artifact. Unsigned Windows installers and macOS builds without Developer ID notarization are development artifacts; see [distribution signing](docs/RELEASING.md#desktop-installers-and-signing).
 
 Download the **[Linux x64 package from v0.1.0](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** and its `.sha256` file into the same directory. It requires glibc 2.39 or newer, such as Ubuntu 24.04.
 
@@ -65,16 +79,16 @@ From a source checkout, install the [build prerequisites](docs/BUILD.md) and run
 
 ```sh
 node scripts/build.mjs
-./dist/hycli dashboard
+./dist/hycli open
 ```
 
-The build produces `dist/hycli` (`dist/hycli.exe` on Windows) and a SHA-256 checksum. Add `--install-dir <directory>` to install it on your PATH. Native archives can be unpacked into any directory; check their `SHA256SUMS` and run the included executable. See [building and packaging](docs/BUILD.md) for platform prerequisites and the [release checklist](docs/RELEASING.md) for reproducible archive checks.
+The build produces `dist/hycli` and `dist/hycli-desktop` (`.exe` on Windows), with SHA-256 checksums. `node scripts/package-desktop.mjs` creates the native installer on the current OS. Add `--install-dir <directory>` to install it on your PATH. Native archives can be unpacked into any directory; check their `SHA256SUMS` and run the included executable. See [building and packaging](docs/BUILD.md) for platform prerequisites and the [release checklist](docs/RELEASING.md) for reproducible archive checks.
 
 </details>
 
 ### Connect your first website
 
-The dashboard opens at `http://127.0.0.1:4318`. Use `hycli dashboard --no-open` to print the address without opening a browser, or `--port 4320` to choose another port. The website engine and dashboard are included in the same executable.
+The current app prefers `http://127.0.0.1:4318` and selects a free loopback port if needed. `hycli open --no-open` starts it without opening a browser and prints its address; `--port 4320` selects a preferred port. `hycli dashboard` is still available for foreground development. The website engine and dashboard are included in the same executable.
 
 1. Open **AI connections** and connect a provider.
 2. Add a website address, choose the AI and optionally describe your task.
@@ -107,14 +121,16 @@ Three independent AI workers handle reads and search, useful workflows, and acco
 </p>
 <p align="center"><sub>Three workers. One very busy little bird.</sub></p>
 
-Preparation follows information actually available from the website: linked documentation, API schemas, published JavaScript, and request shapes observed by the browser companion. It performs bounded reads before installing a replacement. If a request or extraction check fails, the workers receive that evidence and can revise the definition before checking again. An already working definition stays installed during preparation. It does not create test records, edit content, delete objects, guess large lists of endpoints, or fuzz a live server.
+Preparation follows information actually available from the website: linked documentation, API schemas, published JavaScript, and request shapes observed by the browser companion. After the planned workflows, the workers keep going through every documented API operation that has no action yet, until each one is implemented or reported with its reason; the job's `coverage` lists what remains. It performs bounded reads before installing a replacement. If a request or extraction check fails, the workers receive that evidence and can revise the definition before checking again. An already working definition stays installed during preparation. It does not create test records, edit content, delete objects, guess large lists of endpoints, or fuzz a live server.
 
 | Action | Behavior |
 | --- | --- |
 | Read or search | Runs autonomously when the operation is supported by evidence and classified as a read. |
-| Create, send, edit or delete | Shows the website, account, action and resolved inputs for the user to approve. |
+| Create, send, edit or delete | Off until you allow changes for that website. Then shows the website, account, action and resolved inputs for you to approve. |
 | Unclear effect | Requires review before sending the request. |
 | Authentication, challenge or request limit | Pauses the affected requests and lets you reconnect or wait. |
+
+Every website starts read-only. Its change actions are hidden from MCP and refused by the CLI until you turn on **Allow changes** in that website's details; turning it off again cancels pending approvals. The switch and the approval button exist only in the dashboard, and the dashboard grants its session only to the address `hycli dashboard` opens, so an agent calling Hycli cannot turn changes on or approve its own request. An agent that can run any command as your user can also read your files; keep such agents on their own permission prompts.
 
 Approval applies to one exact request, expires after five minutes, and can be consumed only once. Changing the inputs, account, saved sign-in or installed tool definition invalidates it. CLI, MCP and dashboard execution use the same boundary. Writes are never retried automatically. If a change is interrupted after authorization, its outcome is marked uncertain so you can check the website before trying again. An open dashboard reconnects automatically after the local server restarts.
 
@@ -164,7 +180,7 @@ A typical MCP configuration looks like this:
 }
 ```
 
-Use the executable path shown by the dashboard if `hycli` is not on your agent’s PATH. The general MCP server offers preparation, job status, website listings, account metadata and `hycli_run` for executing newly installed actions even before a client refreshes its tool list. It never offers a tool for reading credentials or approving a change on the user's behalf. The `hycli_result` and `hycli_activity` tools remain available in both modes, so your AI can follow work notes, progress and approved results.
+Use the executable path shown by the dashboard if `hycli` is not on your agent’s PATH. The general MCP server offers preparation, job status, website listings, account metadata and `hycli_run` for executing newly installed actions even before a client refreshes its tool list. It never offers a tool for reading credentials or approving a change on the user's behalf. The `hycli_result`, `hycli_check` and `hycli_activity` tools remain available in both modes, so your AI can follow work notes, progress and approved results, and tell an expired sign-in from a changed website.
 
 ```sh
 hycli jobs ls
@@ -182,6 +198,15 @@ hycli describe SITE ACTION
 hycli SITE ACTION --help
 hycli run SITE ACTION --arg query="design systems"
 ```
+
+Before retrying a failed action, check the website without AI:
+
+```sh
+hycli check          # every installed website
+hycli check SITE
+```
+
+Preparation records the reads that passed, in order, including reads that pass an earlier result's identifier to the next one. `hycli check` replays them, first confirming the saved account's identity. The verdict separates `signed_out` (reconnect the account) from `site_changed` (the account works but responses no longer match; request a repair), plus `blocked` and `unreachable`. It never runs a change, and the exit status follows the verdict. MCP clients get the same check as `hycli_check`.
 
 Replace the sample URL and uppercase IDs with your website and the names returned by `describe`. Direct syntax such as `hycli SITE ACTION --query "design systems"` also works. Required inputs, typed values, defaults and account selection are shared with the dashboard. A failed HTTP response or unexpected login page produces a failed action and a nonzero CLI exit status.
 

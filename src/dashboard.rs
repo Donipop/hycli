@@ -31,6 +31,11 @@ pub struct Web {
     pub port: u16,
     pub session: String,
     pub csrf: String,
+    /// Shown only in the address `hycli dashboard` opens; a plain local request cannot
+    /// mint a dashboard session, so a tool-calling agent cannot approve its own change.
+    pub launch: String,
+    pub instance_id: String,
+    pub shutdown: tokio::sync::watch::Sender<bool>,
     pub pairs: Arc<Mutex<BTreeMap<String, Pair>>>,
 }
 #[derive(Clone)]
@@ -93,40 +98,138 @@ fn ok() -> Json<Value> {
 fn token() -> String {
     format!("{}{}", util::id(), util::id()).replace('-', "")
 }
+#[derive(serde::Serialize, Deserialize)]
+struct Secrets {
+    session: String,
+    csrf: String,
+    launch: String,
+}
 impl Web {
-    pub fn new(core: Arc<Runtime>, port: u16) -> Self {
-        Self {
+    /// Secrets persist in the private data directory, so an open dashboard
+    /// reconnects after a restart without a new launch address.
+    pub fn new(core: Arc<Runtime>, port: u16) -> AppResult<Self> {
+        let path = core.root.join("dashboard-session.json");
+        let secrets = match util::read_bounded(&path, 4096)
+            .ok()
+            .and_then(|data| serde_json::from_slice::<Secrets>(&data).ok())
+        {
+            Some(secrets) => secrets,
+            None => {
+                let secrets = Secrets {
+                    session: token(),
+                    csrf: token(),
+                    launch: token(),
+                };
+                util::atomic_file(&path, &serde_json::to_vec(&secrets)?)?;
+                secrets
+            }
+        };
+        Ok(Self {
             core,
             port,
-            session: token(),
-            csrf: token(),
+            session: secrets.session,
+            csrf: secrets.csrf,
+            launch: secrets.launch,
+            instance_id: util::id(),
+            shutdown: tokio::sync::watch::channel(false).0,
             pairs: Arc::new(Mutex::new(BTreeMap::new())),
-        }
+        })
+    }
+    pub fn launch_url(&self) -> String {
+        format!("http://127.0.0.1:{}/?launch={}", self.port, self.launch)
     }
 }
+fn session_cookie(headers: &HeaderMap) -> &str {
+    headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .find_map(|p| p.trim().strip_prefix("hycli_session="))
+        .unwrap_or("")
+}
 pub async fn serve(core: Arc<Runtime>, port: u16, open_browser: bool) -> AppResult<()> {
-    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
+    serve_with_options(core, port, open_browser, false).await
+}
+pub async fn serve_with_options(
+    core: Arc<Runtime>,
+    port: u16,
+    open_browser: bool,
+    auto_port: bool,
+) -> AppResult<()> {
+    let listener = match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await
+    {
+        Ok(listener) => listener,
+        Err(e) if auto_port && e.kind() == std::io::ErrorKind::AddrInUse => {
+            tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?
+        }
+        Err(e) => return Err(e.into()),
+    };
     let port = listener.local_addr()?.port();
     let images = core.clone();
     tokio::spawn(async move {
         images.fill_missing_site_images().await;
     });
-    let web = Web::new(core, port);
-    let url = format!("http://127.0.0.1:{port}");
+    let web = Web::new(core.clone(), port)?;
+    let _registration = crate::desktop::Registration::publish(
+        &core.root,
+        &crate::desktop::Instance {
+            port,
+            id: web.instance_id.clone(),
+        },
+    )?;
+    let url = web.launch_url();
     eprintln!("Hycli dashboard: {url}");
     if open_browser {
-        let _ = open_url(&url);
+        if let Err(e) = open_url(&url) {
+            eprintln!("{e}. Open {url} in your browser.");
+        }
     }
-    axum::serve(listener, router(web))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
-        .map_err(Into::into)
+    let shutdown = web.shutdown.clone();
+    let mut shutdown_rx = shutdown.subscribe();
+    let mut done_rx = shutdown.subscribe();
+    let server = axum::serve(listener, router(web)).with_graceful_shutdown(async move {
+        tokio::select! {
+            _ = shutdown_rx.wait_for(|value| *value) => {},
+            _ = shutdown_signal() => { shutdown.send_replace(true); },
+        }
+    });
+    // SSE streams close on the signal; bound any remaining keepalive connections.
+    tokio::select! {
+        result = std::future::IntoFuture::into_future(server) => result.map_err(Into::into),
+        _ = async { let _ = done_rx.wait_for(|value| *value).await; tokio::time::sleep(Duration::from_secs(5)).await; } => Ok(()),
+    }
+}
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        if let Ok(mut term) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+async fn shutdown(State(web): State<Web>) -> AppResult<Json<Value>> {
+    if web
+        .core
+        .state
+        .read()?
+        .jobs
+        .iter()
+        .any(|job| ["queued", "running"].contains(&job.status.as_str()))
+    {
+        return Err(AppError::api("work_in_progress", 409));
+    }
+    web.shutdown.send_replace(true);
+    Ok(ok())
 }
 pub fn router(web: Web) -> Router {
     Router::new()
         .route("/api/session", get(session))
+        .route("/api/shutdown", post(shutdown))
         .route("/api/state", get(snapshot))
         .route("/api/events", get(events))
         .route("/api/activity/export", get(export_activity))
@@ -222,16 +325,7 @@ async fn guard(State(web): State<Web>, request: Request, next: Next) -> Response
             return fail();
         }
         if path.starts_with("/api/") && path != "/api/session" {
-            let cookie = request
-                .headers()
-                .get(header::COOKIE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            let received = cookie
-                .split(';')
-                .find_map(|p| p.trim().strip_prefix("hycli_session="))
-                .unwrap_or("");
-            if !util::constant_eq(received, &web.session) {
+            if !util::constant_eq(session_cookie(request.headers()), &web.session) {
                 return AppError::api("session_expired", 401).into_response();
             }
             if request.method() != axum::http::Method::GET
@@ -248,6 +342,9 @@ async fn guard(State(web): State<Web>, request: Request, next: Next) -> Response
             }
         }
     }
+    if *web.shutdown.borrow() {
+        return AppError::api("shutting_down", 503).into_response();
+    }
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
@@ -258,7 +355,17 @@ async fn guard(State(web): State<Web>, request: Request, next: Next) -> Response
     }
     response
 }
-async fn session(State(web): State<Web>) -> Response {
+async fn session(
+    State(web): State<Web>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+) -> Response {
+    let launched = query
+        .get("launch")
+        .is_some_and(|value| util::constant_eq(value, &web.launch));
+    if !launched && !util::constant_eq(session_cookie(&headers), &web.session) {
+        return AppError::api("launch_required", 401).into_response();
+    }
     (
         [(
             header::SET_COOKIE,
@@ -267,7 +374,7 @@ async fn session(State(web): State<Web>) -> Response {
                 web.session
             ),
         )],
-        Json(json!({"csrf":web.csrf})),
+        Json(json!({"csrf":web.csrf,"instance_id":web.instance_id})),
     )
         .into_response()
 }
@@ -287,8 +394,12 @@ async fn snapshot(State(web): State<Web>, headers: HeaderMap) -> AppResult<Json<
 async fn events(
     State(web): State<Web>,
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let mut shutdown = web.shutdown.subscribe();
     let stream = BroadcastStream::new(web.core.events.subscribe())
-        .map(|_| Ok(Event::default().data("update")));
+        .map(|_| Ok(Event::default().data("update")))
+        .take_until(async move {
+            let _ = shutdown.wait_for(|value| *value).await;
+        });
     Sse::new(stream)
         .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
 }
@@ -513,12 +624,15 @@ async fn edit_site(
                 return Err(AppError::api("bad_request", 400));
             }
         }
-        let m = d.sites.entry(id).or_default();
+        let m = d.sites.entry(id.clone()).or_default();
         if let Some(title) = body.get("title").and_then(Value::as_str) {
             m.title = title.trim().chars().take(100).collect();
         }
         if let Some(pinned) = body.get("pinned").and_then(Value::as_bool) {
             m.pinned = pinned;
+        }
+        if let Some(writes) = body.get("writes").and_then(Value::as_bool) {
+            m.writes = writes;
         }
         if let Some(account) = body.get("account_id").and_then(Value::as_str) {
             m.account_id = account.into();
@@ -526,6 +640,9 @@ async fn edit_site(
         m.updated_at = util::now();
         Ok(())
     })?;
+    if body.get("writes") == Some(&Value::Bool(false)) {
+        web.core.policy.invalidate(Some(&id), None)?;
+    }
     web.core.changed();
     Ok(ok())
 }
@@ -678,7 +795,7 @@ async fn summarize(
 }
 
 async fn pair(State(web): State<Web>, Json(body): Json<Prepare>) -> AppResult<Json<Value>> {
-    let url = crate::net::validate_url(&body.url)?;
+    let url = crate::net::website_url(&body.url)?;
     if !body.site_id.is_empty()
         && crate::runtime::origin(web.core.spec(&body.site_id)?.site.source_url())?
             != url.origin().ascii_serialization()
@@ -809,7 +926,7 @@ async fn asset(request: Request) -> Response {
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
-fn open_url(url: &str) -> std::io::Result<()> {
+pub fn open_url(url: &str) -> std::io::Result<()> {
     let mut command = if cfg!(target_os = "macos") {
         std::process::Command::new("open")
     } else if cfg!(windows) {
@@ -823,7 +940,13 @@ fn open_url(url: &str) -> std::io::Result<()> {
         .arg(url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn()?;
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command.spawn()?;
     Ok(())
 }
 
@@ -872,7 +995,9 @@ async fn browser_find(
 }
 async fn browser_select(State(web): State<Web>, Json(body): Json<Value>) -> AppResult<Json<Value>> {
     let id = body.get("account_id").and_then(Value::as_str).unwrap_or("");
-    let target = crate::runtime::origin(body.get("url").and_then(Value::as_str).unwrap_or(""))?;
+    let target = crate::net::website_url(body.get("url").and_then(Value::as_str).unwrap_or(""))?
+        .origin()
+        .ascii_serialization();
     web.core.state.update(|state| {
         let account = state
             .accounts
@@ -896,7 +1021,7 @@ async fn browser_login(
     State(web): State<Web>,
     Json(body): Json<BrowserFind>,
 ) -> AppResult<Json<Value>> {
-    let target = crate::net::validate_url(&body.url)?;
+    let target = crate::net::website_url(&body.url)?;
     if !policy::safe_read_url(&target) {
         return Err(AppError::api("bad_url", 400));
     }

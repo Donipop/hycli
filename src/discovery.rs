@@ -387,6 +387,219 @@ pub fn documented_routes(text: &str) -> BTreeSet<(String, String)> {
         .collect()
 }
 
+fn normalize_bundle_path(raw: &str) -> Option<String> {
+    let mut cleaned = raw.trim().replace("\\/", "/");
+    if let Some((before_q, _)) = cleaned.split_once('?') {
+        cleaned = before_q.to_owned();
+    }
+    if let Some((before_hash, _)) = cleaned.split_once('#') {
+        cleaned = before_hash.to_owned();
+    }
+    // Convert JS template expressions `${encodeURIComponent(slug)}` or `${item.id}` -> `{slug}` / `{id}`
+    let template_re = regex::Regex::new(r"\$\{([^}]+)\}").expect("constant");
+    cleaned = template_re
+        .replace_all(&cleaned, |caps: &regex::Captures<'_>| {
+            let expr = &caps[1];
+            let ident = regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]*")
+                .expect("constant")
+                .find_iter(expr)
+                .map(|m| m.as_str())
+                .filter(|w| !matches!(*w, "encodeURIComponent" | "String" | "Number" | "this"))
+                .last()
+                .unwrap_or("id");
+            format!("{{{ident}}}")
+        })
+        .into_owned();
+    // Convert Express/router style `:id` segments -> `{id}`
+    let colon_re = regex::Regex::new(r"/:([A-Za-z_][A-Za-z0-9_]*)").expect("constant");
+    cleaned = colon_re.replace_all(&cleaned, "/{$1}").into_owned();
+    let trimmed = cleaned.trim_end_matches('/').to_owned();
+    let path = if trimmed.is_empty() {
+        "/".to_owned()
+    } else {
+        trimmed
+    };
+    if !path.starts_with('/')
+        || path.starts_with("//")
+        || path == "/"
+        || path.len() > 300
+        || path.contains([' ', '\t', '\r', '\n', '<', '>', '"', '\'', '`', '\\', '*'])
+    {
+        return None;
+    }
+    let lower = path.to_ascii_lowercase();
+    if [
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".woff", ".woff2", ".ttf", ".ico",
+        ".map", ".webp", ".mp4", ".mp3",
+    ]
+    .iter()
+    .any(|ext| lower.ends_with(ext))
+    {
+        return None;
+    }
+    Some(path)
+}
+
+/// Extract HTTP routes from inline `<script>` blocks and JS bundles (`fetch`, `axios`, `/api/...`, GraphQL).
+pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
+    let mut routes = BTreeSet::new();
+    // 1. Normalize JS string concatenation inside fetch(...) e.g.
+    //    fetch('/api/entries/' + encodeURIComponent(id) + '/comments', { method: 'POST' })
+    let concat_re = regex::Regex::new(
+        r#"["'`]\s*\+\s*(?:encodeURIComponent\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*\)?\s*(?:\+\s*["'`])?"#,
+    )
+    .expect("constant");
+    let normalized = concat_re
+        .replace_all(text, |caps: &regex::Captures<'_>| {
+            let ident = caps[1].rsplit('.').next().unwrap_or("id");
+            let has_trailing_quote = caps[0].ends_with('"')
+                || caps[0].ends_with('\'')
+                || caps[0].ends_with('`');
+            if has_trailing_quote {
+                format!("{{{ident}}}")
+            } else {
+                format!("{{{ident}}}\"")
+            }
+        })
+        .into_owned();
+
+    // 2. Match `fetch("...", { ... })` calls with optional `method: "..."`
+    let fetch_re = regex::Regex::new(
+        r#"fetch\s*\(\s*["'`]((?:https?://[^/"'`\s]+)?/[^"'`\s]{1,260})["'`](?:\s*,\s*\{([^}]{0,320})\})?"#,
+    )
+    .expect("constant");
+    let method_re =
+        regex::Regex::new(r#"(?i)\bmethod\s*:\s*["'`](GET|HEAD|POST|PUT|PATCH|DELETE)["'`]"#)
+            .expect("constant");
+    for cap in fetch_re.captures_iter(&normalized).take(1000) {
+        let raw_target = &cap[1];
+        let raw_path = if raw_target.starts_with("http://") || raw_target.starts_with("https://") {
+            let Ok(u) = Url::parse(&raw_target.replace('{', "_").replace('}', "_")) else {
+                continue;
+            };
+            let Some(idx) = raw_target
+                .find("://")
+                .and_then(|i| raw_target[i + 3..].find('/').map(|j| i + 3 + j))
+            else {
+                continue;
+            };
+            let _ = u;
+            &raw_target[idx..]
+        } else {
+            raw_target
+        };
+        let Some(path) = normalize_bundle_path(raw_path) else {
+            continue;
+        };
+        let method = cap
+            .get(2)
+            .and_then(|opts| method_re.captures(opts.as_str()))
+            .map(|m| m[1].to_ascii_uppercase())
+            .unwrap_or_else(|| "GET".into());
+        routes.insert((method, path));
+    }
+
+    // 3. Match `axios.<method>("/path")` or `.get("/api/...")` / `.post("/api/...")`
+    let axios_re = regex::Regex::new(
+        r#"(?i)\b(?:axios|client|http|api)\s*\.\s*(get|post|put|patch|delete|head)\s*\(\s*["'`]((?:https?://[^/"'`\s]+)?/[^"'`\s]{1,260})["'`]"#,
+    )
+    .expect("constant");
+    for cap in axios_re.captures_iter(&normalized).take(1000) {
+        let method = cap[1].to_ascii_uppercase();
+        let raw_target = &cap[2];
+        let raw_path = if let Some(idx) = raw_target
+            .find("://")
+            .and_then(|i| raw_target[i + 3..].find('/').map(|j| i + 3 + j))
+        {
+            &raw_target[idx..]
+        } else {
+            raw_target
+        };
+        if let Some(path) = normalize_bundle_path(raw_path) {
+            routes.insert((method, path));
+        }
+    }
+
+    // 4. Match explicit API path string literals: `/api/...`, `/v1/...`, `/v2/...`, `/v3/...`, `/graphql`, `/gql`, `/_next/data/...`
+    let api_lit_re = regex::Regex::new(
+        r#"["'`](/(?:api(?:/v[0-9]+)?|v[1-9][0-9]*|graphql|gql|rest|_next/data)(?:/[A-Za-z0-9_@.{}:$-]+)*)["'`]"#,
+    )
+    .expect("constant");
+    for m in api_lit_re.captures_iter(&normalized).take(1500) {
+        let Some(path) = normalize_bundle_path(&m[1]) else {
+            continue;
+        };
+        let start = m.get(0).map(|x| x.start()).unwrap_or(0);
+        let end = m.get(0).map(|x| x.end()).unwrap_or(0);
+        let window_start = start.saturating_sub(120);
+        let window_end = (end + 180).min(normalized.len());
+        let nearby = &normalized[window_start..window_end];
+        if let Some(mc) = method_re.captures(nearby) {
+            routes.insert((mc[1].to_ascii_uppercase(), path.clone()));
+        } else if path.contains("graphql") || path.ends_with("/gql") {
+            routes.insert(("POST".into(), path));
+        } else {
+            routes.insert(("GET".into(), path));
+        }
+    }
+    routes
+}
+
+/// Extract same-site `<script src="...">` bundle URLs from HTML.
+pub fn bundle_urls(base: &Url, html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    let script_re =
+        regex::Regex::new(r#"(?is)<script\b[^>]*\bsrc\s*=\s*["']([^"'<>\s]+)["']"#).expect("constant");
+    for cap in script_re.captures_iter(html).take(100) {
+        let raw = cap[1].replace("&amp;", "&");
+        let Ok(mut url) = base.join(&raw) else {
+            continue;
+        };
+        url.set_fragment(None);
+        let lower = url.as_str().to_ascii_lowercase();
+        if [
+            "googletagmanager",
+            "google-analytics",
+            "doubleclick",
+            "clarity.ms",
+            "hotjar",
+            "sentry",
+            "facebook.net",
+            "connect.facebook",
+        ]
+        .iter()
+        .any(|skip| lower.contains(skip))
+        {
+            continue;
+        }
+        if crate::net::same_site_origin(&url, base) || lower.contains("/_next/static/") || lower.contains("/assets/") {
+            let s = url.to_string();
+            if seen.insert(s.clone()) {
+                out.push(s);
+            }
+        }
+        if out.len() >= 12 {
+            break;
+        }
+    }
+    out
+}
+
+/// Extract same-site API server origins referenced inside HTML or JS bundles.
+pub fn bundle_api_bases(base: &Url, text: &str) -> BTreeSet<String> {
+    let mut bases = BTreeSet::new();
+    let url_re = regex::Regex::new(r#"https?://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/api(?:/v[0-9]+)?|/v[1-9][0-9]*|/graphql|/gql)?"#).expect("constant");
+    for m in url_re.find_iter(text).take(1000) {
+        if let Ok(url) = Url::parse(m.as_str()) {
+            if safe_server(&url) && crate::net::same_site_origin(&url, base) {
+                bases.insert(url.origin().ascii_serialization());
+            }
+        }
+    }
+    bases
+}
+
 impl Runtime {
     /// Public documentation can redirect to a published documentation host. Cookies and all
     /// other account material stay on the original origin; every hop still uses Network checks.
@@ -415,6 +628,12 @@ impl Runtime {
             next = crate::net::validate_url(&response.url)?
                 .join(&location)
                 .map_err(|_| AppError::api("bad_url", 400))?;
+            // Some sites still publish an HTTP location on their secure entry
+            // point. Try its secure equivalent; never send a downgraded request.
+            if original.scheme() == "https" && next.scheme() == "http" {
+                next.set_scheme("https")
+                    .map_err(|_| AppError::api("bad_url", 400))?;
+            }
         }
         Err(AppError::api("request_failed", 502))
     }

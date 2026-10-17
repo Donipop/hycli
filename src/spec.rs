@@ -1,4 +1,4 @@
-//! SiteSpec v1 — 웹사이트를 CLI로 기술하는 선언형 포맷. 스펙은 데이터다.
+//! Declarative SiteSpec format (v1 & v2) for turning websites into typed CLIs.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -55,19 +55,37 @@ pub struct Defaults {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthStrategy {
     pub name: String,
-    pub kind: String, // none | header | browser
+    pub kind: String, // none | header | browser | derived
     #[serde(default)]
     pub header: String,
     #[serde(default)]
     pub prefix: String,
     #[serde(default, rename = "value_from")]
-    pub value_from: String, // store:<site>/<key>
+    pub value_from: String, // store:<site>/<key> | cookie:<name> | storage:<key>[#<pointer>]
     /// Exact credential destination; legacy definitions use the site's base origin.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub origin: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PreflightStep {
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub op: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub method: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub base_url: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub extract: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Operation {
     pub name: String,
     #[serde(default)]
@@ -82,6 +100,8 @@ pub struct Operation {
     pub transport: String,
     #[serde(default)]
     pub auth: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preflight: Vec<PreflightStep>,
     #[serde(default)]
     pub params: std::collections::BTreeMap<String, Param>,
     #[serde(default)]
@@ -109,6 +129,12 @@ pub struct ResponseExpectation {
     pub required_html_fields: Vec<crate::html::Field>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub html: Option<crate::html::Extraction>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub strip_prefix: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub ssr_json: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub extract_pointer: String,
 }
 
 impl Operation {
@@ -127,6 +153,43 @@ impl Operation {
         });
         query.is_some_and(|query| graphql_parser::parse_query::<&str>(query).is_ok())
     }
+    pub fn parse_json_response(&self, response: &crate::net::Response) -> Option<Value> {
+        let expected = self.response.as_ref();
+        if let Some(exp) = expected {
+            if !exp.ssr_json.is_empty() {
+                let html = String::from_utf8_lossy(&response.bytes);
+                return crate::html::extract_ssr_json(&html, &exp.ssr_json, &exp.extract_pointer);
+            }
+        }
+        let mut parsed = response.json().or_else(|| {
+            let text = std::str::from_utf8(&response.bytes).ok()?.trim_start();
+            let stripped = if let Some(exp) = expected {
+                if !exp.strip_prefix.is_empty() {
+                    text.strip_prefix(exp.strip_prefix.as_str())
+                        .map(str::trim_start)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+            .or_else(|| {
+                for prefix in [")]}',", ")]}'", "while(1);", "for(;;);"] {
+                    if let Some(rest) = text.strip_prefix(prefix) {
+                        return Some(rest.trim_start());
+                    }
+                }
+                None
+            })?;
+            serde_json::from_str(stripped).ok()
+        })?;
+        if let Some(exp) = expected {
+            if !exp.extract_pointer.is_empty() {
+                parsed = parsed.pointer(&exp.extract_pointer)?.clone();
+            }
+        }
+        Some(parsed)
+    }
     pub fn matches_response(&self, response: &crate::net::Response) -> bool {
         if !response.successful() {
             return false;
@@ -135,13 +198,22 @@ impl Operation {
             return true;
         };
         match expected.format.as_str() {
-            "json" => response.json().is_some_and(|body| {
+            "json" => self.parse_json_response(response).is_some_and(|body| {
                 expected
                     .required_pointers
                     .iter()
                     .all(|p| body.pointer(p).is_some())
             }),
             "html" => {
+                if !expected.ssr_json.is_empty() {
+                    return response.header("content-type").contains("text/html")
+                        && self.parse_json_response(response).is_some_and(|body| {
+                            expected
+                                .required_pointers
+                                .iter()
+                                .all(|p| body.pointer(p).is_some())
+                        });
+                }
                 !expected.required_html_fields.is_empty()
                     && response.header("content-type").contains("text/html")
                     && !response.bytes.is_empty()
@@ -192,6 +264,8 @@ fn default_param_type() -> String {
 pub struct Body {
     #[serde(default, rename = "json")]
     pub json: std::collections::BTreeMap<String, Param>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_template: Option<Value>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub form: std::collections::BTreeMap<String, Param>,
 }
@@ -233,7 +307,7 @@ pub struct Issue {
 
 pub fn parse(data: &[u8]) -> AppResult<Spec> {
     let mut s: Spec = serde_yaml::from_slice(data)
-        .map_err(|e| apperr::spec(format!("스펙 YAML 파싱 실패 ({e})"), "yaml 문법 확인"))?;
+        .map_err(|e| apperr::spec(format!("Failed to parse SiteSpec YAML ({e})"), "Check YAML syntax."))?;
     if s.spec_version == 0 {
         s.spec_version = SPEC_VERSION;
     }
@@ -276,31 +350,31 @@ impl Spec {
                 });
             }
 
-            if self.spec_version != SPEC_VERSION {
+            if self.spec_version != SPEC_VERSION && self.spec_version != 2 {
                 add(
                     &mut out,
                     "spec_version",
-                    format!("지원: {SPEC_VERSION}, 실제: {}", self.spec_version),
-                    "spec_version: 1",
+                    format!("supported: 1|2, got: {}", self.spec_version),
+                    "Set spec_version to 1 or 2",
                 );
             }
             if self.site.name.is_empty() {
                 add(
                     &mut out,
                     "site.name",
-                    "비어 있다".into(),
-                    "사이트 식별자 필수",
+                    "empty".into(),
+                    "Site identifier is required",
                 );
             }
             if self.site.base_url.is_empty() {
                 add(
                     &mut out,
                     "site.base_url",
-                    "비어 있다".into(),
-                    "https:// 절대 URL",
+                    "empty".into(),
+                    "Provide an https:// absolute URL",
                 );
             } else if !self.site.base_url.starts_with("http") {
-                add(&mut out, "site.base_url", "http(s) 접두사 없음".into(), "");
+                add(&mut out, "site.base_url", "missing http(s) scheme".into(), "");
             }
 
             let mut auths = std::collections::HashSet::new();
@@ -309,7 +383,7 @@ impl Spec {
                     add(
                         &mut out,
                         &format!("auth.{}", a.name),
-                        "이름 중복".into(),
+                        "duplicate auth strategy name".into(),
                         "",
                     );
                 }
@@ -320,7 +394,7 @@ impl Spec {
                             add(
                                 &mut out,
                                 &format!("auth.{}.header", a.name),
-                                "kind=header인데 헤더명 없음".into(),
+                                "missing header name for kind=header".into(),
                                 "",
                             );
                         }
@@ -328,20 +402,43 @@ impl Spec {
                             add(
                                 &mut out,
                                 &format!("auth.{}.value_from", a.name),
-                                "store:<site>/<key> 참조 필요".into(),
-                                "시크릿은 스펙에 넣지 않는다",
+                                "must reference store:<site>/<key>".into(),
+                                "Never embed raw secrets in a SiteSpec",
+                            );
+                        }
+                    }
+                    "derived" => {
+                        if a.header.is_empty() {
+                            add(
+                                &mut out,
+                                &format!("auth.{}.header", a.name),
+                                "missing header name for kind=derived".into(),
+                                "",
+                            );
+                        }
+                        if !["cookie:", "storage:", "header:"]
+                            .iter()
+                            .any(|p| a.value_from.starts_with(p))
+                        {
+                            add(
+                                &mut out,
+                                &format!("auth.{}.value_from", a.name),
+                                "must reference cookie:<name>, storage:<key>[#<pointer>], or header:<name>".into(),
+                                "Example: cookie:ct0",
                             );
                         }
                     }
                     other => add(
                         &mut out,
                         &format!("auth.{}.kind", a.name),
-                        format!("미지원 kind: {other}"),
-                        "none|header|browser",
+                        format!("unsupported auth kind: {other}"),
+                        "none|header|browser|derived",
                     ),
                 }
             }
             let models: std::collections::HashSet<&String> = self.models.keys().collect();
+            let op_names: std::collections::HashSet<&String> =
+                self.operations.iter().map(|o| &o.name).collect();
 
             for op in &self.operations {
                 let id = format!("operations.{}", op.name);
@@ -349,7 +446,7 @@ impl Spec {
                     add(
                         &mut out,
                         &format!("{id}.method"),
-                        "비어 있다".into(),
+                        "empty".into(),
                         "GET|POST|PUT|PATCH|DELETE",
                     );
                 }
@@ -357,25 +454,59 @@ impl Spec {
                     add(
                         &mut out,
                         &format!("{id}.path"),
-                        format!("/로 시작해야 한다: {}", op.path),
+                        format!("must start with /: {}", op.path),
                         "",
                     );
+                }
+                if op.path.contains("{{step.") {
+                    add(
+                        &mut out,
+                        &format!("{id}.path"),
+                        "preflight step interpolation is forbidden in URL paths".into(),
+                        "Use {{step.*}} only in headers or body",
+                    );
+                }
+                for (qname, qparam) in &op.query {
+                    if qparam
+                        .default
+                        .as_ref()
+                        .is_some_and(|v| value_to_plain_string(v).contains("{{step."))
+                    {
+                        add(
+                            &mut out,
+                            &format!("{id}.query.{qname}"),
+                            "preflight step interpolation is forbidden in URL query parameters".into(),
+                            "Use {{step.*}} only in headers or body",
+                        );
+                    }
                 }
                 if !op.auth.is_empty() && !auths.contains(&op.auth) {
                     add(
                         &mut out,
                         &format!("{id}.auth"),
-                        format!("미정의 auth: {}", op.auth),
-                        "auth 블록에 정의",
+                        format!("undefined auth strategy: {}", op.auth),
+                        "Define in auth block",
                     );
                 }
                 if !op.model.is_empty() && !models.contains(&op.model) {
                     add(
                         &mut out,
                         &format!("{id}.model"),
-                        format!("미정의 model: {}", op.model),
-                        "models 블록에 정의",
+                        format!("undefined model: {}", op.model),
+                        "Define in models block",
                     );
+                }
+                for step in &op.preflight {
+                    let valid_target = (!step.op.is_empty() && op_names.contains(&step.op))
+                        || (!step.path.is_empty() && step.path.starts_with('/'));
+                    if step.name.is_empty() || !valid_target {
+                        add(
+                            &mut out,
+                            &format!("{id}.preflight"),
+                            format!("invalid preflight step: {}", step.name),
+                            "Reference a defined operation or a path starting with '/'",
+                        );
+                    }
                 }
                 let path_names = path_vars(&op.path);
                 for n in &path_names {
@@ -383,8 +514,8 @@ impl Spec {
                         add(
                             &mut out,
                             &format!("{id}.params"),
-                            format!("경로 변수 {{{n}}} 미선언"),
-                            "params에 선언",
+                            format!("undeclared path parameter {{{n}}}"),
+                            "Declare in params",
                         );
                     }
                 }
@@ -393,8 +524,8 @@ impl Spec {
                         add(
                             &mut out,
                             &format!("{id}.params.{n}"),
-                            "경로 템플릿에 없는 파라미터".into(),
-                            &format!("path에 {{{n}}} 사용 또는 query로 이동"),
+                            "parameter not present in path template".into(),
+                            &format!("Use {{{n}}} in path or move to query"),
                         );
                     }
                 }
@@ -406,12 +537,12 @@ impl Spec {
                     *counts.entry(k).or_default() += 1;
                 }
                 if let Some(b) = &op.body {
-                    if !b.json.is_empty() && !b.form.is_empty() {
+                    if (!b.json.is_empty() || b.json_template.is_some()) && !b.form.is_empty() {
                         add(
                             &mut out,
                             &format!("{id}.body"),
                             "Choose one body encoding".into(),
-                            "Use body.json or body.form, not both.",
+                            "Use body.json/json_template or body.form, not both.",
                         );
                     }
                     for (k, _) in b.inputs() {
@@ -423,8 +554,8 @@ impl Spec {
                         add(
                             &mut out,
                             id.as_str(),
-                            format!("인자 이름 충돌: {n}"),
-                            "params/query/body에서 고유하게",
+                            format!("input name conflict: {n}"),
+                            "Keep input names unique across params/query/body",
                         );
                     }
                 }
@@ -436,15 +567,15 @@ impl Spec {
                             "string" | "int" | "float" | "bool" | "json" => {}
                             other => out.push(Issue {
                                 field: format!("{where_}.{n}.type"),
-                                detail: format!("미지원 type: {other}"),
+                                detail: format!("unsupported type: {other}"),
                                 remedy: "string|int|float|bool|json".into(),
                             }),
                         }
                         if p.required && p.default.is_some() {
                             out.push(Issue {
                                 field: format!("{where_}.{n}"),
-                                detail: "required에 default 병기".into(),
-                                remedy: "하나만".into(),
+                                detail: "required parameter cannot also define a default".into(),
+                                remedy: "Use required or default, not both".into(),
                             });
                         }
                     }
@@ -471,13 +602,13 @@ impl Spec {
             .ok_or_else(|| {
                 let names: Vec<&str> = self.operations.iter().map(|o| o.name.as_str()).collect();
                 apperr::spec(
-                    format!("연산 없음: {name}"),
-                    format!("가능: {}", names.join(", ")),
+                    format!("Unknown operation: {name}"),
+                    format!("Available: {}", names.join(", ")),
                 )
             })
     }
 
-    /// 요청 URL·바디 구성. args는 플래그에서 모은 문자열 맵.
+    /// Build the request URL and body from operation definition and input arguments.
     pub fn build_request(
         &self,
         op: &Operation,
@@ -488,7 +619,7 @@ impl Spec {
             let p = op
                 .params
                 .get(&n)
-                .ok_or_else(|| apperr::spec(format!("경로 변수 {n} 미선언"), ""))?;
+                .ok_or_else(|| apperr::spec(format!("Undeclared path parameter: {n}"), ""))?;
             let v = coerce_str(p, &n, args, false)?;
             path = path.replace(&format!("{{{n}}}"), &urlencode_path(&v));
         }
@@ -536,6 +667,23 @@ impl Spec {
                     form.append_pair(name, &coerce_str(p, name, args, true)?);
                 }
                 body = Some(form.finish().into_bytes());
+            } else if let Some(template) = &b.json_template {
+                let mut resolved_values = std::collections::BTreeMap::new();
+                for (name, p) in &b.json {
+                    let present = args.contains_key(name);
+                    if !present && p.default.is_none() {
+                        if p.required {
+                            return Err(apperr::spec(
+                                format!("Missing required argument: --{name}"),
+                                format!("Example: --{name} <{}>", p.kind),
+                            ));
+                        }
+                        continue;
+                    }
+                    resolved_values.insert(name.clone(), coerce_value(p, name, args)?);
+                }
+                let rendered = render_json_template(template, &resolved_values, args);
+                body = Some(serde_json::to_vec(&rendered).unwrap_or_default());
             } else if !b.json.is_empty() {
                 let mut obj = Map::new();
                 for (name, p) in &b.json {
@@ -543,8 +691,8 @@ impl Spec {
                     if !present && p.default.is_none() {
                         if p.required {
                             return Err(apperr::spec(
-                                format!("필수 인자 누락: --{name}"),
-                                format!("예: --{name} <{}>", p.kind),
+                                format!("Missing required argument: --{name}"),
+                                format!("Example: --{name} <{}>", p.kind),
                             ));
                         }
                         continue;
@@ -557,14 +705,14 @@ impl Spec {
         Ok((url_s, body))
     }
 
-    /// 점경로 추출+타입 강제로 원시 JSON을 모델 모양으로.
+    /// Project a raw JSON response into a declared model shape with type coercion.
     pub fn apply_model(&self, name: &str, raw: &[u8]) -> AppResult<Value> {
         let model = match self.models.get(name) {
             Some(m) => m,
             None => return Ok(serde_json::from_slice(raw).unwrap_or(Value::Null)),
         };
         let doc: Value = serde_json::from_slice(raw)
-            .map_err(|e| apperr::spec(format!("모델 적용 중 JSON 파싱 실패 ({e})"), ""))?;
+            .map_err(|e| apperr::spec(format!("Failed to parse JSON while applying model ({e})"), ""))?;
         let mut out = Map::new();
         for (field, f) in model {
             let path = if f.path.is_empty() {
@@ -641,8 +789,8 @@ fn coerce_str(
             }
             if p.required {
                 return Err(apperr::spec(
-                    format!("필수 인자 누락: --{name}"),
-                    format!("예: --{name} <{}>", p.kind),
+                    format!("Missing required argument: --{name}"),
+                    format!("Example: --{name} <{}>", p.kind),
                 ));
             }
             Ok(String::new())
@@ -662,15 +810,15 @@ fn coerce_value(
                 "int" => v
                     .parse::<i64>()
                     .map(Value::from)
-                    .map_err(|e| apperr::spec(format!("--{name} 파싱 실패: {e}"), ""))?,
+                    .map_err(|e| apperr::spec(format!("Failed to parse --{name}: {e}"), ""))?,
                 "float" => v
                     .parse::<f64>()
                     .map(Value::from)
-                    .map_err(|e| apperr::spec(format!("--{name} 파싱 실패: {e}"), ""))?,
+                    .map_err(|e| apperr::spec(format!("Failed to parse --{name}: {e}"), ""))?,
                 "bool" => v
                     .parse::<bool>()
                     .map(Value::from)
-                    .map_err(|e| apperr::spec(format!("--{name} 파싱 실패: {e}"), ""))?,
+                    .map_err(|e| apperr::spec(format!("Failed to parse --{name}: {e}"), ""))?,
                 "json" => serde_json::from_str(v).map_err(|_| {
                     apperr::usage(
                         format!("Invalid structured input: {name}"),
@@ -683,7 +831,7 @@ fn coerce_value(
         None => p
             .default
             .clone()
-            .ok_or_else(|| apperr::spec(format!("필수 인자 누락: --{name}"), "")),
+            .ok_or_else(|| apperr::spec(format!("Missing required argument: --{name}"), "")),
     }
 }
 
@@ -699,7 +847,7 @@ fn check_type(p: &Param, name: &str, v: &str) -> AppResult<()> {
         Ok(())
     } else {
         Err(apperr::spec(
-            format!("--{name}은(는) {}여야 한다: {v}", p.kind),
+            format!("--{name} must be {}: {v}", p.kind),
             "",
         ))
     }
@@ -725,7 +873,7 @@ fn urlencode_path(s: &str) -> String {
     out
 }
 
-/// url 크레이트 의존 없는 최소 form encode.
+/// Minimal form encoder without external crate dependencies.
 #[derive(Default)]
 pub struct FormEncoder(String);
 
@@ -756,3 +904,66 @@ fn form_encode(s: &str) -> String {
     }
     out
 }
+
+pub fn render_json_template(
+    template: &Value,
+    resolved_values: &std::collections::BTreeMap<String, Value>,
+    raw_args: &std::collections::BTreeMap<String, String>,
+) -> Value {
+    match template {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), render_json_template(v, resolved_values, raw_args)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| render_json_template(v, resolved_values, raw_args))
+                .collect(),
+        ),
+        Value::String(s) => {
+            if let Some(var) = s.strip_prefix("{{").and_then(|rest| rest.strip_suffix("}}")) {
+                let var = var.trim();
+                if !var.contains("{{") {
+                    if let Some(val) = resolved_values.get(var) {
+                        return val.clone();
+                    }
+                    if let Some(raw) = raw_args.get(var) {
+                        return Value::String(raw.clone());
+                    }
+                }
+            }
+            Value::String(interpolate_template_str(s, resolved_values, raw_args))
+        }
+        other => other.clone(),
+    }
+}
+
+pub fn interpolate_template_str(
+    template: &str,
+    resolved_values: &std::collections::BTreeMap<String, Value>,
+    raw_args: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after_start = &rest[start + 2..];
+        if let Some(end) = after_start.find("}}") {
+            let var = after_start[..end].trim();
+            if let Some(raw) = raw_args.get(var) {
+                out.push_str(raw);
+            } else if let Some(val) = resolved_values.get(var) {
+                out.push_str(&value_to_plain_string(val));
+            }
+            rest = &after_start[end + 2..];
+        } else {
+            out.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
