@@ -1,5 +1,5 @@
-//! 방어 분류기 — 사이트 불문 프로토콜 지식. 스테이지 라우팅 판정의 재료.
-//! 원칙: 방어 분류는 "차단 신호"에만 붙는다. CDN 존재 신호(cf-ray 등)는 2xx에선 정보일 뿐.
+//! Defense classifier for HTTP responses.
+//! Defense classification only applies to blocking signals; CDN presence headers on 2xx responses are informational.
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -25,7 +25,7 @@ impl Class {
         }
     }
 
-    /// 분류별 다음 행동 힌트 — 스테이지 라우팅과 정렬.
+    /// Suggested next action for each defense class.
     pub fn remedy(self) -> &'static str {
         match self {
             Class::Cloudflare => {
@@ -51,7 +51,7 @@ impl Class {
 #[derive(Debug, Clone, Default)]
 pub struct Observation {
     pub status_code: u16,
-    pub headers: Vec<(String, String)>, // 소문자 키
+    pub headers: Vec<(String, String)>, // lowercase keys
     pub body_snippet: String,
 }
 

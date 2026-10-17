@@ -1,4 +1,4 @@
-//! I/O 계약: stdout = 데이터 전용(non-TTY 자동 JSON), stderr = 로그·에러.
+//! I/O contract: stdout is reserved for structured data (compact JSON when non-TTY); stderr is for diagnostics and errors.
 use std::io::{self, IsTerminal, Write};
 
 use crate::apperr::{self, AppError};
@@ -27,7 +27,7 @@ impl Emitter {
         let _ = writeln!(out, "{pretty}");
     }
 
-    /// 표준 오류 한 줄 + exit code 반환.
+    /// Emit a single-line error to stderr and return the exit code.
     pub fn fail(&self, err: &AppError) -> i32 {
         let mut errw = io::stderr();
         let _ = writeln!(errw, "hycli: code={} {err}", apperr::code_of(err).as_i32());

@@ -583,7 +583,7 @@ impl Runtime {
             Some(&request.account_id),
         )?;
         let effect = policy::operation_effect(op, &request.inputs);
-        let (mut url, mut body) = sp.build_request(op, &request.inputs)?;
+        let (url, mut body) = sp.build_request(op, &request.inputs)?;
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
@@ -606,11 +606,7 @@ impl Runtime {
                 &mut secrets,
             )
             .await?;
-            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
-            if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
-                return Err(AppError::api("unsafe_target", 400));
-            }
-            url = rebuilt_url;
+            let (_, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
             body = rebuilt_body;
             let empty_resolved = BTreeMap::new();
             for (_, v) in &mut headers {
@@ -831,9 +827,29 @@ impl Runtime {
                     } else {
                         Some(h.to_string())
                     }
-                } else if expr.starts_with('/') {
+                } else if let Some(cookie_name) = expr.strip_prefix("cookie:") {
+                    let from_set_cookie = r
+                        .header("set-cookie")
+                        .split(';')
+                        .next()
+                        .and_then(|pair| pair.trim().strip_prefix(&format!("{cookie_name}=")))
+                        .map(|v| v.to_string());
+                    from_set_cookie.or_else(|| {
+                        if account_id.is_empty() {
+                            None
+                        } else {
+                            self.credential(account_id).ok().and_then(|c| {
+                                c.cookies
+                                    .into_iter()
+                                    .find(|ck| ck.name == cookie_name)
+                                    .map(|ck| ck.value)
+                            })
+                        }
+                    })
+                } else if expr.starts_with('/') || expr.starts_with("json:/") {
+                    let ptr = expr.strip_prefix("json:").unwrap_or(expr);
                     json_doc.as_ref().and_then(|doc| {
-                        doc.pointer(expr).and_then(|v| match v {
+                        doc.pointer(ptr).and_then(|v| match v {
                             Value::String(s) => Some(s.clone()),
                             Value::Number(n) => Some(n.to_string()),
                             _ => None,
@@ -843,9 +859,7 @@ impl Runtime {
                     None
                 };
                 if let Some(val) = extracted.filter(|s| !s.is_empty()) {
-                    if util::secret_field(var) {
-                        secrets.push(val.clone());
-                    }
+                    secrets.push(val.clone());
                     effective_inputs.insert(format!("step.{}.{var}", step.name), val.clone());
                     effective_inputs.entry(var.clone()).or_insert(val);
                 }
@@ -1130,7 +1144,7 @@ impl Runtime {
             id,
         ))
     }
-    /// 스텔스 런치 관찰 — 원장 기록 포함. probe와 동일 계약.
+    /// Launch a local browser probe and record the attempt in the knowledge base.
     pub async fn probe_browser_stealth(&self, site: &str, url: &str) -> AppResult<(Value, i64)> {
         let r = crate::browser::stealth_probe(url).await?;
         let verdict = if r.defense == "none" && (200..400).contains(&r.status) {
@@ -1213,9 +1227,15 @@ impl Runtime {
         let doc_routes = crate::discovery::documented_routes(&vis);
         let mut bundle_routes = crate::discovery::bundle_routes(&text);
         let mut api_bases = crate::discovery::bundle_api_bases(&r_url, &text);
+        let max_bundles = max_bundles.min(4);
         let script_urls = crate::discovery::bundle_urls(&r_url, &text);
         let mut scanned_bundles = Vec::new();
         for bundle_url in script_urls.into_iter().take(max_bundles) {
+            if !crate::net::validate_url(&bundle_url)
+                .is_ok_and(|u| crate::net::same_site_origin(&u, &r_url))
+            {
+                continue;
+            }
             if let Ok(br) = self.read_page(&bundle_url, &account_id).await {
                 if br.successful() {
                     let btext = String::from_utf8_lossy(&br.bytes);
@@ -1395,26 +1415,34 @@ impl Runtime {
             .iter()
             .map(|(m, p)| format!("{m} {p}"))
             .collect();
-        let report = json!({
-            "site_id": site_id,
-            "url": r.url,
-            "status": r.status,
-            "defense": r.defense,
-            "latency_ms": r.duration_ms,
-            "title": page_title,
-            "account_id": account_id,
-            "api_bases": api_bases,
-            "documented_routes": doc_route_strs,
-            "bundle_routes": bundle_route_strs,
-            "scanned_bundles": scanned_bundles,
-            "ssr_payloads": ssr_payloads,
-            "draft_operations": draft.operations.iter().map(|o| json!({
-                "name": o.name,
-                "method": o.method,
-                "path": o.path,
-                "base_url": draft.operation_base(o),
-            })).collect::<Vec<_>>(),
-        });
+        let secrets = if account_id.is_empty() {
+            vec![]
+        } else {
+            self.credential(&account_id)?.redaction_values()
+        };
+        let report = sanitized(
+            json!({
+                "site_id": site_id,
+                "url": r.url,
+                "status": r.status,
+                "defense": r.defense,
+                "latency_ms": r.duration_ms,
+                "title": page_title,
+                "account_id": account_id,
+                "api_bases": api_bases,
+                "documented_routes": doc_route_strs,
+                "bundle_routes": bundle_route_strs,
+                "scanned_bundles": scanned_bundles,
+                "ssr_payloads": ssr_payloads,
+                "draft_operations": draft.operations.iter().map(|o| json!({
+                    "name": o.name,
+                    "method": o.method,
+                    "path": o.path,
+                    "base_url": draft.operation_base(o),
+                })).collect::<Vec<_>>(),
+            }),
+            &secrets,
+        );
         Ok((report, draft))
     }
 

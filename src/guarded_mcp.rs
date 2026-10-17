@@ -200,7 +200,7 @@ impl Server {
             }
             let approval = self.core.policy.review(id)?;
             self.allowed(&approval.site_id)?;
-            // 입력값은 MCP로 노출하지 않는다 — 승인 상세는 대시보드 세션에서만.
+            // Input values are not exposed over MCP; approval details are visible only in the local dashboard.
             return Ok(json!({"status":"awaiting_user_approval","approval":{
                 "id": approval.id,
                 "site_id": approval.site_id,
@@ -211,7 +211,7 @@ impl Server {
                 "state": approval.status,
                 "expires_at": approval.expires_at,
                 "inputs": approval.inputs.iter().map(|i| json!({"label": i.label})).collect::<Vec<_>>(),
-                "note": "입력값·승인 상세는 Hycli 대시보드에서만 확인된다"
+                "note": "Input values and approval details are reviewed only in the Hycli dashboard"
             }}));
         }
         if !self.sites_only {

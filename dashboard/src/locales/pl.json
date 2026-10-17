@@ -500,5 +500,12 @@
   "sites.changesOff": "zmiany wyłączone",
   "errors.writes_disabled": "Zmiany są wyłączone dla tej witryny. Włącz Zezwalaj na zmiany w szczegółach, aby użyć tej akcji.",
   "errors.launch_required": "Otwórz Hycli poleceniem hycli dashboard, aby używać tego okna.",
-  "activity.note.coverage_incomplete": "{count} udokumentowanych operacji nie ma jeszcze akcji. Dodawanie."
+  "activity.note.coverage_incomplete": "{count} udokumentowanych operacji nie ma jeszcze akcji. Dodawanie.",
+  "settings.quit": "Zamknij Hycli",
+  "settings.quitHint": "Hycli działa dalej po zamknięciu przeglądarki. Zakończ go tutaj.",
+  "settings.quitConfirm": "Zamknąć Hycli? Najpierw zakończ lub anuluj trwające zadania. Zapisane witryny i konta pozostaną na tym urządzeniu.",
+  "settings.stopped": "Hycli zostało zamknięte",
+  "settings.stoppedHint": "Możesz zamknąć tę kartę. Aby wrócić, otwórz Hycli z menu aplikacji.",
+  "errors.work_in_progress": "Zakończ lub anuluj trwające zadania w Aktywności, a następnie ponownie zamknij Hycli.",
+  "errors.shutting_down": "Hycli jest zamykane."
 }

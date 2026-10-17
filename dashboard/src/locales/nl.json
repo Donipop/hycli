@@ -500,5 +500,12 @@
   "sites.changesOff": "wijzigingen uit",
   "errors.writes_disabled": "Wijzigingen staan uit voor deze website. Zet Wijzigingen toestaan aan in de details om deze actie te gebruiken.",
   "errors.launch_required": "Open Hycli met het commando hycli dashboard om dit venster te gebruiken.",
-  "activity.note.coverage_incomplete": "{count} gedocumenteerde bewerkingen hebben nog geen actie. Ze worden toegevoegd."
+  "activity.note.coverage_incomplete": "{count} gedocumenteerde bewerkingen hebben nog geen actie. Ze worden toegevoegd.",
+  "settings.quit": "Hycli afsluiten",
+  "settings.quitHint": "Hycli blijft actief als je de browser sluit. Sluit Hycli hier af om het te stoppen.",
+  "settings.quitConfirm": "Hycli afsluiten? Voltooi of annuleer eerst het lopende werk. Je opgeslagen websites en accounts blijven op dit apparaat.",
+  "settings.stopped": "Hycli is afgesloten",
+  "settings.stoppedHint": "Je kunt dit tabblad sluiten. Open Hycli via het toepassingenmenu om terug te keren.",
+  "errors.work_in_progress": "Voltooi of annuleer het lopende werk in Activiteit en sluit Hycli daarna opnieuw af.",
+  "errors.shutting_down": "Hycli wordt afgesloten."
 }

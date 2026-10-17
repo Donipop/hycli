@@ -8,6 +8,13 @@ Automate any website, with changes only where you allow them.
 
 - Every website starts read-only. Its change actions are hidden from MCP and refused by the CLI with `writes_disabled` until you turn on **Allow changes** for that website in the dashboard. Turning it off cancels pending approvals.
 - The dashboard grants its session only to the address `hycli dashboard` opens. A plain local request can no longer obtain the session that approves changes. The session persists in the private data directory, so an open dashboard still reconnects after a restart.
+- Values extracted by `preflight` steps or `derived` authentication are unconditionally treated as secrets for output redaction, and `{{step.*}}` interpolation is restricted strictly to request headers and bodies (never URL paths or query strings).
+
+### Deterministic Recon & SiteSpec v2
+
+- `hycli recon <URL>` and MCP `hycli_recon` deterministically inspect SSR state payloads (`__NEXT_DATA__`, `__NUXT_DATA__`, Remix, Apollo, JSON-LD) and same-site JavaScript bundles, and can emit a starter `SiteSpec v2` draft without requiring a built-in LLM key.
+- `SiteSpec v2` adds `derived` authentication (`cookie:<name>`, `storage:<key>`, `header:<name>`), `preflight` step extraction (`json:/pointer`, `css:selector@attr`, `header:name`, `cookie:name`), `body.json_template`, and response preprocessing (`strip_prefix`, `ssr_json`, `extract_pointer`).
+- Same-site (`eTLD+1`) subdomain API hosts share verified browser cookies and origin storage within the same site integration, and Chromium observation captures preflight `fetch`/`XHR` headers and bodies via CDP `Fetch.requestPaused` without executing state-changing requests.
 
 ### Checks without AI
 
@@ -17,6 +24,13 @@ Automate any website, with changes only where you allow them.
 
 - Preparation plans complete user workflows, reviews every step, and verifies chained reads before installing.
 - After the workflows, workers continue through documented API operations that have no action yet. The job reports `coverage` with any remaining operations.
+
+### Native desktop & installers
+
+- Open Hycli from a native app icon or `hycli open` without keeping a terminal or manually starting a server. Reuse running instances and select a free local port when necessary.
+- Quit from Settings in all 20 languages, or use `hycli status` / `hycli stop`. Preserve active work and saved data.
+- Build per-user Windows installers, macOS app/DMG packages and Linux DEBs, plus portable archives with a Linux menu installer, for x64 and ARM64.
+- Verify background lifecycle and actual installer payloads in each native CI job. Support optional Windows signing and macOS Developer ID signing/notarization.
 
 ## 0.1.0
 

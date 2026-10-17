@@ -1,4 +1,4 @@
-//! SiteSpec v1 — 웹사이트를 CLI로 기술하는 선언형 포맷. 스펙은 데이터다.
+//! Declarative SiteSpec format (v1 & v2) for turning websites into typed CLIs.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -307,7 +307,7 @@ pub struct Issue {
 
 pub fn parse(data: &[u8]) -> AppResult<Spec> {
     let mut s: Spec = serde_yaml::from_slice(data)
-        .map_err(|e| apperr::spec(format!("스펙 YAML 파싱 실패 ({e})"), "yaml 문법 확인"))?;
+        .map_err(|e| apperr::spec(format!("Failed to parse SiteSpec YAML ({e})"), "Check YAML syntax."))?;
     if s.spec_version == 0 {
         s.spec_version = SPEC_VERSION;
     }
@@ -354,27 +354,27 @@ impl Spec {
                 add(
                     &mut out,
                     "spec_version",
-                    format!("지원: 1|2, 실제: {}", self.spec_version),
-                    "spec_version: 1 또는 2",
+                    format!("supported: 1|2, got: {}", self.spec_version),
+                    "Set spec_version to 1 or 2",
                 );
             }
             if self.site.name.is_empty() {
                 add(
                     &mut out,
                     "site.name",
-                    "비어 있다".into(),
-                    "사이트 식별자 필수",
+                    "empty".into(),
+                    "Site identifier is required",
                 );
             }
             if self.site.base_url.is_empty() {
                 add(
                     &mut out,
                     "site.base_url",
-                    "비어 있다".into(),
-                    "https:// 절대 URL",
+                    "empty".into(),
+                    "Provide an https:// absolute URL",
                 );
             } else if !self.site.base_url.starts_with("http") {
-                add(&mut out, "site.base_url", "http(s) 접두사 없음".into(), "");
+                add(&mut out, "site.base_url", "missing http(s) scheme".into(), "");
             }
 
             let mut auths = std::collections::HashSet::new();
@@ -383,7 +383,7 @@ impl Spec {
                     add(
                         &mut out,
                         &format!("auth.{}", a.name),
-                        "이름 중복".into(),
+                        "duplicate auth strategy name".into(),
                         "",
                     );
                 }
@@ -394,7 +394,7 @@ impl Spec {
                             add(
                                 &mut out,
                                 &format!("auth.{}.header", a.name),
-                                "kind=header인데 헤더명 없음".into(),
+                                "missing header name for kind=header".into(),
                                 "",
                             );
                         }
@@ -402,8 +402,8 @@ impl Spec {
                             add(
                                 &mut out,
                                 &format!("auth.{}.value_from", a.name),
-                                "store:<site>/<key> 참조 필요".into(),
-                                "시크릿은 스펙에 넣지 않는다",
+                                "must reference store:<site>/<key>".into(),
+                                "Never embed raw secrets in a SiteSpec",
                             );
                         }
                     }
@@ -412,7 +412,7 @@ impl Spec {
                             add(
                                 &mut out,
                                 &format!("auth.{}.header", a.name),
-                                "kind=derived인데 헤더명 없음".into(),
+                                "missing header name for kind=derived".into(),
                                 "",
                             );
                         }
@@ -423,15 +423,15 @@ impl Spec {
                             add(
                                 &mut out,
                                 &format!("auth.{}.value_from", a.name),
-                                "cookie:<name> 또는 storage:<key>[#<pointer>] 참조 필요".into(),
-                                "예: cookie:note_gql_auth_token",
+                                "must reference cookie:<name>, storage:<key>[#<pointer>], or header:<name>".into(),
+                                "Example: cookie:ct0",
                             );
                         }
                     }
                     other => add(
                         &mut out,
                         &format!("auth.{}.kind", a.name),
-                        format!("미지원 kind: {other}"),
+                        format!("unsupported auth kind: {other}"),
                         "none|header|browser|derived",
                     ),
                 }
@@ -446,7 +446,7 @@ impl Spec {
                     add(
                         &mut out,
                         &format!("{id}.method"),
-                        "비어 있다".into(),
+                        "empty".into(),
                         "GET|POST|PUT|PATCH|DELETE",
                     );
                 }
@@ -454,24 +454,46 @@ impl Spec {
                     add(
                         &mut out,
                         &format!("{id}.path"),
-                        format!("/로 시작해야 한다: {}", op.path),
+                        format!("must start with /: {}", op.path),
                         "",
                     );
+                }
+                if op.path.contains("{{step.") {
+                    add(
+                        &mut out,
+                        &format!("{id}.path"),
+                        "preflight step interpolation is forbidden in URL paths".into(),
+                        "Use {{step.*}} only in headers or body",
+                    );
+                }
+                for (qname, qparam) in &op.query {
+                    if qparam
+                        .default
+                        .as_ref()
+                        .is_some_and(|v| value_to_plain_string(v).contains("{{step."))
+                    {
+                        add(
+                            &mut out,
+                            &format!("{id}.query.{qname}"),
+                            "preflight step interpolation is forbidden in URL query parameters".into(),
+                            "Use {{step.*}} only in headers or body",
+                        );
+                    }
                 }
                 if !op.auth.is_empty() && !auths.contains(&op.auth) {
                     add(
                         &mut out,
                         &format!("{id}.auth"),
-                        format!("미정의 auth: {}", op.auth),
-                        "auth 블록에 정의",
+                        format!("undefined auth strategy: {}", op.auth),
+                        "Define in auth block",
                     );
                 }
                 if !op.model.is_empty() && !models.contains(&op.model) {
                     add(
                         &mut out,
                         &format!("{id}.model"),
-                        format!("미정의 model: {}", op.model),
-                        "models 블록에 정의",
+                        format!("undefined model: {}", op.model),
+                        "Define in models block",
                     );
                 }
                 for step in &op.preflight {
@@ -481,8 +503,8 @@ impl Spec {
                         add(
                             &mut out,
                             &format!("{id}.preflight"),
-                            format!("유효하지 않은 preflight step: {}", step.name),
-                            "정의된 operation 참조 또는 '/'로 시작하는 path 지정 필요",
+                            format!("invalid preflight step: {}", step.name),
+                            "Reference a defined operation or a path starting with '/'",
                         );
                     }
                 }
@@ -492,8 +514,8 @@ impl Spec {
                         add(
                             &mut out,
                             &format!("{id}.params"),
-                            format!("경로 변수 {{{n}}} 미선언"),
-                            "params에 선언",
+                            format!("undeclared path parameter {{{n}}}"),
+                            "Declare in params",
                         );
                     }
                 }
@@ -502,8 +524,8 @@ impl Spec {
                         add(
                             &mut out,
                             &format!("{id}.params.{n}"),
-                            "경로 템플릿에 없는 파라미터".into(),
-                            &format!("path에 {{{n}}} 사용 또는 query로 이동"),
+                            "parameter not present in path template".into(),
+                            &format!("Use {{{n}}} in path or move to query"),
                         );
                     }
                 }
@@ -532,8 +554,8 @@ impl Spec {
                         add(
                             &mut out,
                             id.as_str(),
-                            format!("인자 이름 충돌: {n}"),
-                            "params/query/body에서 고유하게",
+                            format!("input name conflict: {n}"),
+                            "Keep input names unique across params/query/body",
                         );
                     }
                 }
@@ -545,15 +567,15 @@ impl Spec {
                             "string" | "int" | "float" | "bool" | "json" => {}
                             other => out.push(Issue {
                                 field: format!("{where_}.{n}.type"),
-                                detail: format!("미지원 type: {other}"),
+                                detail: format!("unsupported type: {other}"),
                                 remedy: "string|int|float|bool|json".into(),
                             }),
                         }
                         if p.required && p.default.is_some() {
                             out.push(Issue {
                                 field: format!("{where_}.{n}"),
-                                detail: "required에 default 병기".into(),
-                                remedy: "하나만".into(),
+                                detail: "required parameter cannot also define a default".into(),
+                                remedy: "Use required or default, not both".into(),
                             });
                         }
                     }
@@ -580,13 +602,13 @@ impl Spec {
             .ok_or_else(|| {
                 let names: Vec<&str> = self.operations.iter().map(|o| o.name.as_str()).collect();
                 apperr::spec(
-                    format!("연산 없음: {name}"),
-                    format!("가능: {}", names.join(", ")),
+                    format!("Unknown operation: {name}"),
+                    format!("Available: {}", names.join(", ")),
                 )
             })
     }
 
-    /// 요청 URL·바디 구성. args는 플래그에서 모은 문자열 맵.
+    /// Build the request URL and body from operation definition and input arguments.
     pub fn build_request(
         &self,
         op: &Operation,
@@ -597,7 +619,7 @@ impl Spec {
             let p = op
                 .params
                 .get(&n)
-                .ok_or_else(|| apperr::spec(format!("경로 변수 {n} 미선언"), ""))?;
+                .ok_or_else(|| apperr::spec(format!("Undeclared path parameter: {n}"), ""))?;
             let v = coerce_str(p, &n, args, false)?;
             path = path.replace(&format!("{{{n}}}"), &urlencode_path(&v));
         }
@@ -652,8 +674,8 @@ impl Spec {
                     if !present && p.default.is_none() {
                         if p.required {
                             return Err(apperr::spec(
-                                format!("필수 인자 누락: --{name}"),
-                                format!("예: --{name} <{}>", p.kind),
+                                format!("Missing required argument: --{name}"),
+                                format!("Example: --{name} <{}>", p.kind),
                             ));
                         }
                         continue;
@@ -669,8 +691,8 @@ impl Spec {
                     if !present && p.default.is_none() {
                         if p.required {
                             return Err(apperr::spec(
-                                format!("필수 인자 누락: --{name}"),
-                                format!("예: --{name} <{}>", p.kind),
+                                format!("Missing required argument: --{name}"),
+                                format!("Example: --{name} <{}>", p.kind),
                             ));
                         }
                         continue;
@@ -683,14 +705,14 @@ impl Spec {
         Ok((url_s, body))
     }
 
-    /// 점경로 추출+타입 강제로 원시 JSON을 모델 모양으로.
+    /// Project a raw JSON response into a declared model shape with type coercion.
     pub fn apply_model(&self, name: &str, raw: &[u8]) -> AppResult<Value> {
         let model = match self.models.get(name) {
             Some(m) => m,
             None => return Ok(serde_json::from_slice(raw).unwrap_or(Value::Null)),
         };
         let doc: Value = serde_json::from_slice(raw)
-            .map_err(|e| apperr::spec(format!("모델 적용 중 JSON 파싱 실패 ({e})"), ""))?;
+            .map_err(|e| apperr::spec(format!("Failed to parse JSON while applying model ({e})"), ""))?;
         let mut out = Map::new();
         for (field, f) in model {
             let path = if f.path.is_empty() {
@@ -767,8 +789,8 @@ fn coerce_str(
             }
             if p.required {
                 return Err(apperr::spec(
-                    format!("필수 인자 누락: --{name}"),
-                    format!("예: --{name} <{}>", p.kind),
+                    format!("Missing required argument: --{name}"),
+                    format!("Example: --{name} <{}>", p.kind),
                 ));
             }
             Ok(String::new())
@@ -788,15 +810,15 @@ fn coerce_value(
                 "int" => v
                     .parse::<i64>()
                     .map(Value::from)
-                    .map_err(|e| apperr::spec(format!("--{name} 파싱 실패: {e}"), ""))?,
+                    .map_err(|e| apperr::spec(format!("Failed to parse --{name}: {e}"), ""))?,
                 "float" => v
                     .parse::<f64>()
                     .map(Value::from)
-                    .map_err(|e| apperr::spec(format!("--{name} 파싱 실패: {e}"), ""))?,
+                    .map_err(|e| apperr::spec(format!("Failed to parse --{name}: {e}"), ""))?,
                 "bool" => v
                     .parse::<bool>()
                     .map(Value::from)
-                    .map_err(|e| apperr::spec(format!("--{name} 파싱 실패: {e}"), ""))?,
+                    .map_err(|e| apperr::spec(format!("Failed to parse --{name}: {e}"), ""))?,
                 "json" => serde_json::from_str(v).map_err(|_| {
                     apperr::usage(
                         format!("Invalid structured input: {name}"),
@@ -809,7 +831,7 @@ fn coerce_value(
         None => p
             .default
             .clone()
-            .ok_or_else(|| apperr::spec(format!("필수 인자 누락: --{name}"), "")),
+            .ok_or_else(|| apperr::spec(format!("Missing required argument: --{name}"), "")),
     }
 }
 
@@ -825,7 +847,7 @@ fn check_type(p: &Param, name: &str, v: &str) -> AppResult<()> {
         Ok(())
     } else {
         Err(apperr::spec(
-            format!("--{name}은(는) {}여야 한다: {v}", p.kind),
+            format!("--{name} must be {}: {v}", p.kind),
             "",
         ))
     }
@@ -851,7 +873,7 @@ fn urlencode_path(s: &str) -> String {
     out
 }
 
-/// url 크레이트 의존 없는 최소 form encode.
+/// Minimal form encoder without external crate dependencies.
 #[derive(Default)]
 pub struct FormEncoder(String);
 

@@ -500,5 +500,12 @@
   "sites.changesOff": "değişiklikler kapalı",
   "errors.writes_disabled": "Bu web sitesi için değişiklikler kapalı. Bu işlemi kullanmak için ayrıntılarda Değişikliklere izin ver seçeneğini açın.",
   "errors.launch_required": "Bu pencereyi kullanmak için Hycli'yi hycli dashboard komutuyla açın.",
-  "activity.note.coverage_incomplete": "Belgelenmiş {count} işlemin henüz eylemi yok. Ekleniyor."
+  "activity.note.coverage_incomplete": "Belgelenmiş {count} işlemin henüz eylemi yok. Ekleniyor.",
+  "settings.quit": "Hycli’den çık",
+  "settings.quitHint": "Tarayıcı kapatıldığında Hycli çalışmaya devam eder. Durdurmak için buradan çıkın.",
+  "settings.quitConfirm": "Hycli’den çıkılsın mı? Önce devam eden işleri tamamlayın veya iptal edin. Kayıtlı siteleriniz ve hesaplarınız bu cihazda kalır.",
+  "settings.stopped": "Hycli kapatıldı",
+  "settings.stoppedHint": "Bu sekmeyi kapatabilirsiniz. Geri dönmek için uygulama menüsünden Hycli’yi açın.",
+  "errors.work_in_progress": "Etkinlik bölümünde devam eden işleri tamamlayın veya iptal edin, ardından yeniden çıkın.",
+  "errors.shutting_down": "Hycli kapatılıyor."
 }

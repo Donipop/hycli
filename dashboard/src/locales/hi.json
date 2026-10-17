@@ -500,5 +500,12 @@
   "sites.changesOff": "बदलाव बंद हैं",
   "errors.writes_disabled": "इस वेबसाइट के लिए बदलाव बंद हैं। यह कार्रवाई इस्तेमाल करने के लिए विवरण में बदलावों की अनुमति दें चालू करें।",
   "errors.launch_required": "इस विंडो का उपयोग करने के लिए hycli dashboard कमांड से Hycli खोलें।",
-  "activity.note.coverage_incomplete": "{count} दस्तावेज़ित ऑपरेशन के लिए अभी कोई ऐक्शन नहीं है। जोड़ रहे हैं।"
+  "activity.note.coverage_incomplete": "{count} दस्तावेज़ित ऑपरेशन के लिए अभी कोई ऐक्शन नहीं है। जोड़ रहे हैं।",
+  "settings.quit": "Hycli बंद करें",
+  "settings.quitHint": "ब्राउज़र बंद करने पर भी Hycli चलता रहता है। इसे रोकने के लिए यहाँ से बंद करें।",
+  "settings.quitConfirm": "Hycli बंद करें? पहले चल रहे काम पूरे करें या रद्द करें। आपकी सहेजी गई वेबसाइटें और खाते इस डिवाइस पर बने रहेंगे।",
+  "settings.stopped": "Hycli बंद हो गया है",
+  "settings.stoppedHint": "आप यह टैब बंद कर सकते हैं। वापस आने के लिए ऐप मेनू से Hycli खोलें।",
+  "errors.work_in_progress": "गतिविधि में चल रहे काम पूरे करें या रद्द करें, फिर दोबारा बंद करें।",
+  "errors.shutting_down": "Hycli बंद हो रहा है।"
 }

@@ -633,6 +633,11 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             || !names.insert(op.name.clone())
             || op.path.starts_with("//")
             || op.path.contains(['\\', '\r', '\n', '#', '?'])
+            || op.path.contains("{{step.")
+            || op
+                .query
+                .values()
+                .any(|p| p.default.as_ref().is_some_and(|v| util::plain(v).contains("{{step.")))
             || !["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
                 .contains(&op.method.as_str())
         {

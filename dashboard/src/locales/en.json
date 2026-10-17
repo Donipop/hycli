@@ -500,5 +500,12 @@
   "sites.changesOff": "changes are off",
   "errors.writes_disabled": "Changes are off for this website. Turn on Allow changes in its details to use this action.",
   "errors.launch_required": "Open Hycli with the hycli dashboard command to use this window.",
-  "activity.note.coverage_incomplete": "{count} documented operations have no action yet. Adding them."
+  "activity.note.coverage_incomplete": "{count} documented operations have no action yet. Adding them.",
+  "settings.quit": "Quit Hycli",
+  "settings.quitHint": "Closing the browser keeps Hycli running. Quit here to stop it.",
+  "settings.quitConfirm": "Quit Hycli? Finish or cancel active work first. Your saved websites and accounts will stay on this device.",
+  "settings.stopped": "Hycli has closed",
+  "settings.stoppedHint": "You can close this tab. Open Hycli from your application menu to return.",
+  "errors.work_in_progress": "Finish or cancel active work in Activity, then quit again.",
+  "errors.shutting_down": "Hycli is shutting down."
 }

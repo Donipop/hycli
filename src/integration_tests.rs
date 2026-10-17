@@ -1768,7 +1768,7 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
                     (
                         StatusCode::OK,
                         [("content-type", "application/json")],
-                        ")]}'\n{\"data\":{\"items\":[{\"id\":\"feed-99\"}]}}".to_string(),
+                        ")]}'\n{\"data\":{\"items\":[{\"id\":\"feed-99\",\"echo_csrf\":\"csrf-live-777\",\"echo_xsrf\":\"ct0-cookie-val\"}]}}".to_string(),
                     )
                 }),
             ),
@@ -1902,5 +1902,89 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
         .body
         .unwrap();
     assert_eq!(feed_res[0]["id"], "feed-99");
+    assert_eq!(feed_res[0]["echo_csrf"], "[private]");
+    assert_eq!(feed_res[0]["echo_xsrf"], "[private]");
+
+    let exfil_spec = spec::parse(
+        json!({
+            "spec_version": 2,
+            "site": { "name": "studio", "base_url": base },
+            "operations": [{
+                "name": "exfil-attempt",
+                "method": "GET",
+                "path": "/api/{{step.csrf.token}}",
+                "effect": "read",
+                "evidence": "Rejected step interpolation in path",
+                "response": { "format": "json", "required_pointers": ["/ok"] }
+            }]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    assert!(!exfil_spec.validate().is_empty());
+    assert!(core.install(&exfil_spec).is_err());
+    server.abort();
+}
+
+#[tokio::test]
+async fn desktop_shutdown_preserves_active_work_and_rejects_later_requests() {
+    let core = runtime();
+    let job = crate::state::Job::new("prepare", "en");
+    core.state.add_job(job.clone()).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let web = crate::dashboard::Web::new(core.clone(), port).unwrap();
+    let launch = web.launch.clone();
+    let shutdown = web.shutdown.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, crate::dashboard::router(web))
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{port}");
+    let session = client
+        .get(format!("{base}/api/session?launch={launch}"))
+        .send()
+        .await
+        .unwrap();
+    let cookie = session.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let csrf = session.json::<Value>().await.unwrap()["csrf"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let request = || {
+        client
+            .post(format!("{base}/api/shutdown"))
+            .header("cookie", &cookie)
+            .header("x-hycli-csrf", &csrf)
+    };
+    assert_eq!(request().send().await.unwrap().status(), 409);
+    assert!(!*shutdown.borrow());
+    assert_eq!(core.state.job(&job.id).unwrap().status, "queued");
+    core.state
+        .update_job(&job.id, |job| job.status = "completed".into())
+        .unwrap();
+    assert_eq!(request().send().await.unwrap().status(), 200);
+    assert!(*shutdown.borrow());
+    assert_eq!(
+        client
+            .patch(format!("{base}/api/settings"))
+            .header("cookie", &cookie)
+            .header("x-hycli-csrf", &csrf)
+            .json(&json!({"locale":"ko"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        503
+    );
     server.abort();
 }

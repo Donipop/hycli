@@ -500,5 +500,12 @@
   "sites.changesOff": "Änderungen aus",
   "errors.writes_disabled": "Änderungen sind für diese Website ausgeschaltet. Schalten Sie in den Details Änderungen erlauben ein, um diese Aktion zu nutzen.",
   "errors.launch_required": "Öffnen Sie Hycli mit dem Befehl hycli dashboard, um dieses Fenster zu verwenden.",
-  "activity.note.coverage_incomplete": "{count} dokumentierte Vorgänge haben noch keine Aktion. Sie werden hinzugefügt."
+  "activity.note.coverage_incomplete": "{count} dokumentierte Vorgänge haben noch keine Aktion. Sie werden hinzugefügt.",
+  "settings.quit": "Hycli beenden",
+  "settings.quitHint": "Hycli läuft weiter, wenn Sie den Browser schließen. Beenden Sie es hier.",
+  "settings.quitConfirm": "Hycli beenden? Schließen Sie laufende Aufgaben zuerst ab oder brechen Sie sie ab. Gespeicherte Websites und Konten bleiben auf diesem Gerät.",
+  "settings.stopped": "Hycli wurde beendet",
+  "settings.stoppedHint": "Sie können diesen Tab schließen. Öffnen Sie Hycli im Anwendungsmenü, um fortzufahren.",
+  "errors.work_in_progress": "Schließen Sie laufende Aufgaben unter Aktivitäten ab oder brechen Sie sie ab. Beenden Sie Hycli dann erneut.",
+  "errors.shutting_down": "Hycli wird beendet."
 }

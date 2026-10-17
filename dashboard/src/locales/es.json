@@ -500,5 +500,12 @@
   "sites.changesOff": "cambios desactivados",
   "errors.writes_disabled": "Los cambios están desactivados para este sitio. Activa Permitir cambios en sus detalles para usar esta acción.",
   "errors.launch_required": "Abre Hycli con el comando hycli dashboard para usar esta ventana.",
-  "activity.note.coverage_incomplete": "{count} operaciones documentadas aún no tienen acción. Añadiéndolas."
+  "activity.note.coverage_incomplete": "{count} operaciones documentadas aún no tienen acción. Añadiéndolas.",
+  "settings.quit": "Salir de Hycli",
+  "settings.quitHint": "Hycli sigue funcionando al cerrar el navegador. Sal aquí para detenerlo.",
+  "settings.quitConfirm": "¿Salir de Hycli? Primero termina o cancela las tareas en curso. Los sitios y las cuentas guardados permanecerán en este dispositivo.",
+  "settings.stopped": "Hycli se ha cerrado",
+  "settings.stoppedHint": "Puedes cerrar esta pestaña. Abre Hycli desde el menú de aplicaciones para volver.",
+  "errors.work_in_progress": "Termina o cancela las tareas en curso en Actividad y vuelve a salir.",
+  "errors.shutting_down": "Hycli se está cerrando."
 }

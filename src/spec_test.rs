@@ -38,7 +38,7 @@ fn parse(s: &str) -> spec::Spec {
 #[test]
 fn parse_validate_good() {
     let sp = parse(GOOD);
-    assert!(sp.validate().is_empty(), "이슈: {:?}", sp.validate());
+    assert!(sp.validate().is_empty(), "issues: {:?}", sp.validate());
 }
 
 #[test]
@@ -67,9 +67,9 @@ operations:
         .iter()
         .map(|i| format!("{} {}", i.field, i.detail))
         .collect::<String>();
-    assert!(joined.contains("params"), "params 이슈 누락: {joined}");
-    assert!(joined.contains("ghost"), "auth 이슈 누락: {joined}");
-    assert!(joined.contains("충돌"), "충돌 이슈 누락: {joined}");
+    assert!(joined.contains("params"), "missing params issue: {joined}");
+    assert!(joined.contains("ghost"), "missing auth issue: {joined}");
+    assert!(joined.contains("conflict"), "missing conflict issue: {joined}");
 }
 
 #[test]
@@ -83,15 +83,15 @@ fn build_request() {
     assert!(body.is_none());
 
     let err = sp.build_request(op, &Default::default()).unwrap_err();
-    assert!(err.msg.contains("id"), "필수 누락 메시지: {err}");
+    assert!(err.msg.contains("id"), "missing required message: {err}");
 
     let op2 = sp.op("create").unwrap();
     let mut args = BTreeMap::new();
-    args.insert("name".to_string(), "로고".to_string());
+    args.insert("name".to_string(), "logo".to_string());
     args.insert("count".to_string(), "3".to_string());
     let (_, body2) = sp.build_request(op2, &args).unwrap();
     let m: serde_json::Value = serde_json::from_slice(&body2.unwrap()).unwrap();
-    assert_eq!(m["name"], "로고");
+    assert_eq!(m["name"], "logo");
     assert!(m["count"].is_number());
 }
 
@@ -102,7 +102,7 @@ fn apply_model() {
     let out = sp.apply_model("item_view", raw).unwrap();
     assert_eq!(out["id"], 7);
     assert_eq!(out["name"], "abc");
-    assert!(out.get("extra").is_none(), "모델에 없는 필드가 샜다");
+    assert!(out.get("extra").is_none(), "unexpected extra field in model output");
 }
 
 #[test]

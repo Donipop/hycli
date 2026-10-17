@@ -500,5 +500,12 @@
   "sites.changesOff": "変更はオフ",
   "errors.writes_disabled": "このウェブサイトでは変更がオフです。この操作を使うには詳細で「変更を許可」をオンにしてください。",
   "errors.launch_required": "このウィンドウを使うには hycli dashboard コマンドで Hycli を開いてください。",
-  "activity.note.coverage_incomplete": "ドキュメント化された操作のうち {count} 件にまだアクションがありません。追加しています。"
+  "activity.note.coverage_incomplete": "ドキュメント化された操作のうち {count} 件にまだアクションがありません。追加しています。",
+  "settings.quit": "Hycliを終了",
+  "settings.quitHint": "ブラウザーを閉じてもHycliは動作し続けます。終了するにはこちらを押してください。",
+  "settings.quitConfirm": "Hycliを終了しますか？実行中の作業を完了するか、先にキャンセルしてください。保存したサイトとアカウントはこの端末に残ります。",
+  "settings.stopped": "Hycliを終了しました",
+  "settings.stoppedHint": "このタブを閉じてかまいません。再開するにはアプリメニューからHycliを開いてください。",
+  "errors.work_in_progress": "アクティビティで実行中の作業を完了またはキャンセルしてから、もう一度終了してください。",
+  "errors.shutting_down": "Hycliを終了しています。"
 }

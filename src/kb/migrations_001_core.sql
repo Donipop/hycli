@@ -1,5 +1,5 @@
--- 001_core: hycli 지식베이스 v1 원장
--- 철학: 실행이 곧 기록, 기록이 곧 그래프, 그래프가 곧 판단.
+-- 001_core: Hycli knowledge base v1 schema
+-- Principle: execution is recorded as graph evidence.
 
 CREATE TABLE IF NOT EXISTS node (
   id         INTEGER PRIMARY KEY,

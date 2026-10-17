@@ -500,5 +500,12 @@
   "sites.changesOff": "變更已關閉",
   "errors.writes_disabled": "此網站的變更已關閉。若要使用此動作，請在詳細資料中開啟「允許變更」。",
   "errors.launch_required": "請使用 hycli dashboard 指令開啟 Hycli 以使用此視窗。",
-  "activity.note.coverage_incomplete": "仍有 {count} 個已記錄的操作沒有對應動作，正在新增。"
+  "activity.note.coverage_incomplete": "仍有 {count} 個已記錄的操作沒有對應動作，正在新增。",
+  "settings.quit": "結束 Hycli",
+  "settings.quitHint": "關閉瀏覽器後 Hycli 仍會繼續執行。請在此結束。",
+  "settings.quitConfirm": "要結束 Hycli 嗎？請先完成或取消進行中的工作。已儲存的網站和帳戶會保留在此裝置上。",
+  "settings.stopped": "Hycli 已結束",
+  "settings.stoppedHint": "可以關閉此分頁了。要繼續使用，請從應用程式選單開啟 Hycli。",
+  "errors.work_in_progress": "請在活動中完成或取消進行中的工作，然後再次結束。",
+  "errors.shutting_down": "Hycli 正在結束。"
 }

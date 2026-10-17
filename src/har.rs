@@ -1,4 +1,4 @@
-//! HAR 최소 파서 — capture의 관찰 원료.
+//! Minimal HAR 1.2 parser for capture inputs.
 use serde::Deserialize;
 
 use crate::apperr::{self, AppResult};
@@ -46,5 +46,5 @@ pub struct Content {
 
 pub fn parse(data: &[u8]) -> AppResult<File> {
     serde_json::from_slice(data)
-        .map_err(|e| apperr::spec(format!("HAR 파싱 실패 ({e})"), "HAR 1.2 형식 확인"))
+        .map_err(|e| apperr::spec(format!("Failed to parse HAR ({e})"), "Verify HAR 1.2 JSON format."))
 }

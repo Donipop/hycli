@@ -30,6 +30,7 @@ pub mod util;
 
 pub mod companion;
 pub mod dashboard;
+pub mod desktop;
 
 pub mod guarded_mcp;
 pub mod html;

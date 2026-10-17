@@ -1,4 +1,4 @@
-//! 관찰 원료를 엔드포인트 클러스터로. "캡처된 것은 반드시 분류되고, 미검증 표면은 갭이 된다".
+//! Cluster observed HAR traffic into endpoint templates and draft SiteSpecs.
 use serde::Serialize;
 
 use crate::apperr;
@@ -106,7 +106,7 @@ pub fn slugify(c: &Cluster) -> String {
     format!("{}-{}", c.method.to_lowercase(), p)
 }
 
-/// 클러스터 → 검증 통과하는 초안 SiteSpec. 저자(AI)가 할 일: 네이밍·auth·모델.
+/// Build a validated starter SiteSpec from clustered HAR endpoints.
 pub fn draft_spec(
     site_name: &str,
     title: &str,
@@ -149,7 +149,7 @@ pub fn draft_spec(
         let mut op = spec::Operation {
             transport: String::new(),
             name,
-            desc: format!("capture draft ({}회 관찰, 마지막 {})", c.count, c.last),
+            desc: format!("capture draft ({} observations, last status {})", c.count, c.last),
             method: c.method.clone(),
             path: c.template.clone(),
             base_url: String::new(),
@@ -183,8 +183,8 @@ pub fn draft_spec(
     let issues = sp.validate();
     if !issues.is_empty() {
         return Err(apperr::spec(
-            format!("draft 검증 실패: {issues:?}"),
-            "draft.yaml을 수동 편집",
+            format!("Draft validation failed: {issues:?}"),
+            "Edit draft.yaml manually.",
         ));
     }
     Ok(sp)
