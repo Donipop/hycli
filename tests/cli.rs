@@ -79,6 +79,17 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
         .route(
             "/unexpected",
             get(|| async { axum::response::Html("<html><form>Sign in</form></html>") }),
+        )
+        .route(
+            "/spa",
+            get(|| async {
+                axum::response::Html(
+                    r#"<html><head><title>SPA CLI</title></head><body>
+                    <script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"ok":true}}}</script>
+                    <script>fetch('/items');</script>
+                    </body></html>"#,
+                )
+            }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -266,6 +277,35 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
                 .success()
         );
     }
+    let draft_path = root.join("spa-draft.yaml");
+    let recon_out = ok(cli(
+        &root,
+        &[
+            "--allow-local",
+            "--site",
+            "spa",
+            "recon",
+            &format!("{url}/spa"),
+            "--draft",
+            draft_path.to_str().unwrap(),
+        ],
+    )
+    .await);
+    assert_eq!(recon_out["site_id"], "spa");
+    assert_eq!(recon_out["title"], "SPA CLI");
+    assert!(
+        recon_out["bundle_routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r == "GET /items")
+    );
+    let validated = ok(cli(
+        &root,
+        &["--allow-local", "spec", "validate", draft_path.to_str().unwrap()],
+    )
+    .await);
+    assert_eq!(validated["status"], "ok");
     std::fs::write(root.join("specs/broken.yaml"), "site: [broken").unwrap();
     let listed = cli(&root, &["spec", "ls"]).await;
     assert!(String::from_utf8_lossy(&listed.stderr).contains("cannot load broken"));

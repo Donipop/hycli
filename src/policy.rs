@@ -40,12 +40,9 @@ pub fn dangerous_intent(value: &str) -> bool {
     let words: Vec<_> = lower.split(|c: char| !c.is_ascii_alphanumeric()).collect();
     const CHANGES: &[&str] = &[
         "add",
-        "new",
         "edit",
         "change",
         "toggle",
-        "clear",
-        "empty",
         "commit",
         "upsert",
         "redeem",
@@ -96,10 +93,8 @@ pub fn dangerous_intent(value: &str) -> bool {
         "invite",
         "cancel",
         "terminate",
-        "start",
         "stop",
         "restart",
-        "set",
         "save",
         "markread",
         "markseen",
@@ -215,7 +210,8 @@ pub fn operation_effect(op: &Operation, args: &BTreeMap<String, String>) -> Effe
         // Explicitly documented search/query/lookup operations may use POST.
         let lower = format!("{} {}", op.name, op.path).to_ascii_lowercase();
         if [
-            "search", "query", "lookup", "list", "find", "count", "preview", "resolve",
+            "search", "query", "lookup", "list", "find", "count", "preview", "resolve", "get",
+            "fetch", "read", "filter", "check", "inspect",
         ]
         .iter()
         .any(|word| {
@@ -563,15 +559,25 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
                 if destination.origin() != scope.origin() {
                     return Err(AppError::api("unsafe_target", 400));
                 }
-            } else if auth.kind == "browser"
-                && destination.origin() != crate::net::validate_url(sp.site.source_url())?.origin()
-            {
-                return Err(AppError::api("unsafe_target", 400));
+            } else if matches!(auth.kind.as_str(), "browser" | "derived") {
+                let scope = crate::net::validate_url(if auth.origin.is_empty() {
+                    sp.site.source_url()
+                } else {
+                    &auth.origin
+                })?;
+                if !crate::net::same_site_origin(&destination, &scope) {
+                    return Err(AppError::api("unsafe_target", 400));
+                }
             }
         }
         if let Some(response) = &op.response {
             if !["json", "html", "text", "xml", "empty"].contains(&response.format.as_str())
                 || response.required_pointers.len() > 30
+                || response.strip_prefix.len() > 128
+                || response.ssr_json.len() > 128
+                || (!response.extract_pointer.is_empty()
+                    && (!response.extract_pointer.starts_with('/')
+                        || response.extract_pointer.len() > 512))
                 || response
                     .html
                     .as_ref()
@@ -588,6 +594,24 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
                     .any(|p| !p.is_empty() && (!p.starts_with('/') || p.len() > 512))
             {
                 return Err(AppError::api("data_invalid", 400));
+            }
+        }
+        if op.preflight.len() > 4 {
+            return Err(AppError::api("data_invalid", 400));
+        }
+        for step in &op.preflight {
+            if !util::valid_id(&step.name)
+                || !["", "GET", "HEAD"].contains(&step.method.as_str())
+                || step.path.starts_with("//")
+                || step.path.contains(['\\', '\r', '\n', '#'])
+            {
+                return Err(AppError::api("data_invalid", 400));
+            }
+            if !step.base_url.is_empty() {
+                let step_dest = crate::net::validate_url(&step.base_url)?;
+                if step_dest.query().is_some() || step_dest.fragment().is_some() {
+                    return Err(AppError::api("bad_url", 400));
+                }
             }
         }
         for (name, param) in op
@@ -615,7 +639,9 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             return Err(AppError::api("data_invalid", 400));
         }
         for (key, value) in sp.defaults.headers.iter().chain(op.headers.iter()) {
-            if util::secret_field(key)
+            let is_step_template =
+                value.trim().starts_with("{{step.") && value.trim().ends_with("}}");
+            if (util::secret_field(key) && !is_step_template)
                 || [
                     "host",
                     "content-length",
@@ -671,6 +697,14 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             && !auth
                 .value_from
                 .starts_with(&format!("store:{}/", sp.site.name))
+        {
+            return Err(AppError::api("data_invalid", 400));
+        }
+        if auth.kind == "derived"
+            && (!crate::session_recipe::allowed_header(&auth.header)
+                || !(auth.value_from.starts_with("cookie:")
+                    || auth.value_from.starts_with("storage:")
+                    || auth.value_from.starts_with("header:")))
         {
             return Err(AppError::api("data_invalid", 400));
         }

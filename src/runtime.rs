@@ -313,8 +313,11 @@ impl Runtime {
                     let d = chosen.and_then(|s| s.actions.get(&op.name));
                     ActionView {
                         id: op.name.clone(),
-                        accepts_account: origin(sp.operation_base(op)).ok()
-                            == origin(sp.site.source_url()).ok()
+                        accepts_account: same_site_url(
+                            sp.operation_base(op),
+                            sp.site.source_url(),
+                        )
+                        .unwrap_or(false)
                             && !sp
                                 .find_auth(&op.auth)
                                 .is_some_and(|auth| auth.kind == "header"),
@@ -439,7 +442,7 @@ impl Runtime {
                 .accounts
                 .get(&account)
                 .ok_or_else(|| AppError::api("auth_required", 401))?;
-            if a.site_id != sp.site.name || origin(&a.site_url)? != origin(&url)? {
+            if a.site_id != sp.site.name || !same_site_url(&a.site_url, &url)? {
                 if explicit_account {
                     return Err(AppError::api("auth_required", 401));
                 }
@@ -580,11 +583,11 @@ impl Runtime {
             Some(&request.account_id),
         )?;
         let effect = policy::operation_effect(op, &request.inputs);
-        let (url, body) = sp.build_request(op, &request.inputs)?;
+        let (mut url, mut body) = sp.build_request(op, &request.inputs)?;
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
-        let (headers, secrets) = self.headers(&sp, op, &url, &request.account_id)?;
+        let (mut headers, mut secrets) = self.headers(&sp, op, &url, &request.account_id)?;
         checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
         if effect != Effect::Read {
             self.ensure_writes(&sp.site.name)?;
@@ -592,6 +595,33 @@ impl Runtime {
                 approval.ok_or_else(|| AppError::api("approval_required", 409))?,
                 &checked,
             )?;
+        }
+        if !op.preflight.is_empty() {
+            let mut effective_inputs = request.inputs.clone();
+            self.run_preflight_steps(
+                sp,
+                op,
+                &request.account_id,
+                &mut effective_inputs,
+                &mut secrets,
+            )
+            .await?;
+            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
+            if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
+                return Err(AppError::api("unsafe_target", 400));
+            }
+            url = rebuilt_url;
+            body = rebuilt_body;
+            let empty_resolved = BTreeMap::new();
+            for (_, v) in &mut headers {
+                if v.contains("{{") {
+                    *v = crate::spec::interpolate_template_str(
+                        v,
+                        &empty_resolved,
+                        &effective_inputs,
+                    );
+                }
+            }
         }
         let response = if op.transport == "browser" {
             let credential = if request.account_id.is_empty() {
@@ -638,8 +668,9 @@ impl Runtime {
                 });
             }
         };
+        let parsed_json = op.parse_json_response(&response);
         let response_shape = op.matches_response(&response);
-        let query_error = response.json().is_some_and(|body| {
+        let query_error = parsed_json.as_ref().is_some_and(|body| {
             body.get("errors")
                 .and_then(Value::as_array)
                 .is_some_and(|errors| !errors.is_empty())
@@ -664,15 +695,16 @@ impl Runtime {
             .and_then(|extraction| {
                 extraction.extract(&String::from_utf8_lossy(&response.bytes), &response.url)
             });
-        let raw = extracted.or_else(|| response.json()).unwrap_or_else(
+        let raw = extracted.or(parsed_json).unwrap_or_else(
             || json!({"text":visible_text(&String::from_utf8_lossy(&response.bytes))}),
         );
         let clean = sanitized(raw.clone(), &secrets);
         let mapped = if op.model.is_empty() {
             None
         } else {
+            let model_bytes = serde_json::to_vec(&raw).unwrap_or_else(|_| response.bytes.clone());
             Some(sanitized(
-                sp.apply_model(&op.model, &response.bytes)?,
+                sp.apply_model(&op.model, &model_bytes)?,
                 &secrets,
             ))
         };
@@ -728,6 +760,100 @@ impl Runtime {
             attempt,
         ))
     }
+
+    async fn run_preflight_steps(
+        &self,
+        sp: &Spec,
+        op: &Operation,
+        account_id: &str,
+        effective_inputs: &mut BTreeMap<String, String>,
+        secrets: &mut Vec<String>,
+    ) -> AppResult<()> {
+        for step in &op.preflight {
+            let step_url = if !step.op.is_empty() {
+                let pre_op = sp.op(&step.op)?;
+                let mut step_args = effective_inputs.clone();
+                step_args.extend(step.args.clone());
+                let (u, _) = sp.build_request(pre_op, &step_args)?;
+                u
+            } else {
+                let base = if step.base_url.is_empty() {
+                    sp.operation_base(op)
+                } else {
+                    step.base_url.as_str()
+                };
+                format!(
+                    "{}/{}",
+                    base.trim_end_matches('/'),
+                    step.path.trim_start_matches('/')
+                )
+            };
+            let parsed = crate::net::validate_url(&step_url)?;
+            if !crate::net::same_site_origin(
+                &parsed,
+                &crate::net::validate_url(sp.site.source_url())?,
+            ) {
+                return Err(AppError::api("unsafe_target", 400));
+            }
+            let r = self
+                .read_page_profile(&step_url, account_id, &sp.defaults.tls_profile)
+                .await?;
+            let text = String::from_utf8_lossy(&r.bytes);
+            let json_doc = r.json();
+            let ssr_map = crate::html::extract_ssr_map(&text);
+            for (var, expr) in &step.extract {
+                let extracted: Option<String> = if let Some(sel) = expr.strip_prefix("css:") {
+                    let (selector, attribute) = sel.split_once('@').unwrap_or((sel, ""));
+                    let field = crate::html::Field {
+                        selector: selector.to_string(),
+                        attribute: attribute.to_string(),
+                    };
+                    let doc = scraper::Html::parse_document(&text);
+                    field.extract(&doc)
+                } else if let Some(ssr_spec) = expr.strip_prefix("ssr:") {
+                    let (key, pointer) = ssr_spec.split_once('#').unwrap_or((ssr_spec, ""));
+                    ssr_map.get(key).and_then(|doc| {
+                        let target = if pointer.is_empty() {
+                            Some(doc)
+                        } else {
+                            doc.pointer(pointer)
+                        };
+                        target.and_then(|v| match v {
+                            Value::String(s) => Some(s.clone()),
+                            Value::Number(n) => Some(n.to_string()),
+                            _ => None,
+                        })
+                    })
+                } else if let Some(hdr) = expr.strip_prefix("header:") {
+                    let h = r.header(hdr);
+                    if h.is_empty() {
+                        None
+                    } else {
+                        Some(h.to_string())
+                    }
+                } else if expr.starts_with('/') {
+                    json_doc.as_ref().and_then(|doc| {
+                        doc.pointer(expr).and_then(|v| match v {
+                            Value::String(s) => Some(s.clone()),
+                            Value::Number(n) => Some(n.to_string()),
+                            _ => None,
+                        })
+                    })
+                } else {
+                    None
+                };
+                if let Some(val) = extracted.filter(|s| !s.is_empty()) {
+                    if util::secret_field(var) {
+                        secrets.push(val.clone());
+                    }
+                    effective_inputs.insert(format!("step.{}.{var}", step.name), val.clone());
+                    effective_inputs.entry(var.clone()).or_insert(val);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn headers(
         &self,
         sp: &Spec,
@@ -757,6 +883,16 @@ impl Runtime {
         {
             return Err(AppError::api("auth_required", 401));
         }
+        if strategy.is_some_and(|auth| auth.kind == "derived")
+            && !self
+                .state
+                .read()?
+                .accounts
+                .get(account)
+                .is_some_and(|view| view.status == "connected")
+        {
+            return Err(AppError::api("auth_required", 401));
+        }
         let mut vault = self
             .vault
             .lock()
@@ -770,6 +906,7 @@ impl Runtime {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let mut secrets = vault.values_for_redaction();
+        let mut loaded_credential: Option<Credential> = None;
         if !account.is_empty() {
             let credential: Credential = serde_json::from_str(
                 vault
@@ -777,11 +914,12 @@ impl Runtime {
                     .ok_or_else(|| AppError::api("auth_required", 401))?,
             )?;
             let session_headers = credential.request_headers(url)?;
-            if session_headers.is_empty() {
+            if session_headers.is_empty() && !strategy.is_some_and(|a| a.kind == "derived") {
                 return Err(AppError::api("auth_required", 401));
             }
             secrets.extend(credential.redaction_values());
             headers.extend(session_headers);
+            loaded_credential = Some(credential);
         }
         if let Some(auth) = strategy {
             if auth.kind == "header" {
@@ -798,6 +936,16 @@ impl Runtime {
                 } else {
                     return Err(AppError::api("auth_required", 401));
                 }
+            } else if auth.kind == "derived" {
+                let credential = loaded_credential
+                    .as_ref()
+                    .ok_or_else(|| AppError::api("auth_required", 401))?;
+                let derived = credential.resolve_derived_value(&auth.value_from, url)?;
+                let full_val = format!("{}{derived}", auth.prefix);
+                secrets.push(derived);
+                secrets.push(full_val.clone());
+                headers.retain(|key, _| !key.eq_ignore_ascii_case(&auth.header));
+                headers.insert(auth.header.clone(), full_val);
             }
         }
         if let Some(body) = &op.body {
@@ -1012,6 +1160,264 @@ impl Runtime {
         ))
     }
 
+    /// Deterministic fast recon for external agents (CLI / MCP) without waiting on an AI loop.
+    pub async fn recon(
+        &self,
+        site: &str,
+        url: &str,
+        max_bundles: usize,
+    ) -> AppResult<(Value, Spec)> {
+        let parsed = crate::net::validate_url(url)?;
+        let site_id = if site.is_empty() || site == "default" {
+            site_id_for(&parsed)
+        } else {
+            site.to_string()
+        };
+        let account_id = self
+            .state
+            .read()?
+            .accounts
+            .values()
+            .find(|a| {
+                a.status == "connected"
+                    && (a.site_id == site_id
+                        || crate::net::validate_url(&a.site_url)
+                            .is_ok_and(|u| crate::net::same_site_origin(&u, &parsed)))
+            })
+            .map(|a| a.id.clone())
+            .unwrap_or_default();
+        let r = self.read_page(url, &account_id).await?;
+        let _ = self.kb.record_attempt(&AttemptInput {
+            site: site_id.clone(),
+            stage: "recon".into(),
+            action: "recon_entry".into(),
+            target_kind: "url".into(),
+            target_key: r.url.clone(),
+            status: r.status as i64,
+            defense: r.defense.clone(),
+            duration_ms: r.duration_ms,
+            verdict: if r.successful() { "pass" } else { "fail" }.into(),
+            ..Default::default()
+        });
+        let r_url = crate::net::validate_url(&r.url)?;
+        let text = String::from_utf8_lossy(&r.bytes);
+        let vis = visible_text(&text);
+        let page_title = crate::html::Field {
+            selector: "title".into(),
+            attribute: String::new(),
+        }
+        .extract(&scraper::Html::parse_document(&text))
+        .unwrap_or_default();
+        let ssr_payloads = crate::html::ssr_payloads(&text);
+        let ssr_map = crate::html::extract_ssr_map(&text);
+        let doc_routes = crate::discovery::documented_routes(&vis);
+        let mut bundle_routes = crate::discovery::bundle_routes(&text);
+        let mut api_bases = crate::discovery::bundle_api_bases(&r_url, &text);
+        let script_urls = crate::discovery::bundle_urls(&r_url, &text);
+        let mut scanned_bundles = Vec::new();
+        for bundle_url in script_urls.into_iter().take(max_bundles) {
+            if let Ok(br) = self.read_page(&bundle_url, &account_id).await {
+                if br.successful() {
+                    let btext = String::from_utf8_lossy(&br.bytes);
+                    for route in crate::discovery::bundle_routes(&btext) {
+                        if bundle_routes.len() < 48 {
+                            bundle_routes.insert(route);
+                        }
+                    }
+                    if let Ok(br_url) = crate::net::validate_url(&br.url) {
+                        for base in crate::discovery::bundle_api_bases(&br_url, &btext) {
+                            if api_bases.len() < 8 {
+                                api_bases.insert(base);
+                            }
+                        }
+                    }
+                    scanned_bundles.push(bundle_url);
+                }
+            }
+        }
+        let origin_str = r_url.origin().ascii_serialization();
+        let primary_base = api_bases
+            .iter()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| origin_str.clone());
+        let mut operations = Vec::new();
+        let mut used_names = std::collections::BTreeSet::new();
+        for ssr_key in ["__NEXT_DATA__", "__INITIAL_STATE__", "__STATE__", "INIT_DATA"] {
+            if let Some(doc) = ssr_map.get(ssr_key) {
+                let op_name = format!(
+                    "read-{}",
+                    ssr_key
+                        .trim_matches('_')
+                        .to_ascii_lowercase()
+                        .replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+                );
+                if used_names.insert(op_name.clone()) {
+                    let required_pointers = if doc.get("props").is_some() {
+                        vec!["/props".to_string()]
+                    } else {
+                        vec![]
+                    };
+                    operations.push(spec::Operation {
+                        name: op_name,
+                        method: "GET".into(),
+                        path: parsed.path().to_string(),
+                        base_url: origin_str.clone(),
+                        desc: format!("Extract embedded {ssr_key} SSR state from entry page"),
+                        effect: Effect::Read,
+                        evidence: format!("Observed {ssr_key} payload in entry HTML"),
+                        response: Some(spec::ResponseExpectation {
+                            format: "json".into(),
+                            ssr_json: ssr_key.into(),
+                            required_pointers,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        for (method, path) in doc_routes.iter().chain(bundle_routes.iter()) {
+            let slug = path
+                .trim_matches('/')
+                .split('/')
+                .filter(|seg| !seg.is_empty() && !seg.starts_with('{'))
+                .collect::<Vec<_>>()
+                .join("-")
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+                .to_ascii_lowercase();
+            let op_name = format!(
+                "{}-{}",
+                method.to_ascii_lowercase(),
+                if slug.is_empty() { "root" } else { &slug }
+            )
+            .chars()
+            .take(48)
+            .collect::<String>()
+            .trim_end_matches('-')
+            .to_string();
+            if !util::valid_id(&op_name) || !used_names.insert(op_name.clone()) {
+                continue;
+            }
+            let route_key = format!("{method} {path}");
+            let _ = self.kb.ensure_node(
+                &site_id,
+                "endpoint",
+                &route_key,
+                &json!({"method": method, "path": path}),
+            );
+            let mut params = BTreeMap::new();
+            for seg in path.split('/') {
+                if let Some(var) = seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    if util::valid_id(var) {
+                        params.insert(
+                            var.to_string(),
+                            spec::Param {
+                                kind: "string".into(),
+                                required: true,
+                                default: None,
+                            },
+                        );
+                    }
+                }
+            }
+            let is_read = ["GET", "HEAD"].contains(&method.as_str())
+                && !policy::dangerous_intent(path);
+            operations.push(spec::Operation {
+                name: op_name,
+                method: method.to_string(),
+                path: path.to_string(),
+                base_url: if path.starts_with("/api/") && primary_base != origin_str {
+                    primary_base.clone()
+                } else {
+                    String::new()
+                },
+                params,
+                desc: route_key.clone(),
+                effect: if is_read { Effect::Read } else { Effect::Write },
+                evidence: format!("Discovered {route_key} during deterministic recon"),
+                response: Some(spec::ResponseExpectation {
+                    format: "json".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            if operations.len() >= 24 {
+                break;
+            }
+        }
+        if operations.is_empty() {
+            operations.push(spec::Operation {
+                name: "read-entry".into(),
+                method: "GET".into(),
+                path: parsed.path().to_string(),
+                desc: "Read entry page".into(),
+                effect: Effect::Read,
+                evidence: "Observed entry page during recon".into(),
+                response: Some(spec::ResponseExpectation {
+                    format: if r.header("content-type").contains("json") {
+                        "json"
+                    } else {
+                        "text"
+                    }
+                    .into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
+        let draft = Spec {
+            spec_version: 2,
+            site: spec::SiteInfo {
+                name: site_id.clone(),
+                title: if page_title.is_empty() {
+                    humanize(&site_id)
+                } else {
+                    page_title.clone()
+                },
+                base_url: origin_str.clone(),
+                source_url: r.url.clone(),
+            },
+            defaults: spec::Defaults {
+                tls_profile: "go".into(),
+                ..Default::default()
+            },
+            auth: vec![],
+            models: BTreeMap::new(),
+            operations,
+            health: None,
+        };
+        let doc_route_strs: Vec<String> = doc_routes
+            .iter()
+            .map(|(m, p)| format!("{m} {p}"))
+            .collect();
+        let bundle_route_strs: Vec<String> = bundle_routes
+            .iter()
+            .map(|(m, p)| format!("{m} {p}"))
+            .collect();
+        let report = json!({
+            "site_id": site_id,
+            "url": r.url,
+            "status": r.status,
+            "defense": r.defense,
+            "latency_ms": r.duration_ms,
+            "title": page_title,
+            "account_id": account_id,
+            "api_bases": api_bases,
+            "documented_routes": doc_route_strs,
+            "bundle_routes": bundle_route_strs,
+            "scanned_bundles": scanned_bundles,
+            "ssr_payloads": ssr_payloads,
+            "draft_operations": draft.operations.iter().map(|o| json!({
+                "name": o.name,
+                "method": o.method,
+                "path": o.path,
+                "base_url": draft.operation_base(o),
+            })).collect::<Vec<_>>(),
+        });
+        Ok((report, draft))
+    }
+
     pub fn connect_account(
         &self,
         site_id: &str,
@@ -1166,6 +1572,11 @@ pub fn origin(raw: &str) -> AppResult<String> {
     Ok(crate::net::validate_url(raw)?
         .origin()
         .ascii_serialization())
+}
+pub fn same_site_url(a: &str, b: &str) -> AppResult<bool> {
+    let ua = crate::net::validate_url(a)?;
+    let ub = crate::net::validate_url(b)?;
+    Ok(crate::net::same_site_origin(&ua, &ub))
 }
 pub fn site_id_for(url: &url::Url) -> String {
     let host = url

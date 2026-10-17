@@ -557,12 +557,13 @@ pub fn published_login(target: &url::Url, html: &str) -> Option<String> {
 impl Runtime {
     /// Reuse the user's selected account first. Never silently choose between different accounts.
     pub(crate) fn browser_account_for(&self, site_id: &str, url: &str) -> AppResult<String> {
-        let origin = crate::runtime::origin(url)?;
+        let target_url = crate::net::validate_url(url)?;
         let data = self.state.read()?;
         let usable = |id: &str| {
             data.accounts.get(id).is_some_and(|account| {
                 account.site_id == site_id
-                    && account.site_url == origin
+                    && crate::net::validate_url(&account.site_url)
+                        .is_ok_and(|site_url| crate::net::same_site_origin(&target_url, &site_url))
                     && account.status == "connected"
                     && account.verified_identity
             })

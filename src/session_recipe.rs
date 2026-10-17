@@ -73,7 +73,8 @@ fn scalar(value: &Value) -> Option<String> {
 impl ConnectionRecipe {
     pub fn resolve_headers(&self, credential: &Credential) -> AppResult<BTreeMap<String, String>> {
         let url = crate::net::validate_url(&self.identity_url)?;
-        if url.origin().ascii_serialization() != credential.origin
+        let origin = crate::net::validate_url(&credential.origin)?;
+        if !crate::net::same_site_origin(&url, &origin)
             || !crate::policy::safe_read_url(&url)
             || self.headers.len() > 8
         {

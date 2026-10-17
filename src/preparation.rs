@@ -507,14 +507,23 @@ impl Runtime {
                 api_bases.insert(base.origin().ascii_serialization());
                 routes.insert(("GET".into(), base.path().into()));
                 api_bases.extend(crate::discovery::api_bases(&base, &text));
+                api_bases.extend(crate::discovery::bundle_api_bases(&base, &text));
                 links.extend(crate::discovery::header_links(
                     &base,
                     &response.header("link"),
                 ));
                 links.extend(crate::discovery::published_links(&base, &text));
-                let documented = crate::discovery::documented_routes(&runtime::visible_text(&text));
+                let script_links = crate::discovery::bundle_urls(&base, &text);
+                links.extend(script_links.iter().cloned());
+                let documented =
+                    crate::discovery::documented_routes(&runtime::visible_text(&text));
                 api_routes.extend(documented.iter().cloned());
                 routes.extend(documented);
+                let js_routes = crate::discovery::bundle_routes(&text);
+                for (_, path) in &js_routes {
+                    evidence.insert(path.clone());
+                }
+                routes.extend(js_routes.iter().cloned());
                 api_prefixes.extend(crate::discovery::api_prefixes(&initial, &text));
                 let mut cached = json!(runtime::visible_text(&text));
                 let secrets = if account_id.is_empty() {
@@ -573,14 +582,16 @@ impl Runtime {
                     let (found, paths) = observed_links(&base, &text);
                     if round == 0 && raw == job.url {
                         icon_candidates = crate::site_images::candidates(&base, &text);
-                        // Fetch only a few links the page actually publishes, before asking
-                        // three specialists to work on the same grounded material.
+                        // Fetch only a few links the page actually publishes, plus up to 2 JS bundles.
                         let published = crate::discovery::ranked(links.iter().chain(found.iter()));
                         reads.extend(published.into_iter().take(3));
+                        reads.extend(script_links.into_iter().take(2));
                     }
                     links.extend(found);
                     evidence.extend(paths.iter().cloned());
-                    let mut content = json!({"text":runtime::visible_text(&text).chars().take(32_000).collect::<String>(),"documented_routes":crate::discovery::documented_routes(&runtime::visible_text(&text)),"html_structure":crate::html::structure(&text),"observed_paths":paths.into_iter().take(120).collect::<Vec<_>>()});
+                    let mut doc_routes = crate::discovery::documented_routes(&runtime::visible_text(&text));
+                    doc_routes.extend(js_routes);
+                    let mut content = json!({"text":runtime::visible_text(&text).chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"ssr_payloads":crate::html::ssr_payloads(&text),"html_structure":crate::html::structure(&text),"observed_paths":paths.into_iter().take(120).collect::<Vec<_>>()});
                     let secrets = if account_id.is_empty() {
                         vec![]
                     } else {
@@ -1019,10 +1030,12 @@ impl Runtime {
                             if let Ok(base) = url::Url::parse(&url) {
                                 routes.insert(("GET".into(), base.path().into()));
                                 api_bases.extend(crate::discovery::api_bases(&base, &text));
+                                api_bases.extend(crate::discovery::bundle_api_bases(&base, &text));
                             }
                             let documented = crate::discovery::documented_routes(&text);
                             api_routes.extend(documented.iter().cloned());
                             routes.extend(documented);
+                            routes.extend(crate::discovery::bundle_routes(&text));
                             api_prefixes.extend(crate::discovery::api_prefixes(&initial, &text));
                             documents.insert(url, text);
                         }

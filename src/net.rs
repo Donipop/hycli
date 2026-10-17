@@ -87,7 +87,7 @@ impl Network {
         };
         let started = Instant::now();
         let capture = crate::browser_session::capture(credential, entry, self.allow_local).await?;
-        if validate_url(&capture.final_url)?.origin() != initial.origin()
+        if !same_site_origin(&validate_url(&capture.final_url)?, &initial)
             || capture.html.len() > 8 * 1024 * 1024
         {
             return Err(AppError::api("response_mismatch", 502));
@@ -156,16 +156,45 @@ impl Network {
                 token: &token,
                 released: false,
             };
+            const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+            let ua = if input.tls_profile == "hycli" {
+                concat!("Hycli/", env!("CARGO_PKG_VERSION"))
+            } else {
+                CHROME_UA
+            };
             let client = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .retry(reqwest::retry::never())
                 .timeout(input.timeout.min(Duration::from_secs(90)))
                 .connect_timeout(Duration::from_secs(10))
-                .user_agent(concat!("Hycli/", env!("CARGO_PKG_VERSION")))
+                .user_agent(ua)
                 .resolve_to_addrs(target.host_str().expect("validated host"), &addresses)
                 .build()
                 .map_err(|_| AppError::api("internal", 500))?;
             let mut headers = HeaderMap::new();
+            if matches!(
+                input.tls_profile.as_str(),
+                "chrome" | "browser" | "stealth" | "default" | "standard" | ""
+            ) {
+                headers.insert(
+                    HeaderName::from_static("accept-language"),
+                    HeaderValue::from_static("en-US,en;q=0.9,ko;q=0.8"),
+                );
+                headers.insert(
+                    HeaderName::from_static("sec-ch-ua"),
+                    HeaderValue::from_static(
+                        "\"Chromium\";v=\"134\", \"Not:A-Brand\";v=\"24\", \"Google Chrome\";v=\"134\"",
+                    ),
+                );
+                headers.insert(
+                    HeaderName::from_static("sec-ch-ua-mobile"),
+                    HeaderValue::from_static("?0"),
+                );
+                headers.insert(
+                    HeaderName::from_static("sec-ch-ua-platform"),
+                    HeaderValue::from_static("\"Linux\""),
+                );
+            }
             for (key, value) in &input.headers {
                 let name = HeaderName::from_bytes(key.as_bytes())
                     .map_err(|_| AppError::api("data_invalid", 400))?;
@@ -369,6 +398,55 @@ pub fn validate_url(raw: &str) -> AppResult<url::Url> {
     }
     url.set_fragment(None);
     Ok(url)
+}
+
+pub fn registrable_domain(host: &str) -> Option<String> {
+    let host = host.trim_matches('.').to_ascii_lowercase();
+    if host.is_empty()
+        || host == "localhost"
+        || host.parse::<IpAddr>().is_ok()
+        || host.starts_with('[')
+    {
+        return None;
+    }
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let tail2 = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+    let multipart_tlds = [
+        "co.kr", "or.kr", "ne.kr", "go.kr", "ac.kr", "co.jp", "ne.jp", "or.jp", "ac.jp", "go.jp",
+        "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "com.br", "com.cn",
+        "com.tw", "com.hk", "com.sg",
+    ];
+    if parts.len() >= 3 && multipart_tlds.contains(&tail2.as_str()) {
+        Some(format!(
+            "{}.{}.{}",
+            parts[parts.len() - 3],
+            parts[parts.len() - 2],
+            parts[parts.len() - 1]
+        ))
+    } else {
+        Some(tail2)
+    }
+}
+
+/// True when two URLs share the exact origin or belong to the same registrable domain (eTLD+1)
+/// with the same scheme and port (e.g. `https://suno.com` and `https://studio-api-prod.suno.com`).
+pub fn same_site_origin(a: &url::Url, b: &url::Url) -> bool {
+    if a.origin() == b.origin() {
+        return true;
+    }
+    if a.scheme() != b.scheme() || a.port_or_known_default() != b.port_or_known_default() {
+        return false;
+    }
+    let (Some(ha), Some(hb)) = (a.host_str(), b.host_str()) else {
+        return false;
+    };
+    match (registrable_domain(ha), registrable_domain(hb)) {
+        (Some(da), Some(db)) => da == db,
+        _ => false,
+    }
 }
 pub async fn resolve(url: &url::Url, allow_local: bool) -> AppResult<Vec<SocketAddr>> {
     let host = url

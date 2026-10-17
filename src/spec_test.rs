@@ -112,3 +112,97 @@ fn op_not_found_lists_names() {
     assert!(err.remedy.contains("item"));
     let _ = apperr::Code::Ok;
 }
+
+#[test]
+fn v2_json_template_and_response_preprocessing() {
+    let raw_spec = r##"
+spec_version: 2
+site:
+  name: v2site
+  title: V2 Site
+  base_url: https://app.example.com
+auth:
+  - name: xsrf
+    kind: derived
+    header: X-CSRF-Token
+    value_from: cookie:ct0
+operations:
+  - name: next-feed
+    method: GET
+    path: /feed
+    auth: xsrf
+    response:
+      format: json
+      ssr_json: __NEXT_DATA__
+      extract_pointer: /props/pageProps/items
+      required_pointers:
+        - /0/id
+  - name: create-post
+    method: POST
+    path: /api/posts
+    auth: xsrf
+    preflight:
+      - name: csrf
+        path: /feed
+        extract:
+          token: "css:meta[name='csrf-token']@content"
+    body:
+      json:
+        title: {type: string, required: true}
+        limit: {type: int, default: 5}
+      json_template:
+        operationName: CreatePost
+        variables:
+          input:
+            title: "{{title}}"
+            limit: "{{limit}}"
+            csrf: "{{step.csrf.token}}"
+    response:
+      format: json
+      strip_prefix: ")]}'\n"
+      extract_pointer: /data/post
+"##;
+    let sp = parse(raw_spec);
+    assert!(sp.validate().is_empty(), "v2 validate issues: {:?}", sp.validate());
+
+    let create_op = sp.op("create-post").unwrap();
+    let mut args = BTreeMap::new();
+    args.insert("title".into(), "Hello".into());
+    args.insert("step.csrf.token".into(), "tok-123".into());
+    let (_, body_bytes) = sp.build_request(create_op, &args).unwrap();
+    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes.unwrap()).unwrap();
+    assert_eq!(body_json["operationName"], "CreatePost");
+    assert_eq!(body_json["variables"]["input"]["title"], "Hello");
+    assert_eq!(body_json["variables"]["input"]["limit"], 5);
+    assert_eq!(body_json["variables"]["input"]["csrf"], "tok-123");
+
+    let xssi_resp = crate::net::Response {
+        url: "https://app.example.com/api/posts".into(),
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        bytes: b")]}'\n{\"data\":{\"post\":{\"id\":\"p-1\"}}}".to_vec(),
+        duration_ms: 10,
+        defense: "none".into(),
+    };
+    assert!(create_op.matches_response(&xssi_resp));
+    assert_eq!(
+        create_op.parse_json_response(&xssi_resp).unwrap()["id"],
+        "p-1"
+    );
+
+    let next_op = sp.op("next-feed").unwrap();
+    let ssr_resp = crate::net::Response {
+        url: "https://app.example.com/feed".into(),
+        status: 200,
+        headers: vec![("content-type".into(), "text/html".into())],
+        bytes: br#"<html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"items":[{"id":"clip-7"}]}}}</script></body></html>"#.to_vec(),
+        duration_ms: 12,
+        defense: "none".into(),
+    };
+    assert!(next_op.matches_response(&ssr_resp));
+    assert_eq!(
+        next_op.parse_json_response(&ssr_resp).unwrap()[0]["id"],
+        "clip-7"
+    );
+}
+

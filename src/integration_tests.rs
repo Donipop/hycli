@@ -1714,3 +1714,193 @@ async fn check_replays_recorded_reads_and_tells_sign_in_from_site_changes() {
     assert_eq!(report.checks[1].outcome, "skipped");
     server.abort();
 }
+
+#[tokio::test]
+async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_derived_auth() {
+    let (base, server) = host(
+        Router::new()
+            .route(
+                "/",
+                get(|| async {
+                    (
+                        [("content-type", "text/html; charset=utf-8")],
+                        r#"<!doctype html><html><head><title>Synthetic Studio</title>
+                        <meta name="csrf-token" content="csrf-live-777">
+                        <script src="/_next/static/chunks/app.js"></script></head>
+                        <body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"clips":[{"id":"clip-1","title":"First Song"}]}}}</script></body></html>"#,
+                    )
+                }),
+            )
+            .route(
+                "/_next/static/chunks/app.js",
+                get(|| async {
+                    (
+                        [("content-type", "application/javascript")],
+                        r#"
+                        export async function loadFeed() {
+                            return fetch('/api/v2/feed');
+                        }
+                        export async function publishClip(id, payload) {
+                            return axios.post(`/api/v2/clips/${id}/publish`, payload);
+                        }
+                        "#,
+                    )
+                }),
+            )
+            .route(
+                "/api/v2/feed",
+                get(|headers: HeaderMap| async move {
+                    let xsrf = headers
+                        .get("x-xsrf-token")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    let csrf = headers
+                        .get("x-csrf-token")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if xsrf != "ct0-cookie-val" || csrf != "csrf-live-777" {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            [("content-type", "application/json")],
+                            r#"{"error":"missing derived or preflight headers"}"#.to_string(),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        ")]}'\n{\"data\":{\"items\":[{\"id\":\"feed-99\"}]}}".to_string(),
+                    )
+                }),
+            ),
+    )
+    .await;
+
+    let core = runtime();
+    let (report, draft) = core
+        .recon("studio", &format!("{base}/"), 4)
+        .await
+        .expect("deterministic recon");
+    assert_eq!(report["title"], "Synthetic Studio");
+    let bundle_routes = report["bundle_routes"].as_array().unwrap();
+    assert!(
+        bundle_routes.iter().any(|r| r == "GET /api/v2/feed"),
+        "missing GET /api/v2/feed in {bundle_routes:?}"
+    );
+    assert!(
+        bundle_routes
+            .iter()
+            .any(|r| r == "POST /api/v2/clips/{id}/publish"),
+        "missing POST /api/v2/clips/{{id}}/publish in {bundle_routes:?}"
+    );
+    assert!(
+        draft.operations.iter().any(|o| o.name == "read-next-data"),
+        "missing read-next-data operation"
+    );
+
+    let v2_spec = spec::parse(
+        json!({
+            "spec_version": 2,
+            "site": {
+                "name": "studio",
+                "title": "Synthetic Studio",
+                "base_url": base,
+            },
+            "auth": [
+                {
+                    "name": "xsrf",
+                    "kind": "derived",
+                    "header": "X-XSRF-Token",
+                    "value_from": "cookie:ct0"
+                }
+            ],
+            "operations": [
+                {
+                    "name": "ssr-clips",
+                    "method": "GET",
+                    "path": "/",
+                    "effect": "read",
+                    "evidence": "Synthetic SSR read",
+                    "response": {
+                        "format": "json",
+                        "ssr_json": "__NEXT_DATA__",
+                        "extract_pointer": "/props/pageProps/clips",
+                        "required_pointers": ["/0/id"]
+                    }
+                },
+                {
+                    "name": "protected-feed",
+                    "method": "GET",
+                    "path": "/api/v2/feed",
+                    "effect": "read",
+                    "evidence": "Synthetic feed read",
+                    "auth": "xsrf",
+                    "preflight": [
+                        {
+                            "name": "csrf",
+                            "path": "/",
+                            "extract": {
+                                "token": "css:meta[name='csrf-token']@content"
+                            }
+                        }
+                    ],
+                    "headers": {
+                        "X-CSRF-Token": "{{step.csrf.token}}"
+                    },
+                    "response": {
+                        "format": "json",
+                        "strip_prefix": ")]}'\n",
+                        "extract_pointer": "/data/items",
+                        "required_pointers": ["/0/id"]
+                    }
+                }
+            ]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    core.install(&v2_spec).unwrap();
+
+    let ssr_res = core
+        .run_op(&v2_spec, "ssr-clips", &BTreeMap::new())
+        .await
+        .unwrap()
+        .0
+        .body
+        .unwrap();
+    assert_eq!(ssr_res[0]["id"], "clip-1");
+
+    let host_str = url::Url::parse(&base).unwrap().host_str().unwrap().to_string();
+    let account = core
+        .connect_account(
+            "studio",
+            &base,
+            vec![crate::accounts::Cookie {
+                name: "ct0".into(),
+                value: "ct0-cookie-val".into(),
+                domain: host_str,
+                path: "/".into(),
+                secure: false,
+                http_only: false,
+                host_only: true,
+                expires: None,
+                same_site: String::new(),
+                store_id: String::new(),
+                partition_key: None,
+            }],
+            "firefox",
+            "default",
+            "",
+        )
+        .unwrap();
+
+    let feed_res = core
+        .run_op_for_account(&v2_spec, "protected-feed", &BTreeMap::new(), Some(&account.id))
+        .await
+        .unwrap()
+        .0
+        .body
+        .unwrap();
+    assert_eq!(feed_res[0]["id"], "feed-99");
+    server.abort();
+}
