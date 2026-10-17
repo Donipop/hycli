@@ -55,19 +55,37 @@ pub struct Defaults {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthStrategy {
     pub name: String,
-    pub kind: String, // none | header | browser
+    pub kind: String, // none | header | browser | derived
     #[serde(default)]
     pub header: String,
     #[serde(default)]
     pub prefix: String,
     #[serde(default, rename = "value_from")]
-    pub value_from: String, // store:<site>/<key>
+    pub value_from: String, // store:<site>/<key> | cookie:<name> | storage:<key>[#<pointer>]
     /// Exact credential destination; legacy definitions use the site's base origin.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub origin: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PreflightStep {
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub op: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub method: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub base_url: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub extract: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Operation {
     pub name: String,
     #[serde(default)]
@@ -82,6 +100,8 @@ pub struct Operation {
     pub transport: String,
     #[serde(default)]
     pub auth: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preflight: Vec<PreflightStep>,
     #[serde(default)]
     pub params: std::collections::BTreeMap<String, Param>,
     #[serde(default)]
@@ -109,6 +129,12 @@ pub struct ResponseExpectation {
     pub required_html_fields: Vec<crate::html::Field>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub html: Option<crate::html::Extraction>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub strip_prefix: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub ssr_json: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub extract_pointer: String,
 }
 
 impl Operation {
@@ -127,6 +153,43 @@ impl Operation {
         });
         query.is_some_and(|query| graphql_parser::parse_query::<&str>(query).is_ok())
     }
+    pub fn parse_json_response(&self, response: &crate::net::Response) -> Option<Value> {
+        let expected = self.response.as_ref();
+        if let Some(exp) = expected {
+            if !exp.ssr_json.is_empty() {
+                let html = String::from_utf8_lossy(&response.bytes);
+                return crate::html::extract_ssr_json(&html, &exp.ssr_json, &exp.extract_pointer);
+            }
+        }
+        let mut parsed = response.json().or_else(|| {
+            let text = std::str::from_utf8(&response.bytes).ok()?.trim_start();
+            let stripped = if let Some(exp) = expected {
+                if !exp.strip_prefix.is_empty() {
+                    text.strip_prefix(exp.strip_prefix.as_str())
+                        .map(str::trim_start)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+            .or_else(|| {
+                for prefix in [")]}',", ")]}'", "while(1);", "for(;;);"] {
+                    if let Some(rest) = text.strip_prefix(prefix) {
+                        return Some(rest.trim_start());
+                    }
+                }
+                None
+            })?;
+            serde_json::from_str(stripped).ok()
+        })?;
+        if let Some(exp) = expected {
+            if !exp.extract_pointer.is_empty() {
+                parsed = parsed.pointer(&exp.extract_pointer)?.clone();
+            }
+        }
+        Some(parsed)
+    }
     pub fn matches_response(&self, response: &crate::net::Response) -> bool {
         if !response.successful() {
             return false;
@@ -135,13 +198,22 @@ impl Operation {
             return true;
         };
         match expected.format.as_str() {
-            "json" => response.json().is_some_and(|body| {
+            "json" => self.parse_json_response(response).is_some_and(|body| {
                 expected
                     .required_pointers
                     .iter()
                     .all(|p| body.pointer(p).is_some())
             }),
             "html" => {
+                if !expected.ssr_json.is_empty() {
+                    return response.header("content-type").contains("text/html")
+                        && self.parse_json_response(response).is_some_and(|body| {
+                            expected
+                                .required_pointers
+                                .iter()
+                                .all(|p| body.pointer(p).is_some())
+                        });
+                }
                 !expected.required_html_fields.is_empty()
                     && response.header("content-type").contains("text/html")
                     && !response.bytes.is_empty()
@@ -192,6 +264,8 @@ fn default_param_type() -> String {
 pub struct Body {
     #[serde(default, rename = "json")]
     pub json: std::collections::BTreeMap<String, Param>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_template: Option<Value>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub form: std::collections::BTreeMap<String, Param>,
 }
@@ -276,12 +350,12 @@ impl Spec {
                 });
             }
 
-            if self.spec_version != SPEC_VERSION {
+            if self.spec_version != SPEC_VERSION && self.spec_version != 2 {
                 add(
                     &mut out,
                     "spec_version",
-                    format!("지원: {SPEC_VERSION}, 실제: {}", self.spec_version),
-                    "spec_version: 1",
+                    format!("지원: 1|2, 실제: {}", self.spec_version),
+                    "spec_version: 1 또는 2",
                 );
             }
             if self.site.name.is_empty() {
@@ -333,15 +407,38 @@ impl Spec {
                             );
                         }
                     }
+                    "derived" => {
+                        if a.header.is_empty() {
+                            add(
+                                &mut out,
+                                &format!("auth.{}.header", a.name),
+                                "kind=derived인데 헤더명 없음".into(),
+                                "",
+                            );
+                        }
+                        if !["cookie:", "storage:", "header:"]
+                            .iter()
+                            .any(|p| a.value_from.starts_with(p))
+                        {
+                            add(
+                                &mut out,
+                                &format!("auth.{}.value_from", a.name),
+                                "cookie:<name> 또는 storage:<key>[#<pointer>] 참조 필요".into(),
+                                "예: cookie:note_gql_auth_token",
+                            );
+                        }
+                    }
                     other => add(
                         &mut out,
                         &format!("auth.{}.kind", a.name),
                         format!("미지원 kind: {other}"),
-                        "none|header|browser",
+                        "none|header|browser|derived",
                     ),
                 }
             }
             let models: std::collections::HashSet<&String> = self.models.keys().collect();
+            let op_names: std::collections::HashSet<&String> =
+                self.operations.iter().map(|o| &o.name).collect();
 
             for op in &self.operations {
                 let id = format!("operations.{}", op.name);
@@ -377,6 +474,18 @@ impl Spec {
                         "models 블록에 정의",
                     );
                 }
+                for step in &op.preflight {
+                    let valid_target = (!step.op.is_empty() && op_names.contains(&step.op))
+                        || (!step.path.is_empty() && step.path.starts_with('/'));
+                    if step.name.is_empty() || !valid_target {
+                        add(
+                            &mut out,
+                            &format!("{id}.preflight"),
+                            format!("유효하지 않은 preflight step: {}", step.name),
+                            "정의된 operation 참조 또는 '/'로 시작하는 path 지정 필요",
+                        );
+                    }
+                }
                 let path_names = path_vars(&op.path);
                 for n in &path_names {
                     if !op.params.contains_key(n) {
@@ -406,12 +515,12 @@ impl Spec {
                     *counts.entry(k).or_default() += 1;
                 }
                 if let Some(b) = &op.body {
-                    if !b.json.is_empty() && !b.form.is_empty() {
+                    if (!b.json.is_empty() || b.json_template.is_some()) && !b.form.is_empty() {
                         add(
                             &mut out,
                             &format!("{id}.body"),
                             "Choose one body encoding".into(),
-                            "Use body.json or body.form, not both.",
+                            "Use body.json/json_template or body.form, not both.",
                         );
                     }
                     for (k, _) in b.inputs() {
@@ -536,6 +645,23 @@ impl Spec {
                     form.append_pair(name, &coerce_str(p, name, args, true)?);
                 }
                 body = Some(form.finish().into_bytes());
+            } else if let Some(template) = &b.json_template {
+                let mut resolved_values = std::collections::BTreeMap::new();
+                for (name, p) in &b.json {
+                    let present = args.contains_key(name);
+                    if !present && p.default.is_none() {
+                        if p.required {
+                            return Err(apperr::spec(
+                                format!("필수 인자 누락: --{name}"),
+                                format!("예: --{name} <{}>", p.kind),
+                            ));
+                        }
+                        continue;
+                    }
+                    resolved_values.insert(name.clone(), coerce_value(p, name, args)?);
+                }
+                let rendered = render_json_template(template, &resolved_values, args);
+                body = Some(serde_json::to_vec(&rendered).unwrap_or_default());
             } else if !b.json.is_empty() {
                 let mut obj = Map::new();
                 for (name, p) in &b.json {
@@ -756,3 +882,66 @@ fn form_encode(s: &str) -> String {
     }
     out
 }
+
+pub fn render_json_template(
+    template: &Value,
+    resolved_values: &std::collections::BTreeMap<String, Value>,
+    raw_args: &std::collections::BTreeMap<String, String>,
+) -> Value {
+    match template {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), render_json_template(v, resolved_values, raw_args)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| render_json_template(v, resolved_values, raw_args))
+                .collect(),
+        ),
+        Value::String(s) => {
+            if let Some(var) = s.strip_prefix("{{").and_then(|rest| rest.strip_suffix("}}")) {
+                let var = var.trim();
+                if !var.contains("{{") {
+                    if let Some(val) = resolved_values.get(var) {
+                        return val.clone();
+                    }
+                    if let Some(raw) = raw_args.get(var) {
+                        return Value::String(raw.clone());
+                    }
+                }
+            }
+            Value::String(interpolate_template_str(s, resolved_values, raw_args))
+        }
+        other => other.clone(),
+    }
+}
+
+pub fn interpolate_template_str(
+    template: &str,
+    resolved_values: &std::collections::BTreeMap<String, Value>,
+    raw_args: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after_start = &rest[start + 2..];
+        if let Some(end) = after_start.find("}}") {
+            let var = after_start[..end].trim();
+            if let Some(raw) = raw_args.get(var) {
+                out.push_str(raw);
+            } else if let Some(val) = resolved_values.get(var) {
+                out.push_str(&value_to_plain_string(val));
+            }
+            rest = &after_start[end + 2..];
+        } else {
+            out.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    out.push_str(rest);
+    out
+}
+

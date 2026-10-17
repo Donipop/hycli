@@ -176,7 +176,8 @@ impl Runtime {
                 let account = argument(call, "account_id");
                 context.account(self, account)?;
                 let url = crate::net::validate_url(argument(call, "url"))?;
-                if url.origin().ascii_serialization() != crate::runtime::origin(&context.job.url)?
+                let job_url = crate::net::validate_url(&context.job.url)?;
+                if !crate::net::same_site_origin(&url, &job_url)
                     || (context.url(url.as_str()).is_err()
                         && !context.routes.iter().any(|(method, path)| {
                             method == "GET"
@@ -193,13 +194,18 @@ impl Runtime {
                 let text = String::from_utf8_lossy(&response.bytes);
                 let body = response.json();
                 let html = response.header("content-type").contains("html");
-                outcome.content = json!({"url":response.url,"status":response.status,"successful":response.successful(),"format":if body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"values_exposed":false});
+                let js_routes = crate::discovery::bundle_routes(&text);
+                outcome.content = json!({"url":response.url,"status":response.status,"successful":response.successful(),"format":if body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"ssr_payloads":if html{crate::html::ssr_payloads(&text)}else{json!(null)},"bundle_routes":js_routes,"values_exposed":false});
                 if response.successful() {
                     let final_url = crate::net::validate_url(&response.url)?;
                     outcome
                         .routes
                         .insert(("GET".into(), final_url.path().into()));
+                    outcome.routes.extend(js_routes);
                     outcome.links = crate::discovery::published_links(&final_url, &text);
+                    outcome
+                        .links
+                        .extend(crate::discovery::bundle_urls(&final_url, &text));
                     outcome.document = Some((response.url.clone(), outcome.content.to_string()));
                 }
             }
@@ -216,7 +222,8 @@ impl Runtime {
                     return Err(AppError::api("auth_required", 401));
                 }
                 let url = crate::net::validate_url(argument(call, "url"))?;
-                if url.origin().ascii_serialization() != crate::runtime::origin(&context.job.url)?
+                let job_url = crate::net::validate_url(&context.job.url)?;
+                if !crate::net::same_site_origin(&url, &job_url)
                     || (context.url(url.as_str()).is_err()
                         && !context.routes.iter().any(|(method, path)| {
                             method == "GET"
@@ -240,7 +247,9 @@ impl Runtime {
                     outcome.browser_read = Some(url.to_string());
                     outcome.routes.insert(("GET".into(), url.path().into()));
                 }
-                outcome.content = json!({"url":url.as_str(),"status":response.status,"successful":response.successful(),"format":if json_body.is_some(){"json"}else if response.header("content-type").contains("html"){"html"}else{"text"},"response_shape":json_body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if response.header("content-type").contains("html"){crate::html::structure(&String::from_utf8_lossy(&response.bytes))}else{json!([])},"html_fields":if response.header("content-type").contains("html"){crate::html::fields(&String::from_utf8_lossy(&response.bytes))}else{json!([])},"authentication":"browser","values_exposed":false});
+                let html = response.header("content-type").contains("html");
+                let text = String::from_utf8_lossy(&response.bytes);
+                outcome.content = json!({"url":url.as_str(),"status":response.status,"successful":response.successful(),"format":if json_body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":json_body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"ssr_payloads":if html{crate::html::ssr_payloads(&text)}else{json!(null)},"authentication":"browser","values_exposed":false});
             }
             "session.verify" => {
                 let account = argument(call, "account_id");
@@ -291,6 +300,11 @@ impl Runtime {
                 .await?;
                 let final_url = crate::net::validate_url(&capture.final_url)?;
                 outcome.links = crate::discovery::published_links(&final_url, &capture.html);
+                outcome
+                    .links
+                    .extend(crate::discovery::bundle_urls(&final_url, &capture.html));
+                let js_routes = crate::discovery::bundle_routes(&capture.html);
+                outcome.routes.extend(js_routes.iter().cloned());
                 outcome.routes.extend(
                     capture
                         .observations
@@ -345,7 +359,7 @@ impl Runtime {
                 util::redact(&mut text, &secrets);
                 let text = text.as_str().unwrap_or("").to_string();
                 outcome.document = Some((final_url.to_string(), text.clone()));
-                outcome.content = json!({"url":final_url.as_str(),"status":capture.status,"text":text.chars().take(20_000).collect::<String>(),"html_structure":crate::html::structure(&capture.html),"html_fields":crate::html::fields(&capture.html),"observations":capture.observations,"authenticated_requests":capture.authenticated_requests,"authentication_headers":capture.headers.keys().collect::<Vec<_>>(),"identity_verified":!account_id.is_empty() && self.state.read()?.accounts.get(account_id).is_some_and(|a| a.verified_identity)});
+                outcome.content = json!({"url":final_url.as_str(),"status":capture.status,"text":text.chars().take(20_000).collect::<String>(),"html_structure":crate::html::structure(&capture.html),"html_fields":crate::html::fields(&capture.html),"ssr_payloads":crate::html::ssr_payloads(&capture.html),"bundle_routes":js_routes,"observations":capture.observations,"authenticated_requests":capture.authenticated_requests,"authentication_headers":capture.headers.keys().collect::<Vec<_>>(),"identity_verified":!account_id.is_empty() && self.state.read()?.accounts.get(account_id).is_some_and(|a| a.verified_identity)});
             }
             _ => return Err(AppError::api("unsupported_tool", 422)),
         }

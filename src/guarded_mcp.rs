@@ -94,6 +94,11 @@ impl Server {
                     json!({"type":"object","properties":{},"additionalProperties":false}),
                 ),
                 (
+                    "hycli_recon",
+                    "Deterministic fast recon without an AI loop: fetches the URL, mines SSR JSON (__NEXT_DATA__, window.__STATE__), documented routes, and JS bundle fetch/axios/GraphQL endpoints.",
+                    json!({"type":"object","properties":{"url":{"type":"string"},"site":{"type":"string"},"max_bundles":{"type":"integer","default":4}},"required":["url"],"additionalProperties":false}),
+                ),
+                (
                     "hycli_prepare",
                     "Prepare tools using actual documentation and bounded reads. No live writes, fuzzing or guessed endpoint sweeps.",
                     json!({"type":"object","properties":{"url":{"type":"string"},"provider":{"type":"string"},"intent":{"type":"string","description":"The user outcome to support, including prerequisite list/search actions for opaque identifiers"}},"required":["url"],"additionalProperties":false}),
@@ -125,7 +130,7 @@ impl Server {
                             .read_only(true)
                             .destructive(false)
                             .idempotent(!["hycli_prepare", "hycli_request"].contains(&name))
-                            .open_world(["hycli_prepare", "hycli_request"].contains(&name)),
+                            .open_world(["hycli_prepare", "hycli_request", "hycli_recon"].contains(&name)),
                     ),
                 );
             }
@@ -191,6 +196,20 @@ impl Server {
                             .filter(|s| self.allowed(&s.id).is_ok())
                             .collect::<Vec<_>>()
                     ));
+                }
+                "hycli_recon" => {
+                    if self.only_site.is_some() {
+                        return Err(AppError::api("bad_request", 400));
+                    }
+                    let max_bundles = args
+                        .get("max_bundles")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(4) as usize;
+                    let (report, _) = self
+                        .core
+                        .recon(get("site"), get("url"), max_bundles.min(8))
+                        .await?;
+                    return Ok(report);
                 }
                 "hycli_accounts" => {
                     return Ok(json!(

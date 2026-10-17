@@ -325,6 +325,110 @@ pub fn fields(html: &str) -> Value {
     json!(fields)
 }
 
+/// Parse embedded SSR JSON blocks (`__NEXT_DATA__`, `__NUXT_DATA__`, `application/ld+json`,
+/// `window.__INITIAL_STATE__`, `window.__STATE__`, `window.INIT_DATA`) from HTML without executing scripts.
+pub fn extract_ssr_map(html: &str) -> std::collections::BTreeMap<String, Value> {
+    let document = Html::parse_document(html);
+    let mut payloads = std::collections::BTreeMap::new();
+    if let Ok(sel) = Selector::parse("script") {
+        for script in document.select(&sel).take(80) {
+            let id = script.value().id().unwrap_or("");
+            let r#type = script.value().attr("type").unwrap_or("");
+            let raw: String = script.text().collect();
+            let raw = raw.trim();
+            if raw.is_empty() || raw.len() > 2 * 1024 * 1024 {
+                continue;
+            }
+            if (!id.is_empty()
+                && (id == "__NEXT_DATA__"
+                    || id == "__NUXT_DATA__"
+                    || r#type.contains("json")))
+                || r#type.eq_ignore_ascii_case("application/ld+json")
+            {
+                if let Ok(val) = serde_json::from_str::<Value>(raw) {
+                    let key = if !id.is_empty() {
+                        id.to_owned()
+                    } else {
+                        "ld+json".to_owned()
+                    };
+                    payloads.insert(key, val);
+                }
+                continue;
+            }
+            for (name, pattern) in [
+                (
+                    "__INITIAL_STATE__",
+                    r"(?s)window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*;",
+                ),
+                ("__STATE__", r"(?s)window\.__STATE__\s*=\s*(\{.*?\})\s*;"),
+                ("INIT_DATA", r"(?s)window\.INIT_DATA\s*=\s*(\{.*?\})\s*;"),
+                (
+                    "__PRELOADED_STATE__",
+                    r"(?s)window\.__PRELOADED_STATE__\s*=\s*(\{.*?\})\s*;",
+                ),
+            ] {
+                if let Some(cap) = regex::Regex::new(pattern).expect("constant").captures(raw) {
+                    if let Ok(val) = serde_json::from_str::<Value>(&cap[1]) {
+                        payloads.insert(name.into(), val);
+                    }
+                }
+            }
+        }
+    }
+    payloads
+}
+
+/// Extract a specific SSR JSON payload (or `"auto"` for the first available) and optional JSON pointer.
+pub fn extract_ssr_json(html: &str, source: &str, pointer: &str) -> Option<Value> {
+    let map = extract_ssr_map(html);
+    if map.is_empty() {
+        return None;
+    }
+    let root = if source.is_empty() || source == "auto" {
+        map.get("__NEXT_DATA__")
+            .or_else(|| map.get("__INITIAL_STATE__"))
+            .or_else(|| map.get("__STATE__"))
+            .or_else(|| map.get("INIT_DATA"))
+            .or_else(|| map.values().next())?
+    } else {
+        map.get(source)?
+    };
+    if pointer.is_empty() {
+        Some(root.clone())
+    } else {
+        root.pointer(pointer).cloned()
+    }
+}
+
+/// Summarize SSR JSON payload shapes and CSRF/token selector metadata without exposing secret values.
+pub fn ssr_payloads(html: &str) -> Value {
+    let map = extract_ssr_map(html);
+    let mut shapes = serde_json::Map::new();
+    for (k, v) in map {
+        shapes.insert(k, crate::session_recipe::shape(&v, 0));
+    }
+    let document = Html::parse_document(html);
+    let mut csrf_selectors = Vec::new();
+    if let Ok(sel) = Selector::parse("meta[name], input[type=\"hidden\"][name]") {
+        for el in document.select(&sel).take(40) {
+            let tag = el.value().name();
+            if let Some(name) = el.value().attr("name").filter(|n| stable_name(n)) {
+                let lower = name.to_ascii_lowercase();
+                if ["csrf", "xsrf", "authenticity", "token", "nonce"]
+                    .iter()
+                    .any(|p| lower.contains(p))
+                {
+                    csrf_selectors.push(format!("{tag}[name=\"{name}\"]"));
+                }
+            }
+        }
+    }
+    json!({
+        "payloads": shapes,
+        "csrf_selectors": csrf_selectors,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

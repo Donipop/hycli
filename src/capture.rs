@@ -154,6 +154,7 @@ pub fn draft_spec(
             path: c.template.clone(),
             base_url: String::new(),
             auth: "public".into(),
+            preflight: Vec::new(),
             params: Default::default(),
             query: Default::default(),
             headers: Default::default(),

@@ -33,6 +33,16 @@ enum Cmd {
         #[arg(long)]
         cdp: Option<String>,
     },
+    /// Deterministic fast recon: mine SSR state, documented routes, and JS bundle APIs without an AI loop.
+    Recon {
+        url: String,
+        /// Write a draft SiteSpec v2 YAML file to this path.
+        #[arg(long)]
+        draft: Option<String>,
+        /// Maximum number of JS bundles to scan for API routes.
+        #[arg(long, default_value_t = 4)]
+        max_bundles: usize,
+    },
     /// Inspect the local evidence and activity database.
     Kb {
         #[command(subcommand)]
@@ -556,6 +566,26 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             if defense != "none" {
                 return Err(blocked_err(defense, ""));
             }
+            Ok(())
+        }
+        Cmd::Recon {
+            url,
+            draft,
+            max_bundles,
+        } => {
+            let core = runner(&deps)?;
+            let (mut report, spec) = core.recon(&deps.site, &url, max_bundles.min(8)).await?;
+            if let Some(out_path) = draft {
+                let yaml = serde_yaml::to_string(&spec)
+                    .map_err(|e| apperr::spec(format!("YAML 직렬화 실패 ({e})"), ""))?;
+                std::fs::write(&out_path, yaml).map_err(|e| {
+                    apperr::runtime(e, "파일 쓰기 실패", &out_path)
+                })?;
+                if let Some(obj) = report.as_object_mut() {
+                    obj.insert("draft_file".into(), serde_json::Value::String(out_path));
+                }
+            }
+            emit.data(&report);
             Ok(())
         }
         Cmd::Kb { cmd } => kb_cmd(deps, cmd, emit).await,
