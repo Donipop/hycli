@@ -40,7 +40,7 @@ enum Cmd {
         #[arg(long)]
         draft: Option<String>,
         /// Maximum number of JS bundles to scan for API routes.
-        #[arg(long, default_value_t = 8)]
+        #[arg(long, default_value_t = 12)]
         max_bundles: usize,
     },
     /// Inspect the local evidence and activity database.
@@ -765,23 +765,23 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
     match cmd {
         SpecCmd::Validate { file } => {
             let sp = load_file_spec(&file)?;
-            hycli::policy::validate_spec(&sp)?;
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"status": format!("{} issues", issues.len()), "issues": issues}));
                 return Err(apperr::spec("Spec validation failed", "Fix the reported issues."));
             }
+            hycli::policy::validate_spec(&sp)?;
             emit.data(&serde_json::json!({"status": "ok", "site": sp.site.name, "ops": sp.operations.len()}));
             Ok(())
         }
         SpecCmd::Install { file } => {
             let sp = load_file_spec(&file)?;
-            hycli::policy::validate_spec(&sp)?;
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"issues": issues}));
                 return Err(apperr::spec("Validation failed; installation aborted", "Fix the reported issues."));
             }
+            hycli::policy::validate_spec(&sp)?;
             let dst = hycli::platform::specs_dir().join(format!("{}.yaml", sp.site.name));
             runner(&deps)?.install(&sp)?;
             emit.data(&serde_json::json!({"installed": dst, "site": sp.site.name, "ops": sp.operations.len()}));
@@ -946,11 +946,21 @@ async fn try_run(
     arg_list: Vec<String>,
     emit: &Emitter,
 ) -> Result<(), AppError> {
-    let sp = find_spec(&site)?;
-    sp.op(&op)?;
     let args = hycli::cli_actions::pairs(&arg_list)?;
     let runner = runner(&deps)?;
-    let (res, _) = runner.run_op(&sp, &op, &args).await?;
+    let (res, _) = if (site.ends_with(".yaml")
+        || site.ends_with(".yml")
+        || std::path::Path::new(&site).exists())
+        && !hycli::util::valid_id(&site)
+    {
+        let sp = load_file_spec(&site)?;
+        sp.op(&op)?;
+        runner.verify_candidate_with_inputs(&sp, &op, "", args).await?
+    } else {
+        let sp = find_spec(&site)?;
+        sp.op(&op)?;
+        runner.run_op(&sp, &op, &args).await?
+    };
     emit.data(&res);
     if res.defense != "none" && !res.defense.is_empty() {
         return Err(blocked_err(&res.defense, &res.signal));

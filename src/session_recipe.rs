@@ -192,7 +192,9 @@ pub(crate) fn shape(value: &Value, depth: usize) -> Value {
                 .take(30)
                 .map(|(k, v)| {
                     let key = if k.len() > 80
-                        || k.contains(['\n', '\r', '@', '/', ':'])
+                        || k.contains(['\n', '\r'])
+                        || k.contains("://")
+                        || k.strip_prefix('@').unwrap_or(k).contains('@')
                         || k.chars().next().is_some_and(|c| c.is_ascii_digit())
                     {
                         "[dynamic key]".into()

@@ -174,7 +174,7 @@ impl Network {
             let mut headers = HeaderMap::new();
             if matches!(
                 input.tls_profile.as_str(),
-                "chrome" | "browser" | "stealth" | "default" | "standard" | ""
+                "go" | "chrome" | "browser" | "stealth" | "default" | "standard" | ""
             ) {
                 headers.insert(
                     HeaderName::from_static("accept-language"),

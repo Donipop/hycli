@@ -95,10 +95,14 @@ impl Extraction {
             let records = if self.items.is_empty() {
                 vec![document.root_element()]
             } else {
-                document
+                let matched: Vec<_> = document
                     .select(&Selector::parse(&self.items).ok()?)
                     .take(if self.limit == 0 { 100 } else { self.limit })
-                    .collect()
+                    .collect();
+                if matched.is_empty() {
+                    return None;
+                }
+                matched
             };
             let items: Option<Vec<_>> = records
                 .into_iter()
@@ -325,18 +329,118 @@ pub fn fields(html: &str) -> Value {
     json!(fields)
 }
 
-/// Parse embedded SSR JSON blocks (`__NEXT_DATA__`, `__NUXT_DATA__`, `application/ld+json`,
-/// `window.__INITIAL_STATE__`, `window.__STATE__`, `window.INIT_DATA`) from HTML without executing scripts.
+fn collect_next_f_props(val: &Value, out: &mut serde_json::Map<String, Value>, depth: usize) {
+    if depth > 24 {
+        return;
+    }
+    match val {
+        Value::Object(map) => {
+            for (k, v) in map {
+                if matches!(
+                    k.as_str(),
+                    "data"
+                        | "posts"
+                        | "items"
+                        | "articles"
+                        | "results"
+                        | "initialData"
+                        | "nodes"
+                        | "edges"
+                        | "list"
+                        | "feed"
+                        | "entries"
+                        | "trending"
+                        | "searchParams"
+                        | "params"
+                        | "buildId"
+                ) {
+                    let non_empty = match v {
+                        Value::Null => false,
+                        Value::Array(a) => !a.is_empty(),
+                        Value::Object(o) => !o.is_empty(),
+                        Value::String(s) => !s.is_empty(),
+                        _ => true,
+                    };
+                    if non_empty {
+                        out.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                } else if !matches!(
+                    k.as_str(),
+                    "children" | "fallback" | "parallelRoutes" | "styles" | "tree"
+                ) && v
+                    .as_array()
+                    .is_some_and(|arr| !arr.is_empty() && arr.first().is_some_and(Value::is_object))
+                {
+                    out.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+                collect_next_f_props(v, out, depth + 1);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                collect_next_f_props(item, out, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Resolve a JSON Pointer (RFC 6901), with fallback matching for object keys that contain unescaped `/`.
+pub fn resolve_pointer<'a>(value: &'a Value, pointer: &str) -> Option<&'a Value> {
+    if pointer.is_empty() {
+        return Some(value);
+    }
+    if let Some(found) = value.pointer(pointer) {
+        return Some(found);
+    }
+    let rest = pointer.strip_prefix('/')?;
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                if rest == k {
+                    return Some(v);
+                }
+                if let Some(after) = rest
+                    .strip_prefix(k.as_str())
+                    .and_then(|s| s.strip_prefix('/'))
+                {
+                    if let Some(found) = resolve_pointer(v, &format!("/{after}")) {
+                        return Some(found);
+                    }
+                }
+            }
+            None
+        }
+        Value::Array(arr) => {
+            let (idx_str, after) = rest.split_once('/').unwrap_or((rest, ""));
+            let idx: usize = idx_str.parse().ok()?;
+            let elem = arr.get(idx)?;
+            if after.is_empty() {
+                Some(elem)
+            } else {
+                resolve_pointer(elem, &format!("/{after}"))
+            }
+        }
+        _ => None
+    }
+}
+
+/// Parse embedded SSR JSON blocks (`__NEXT_DATA__`, `__NEXT_F__`, `__remixContext`, `__NUXT_DATA__`,
+/// `application/ld+json`, `window.__INITIAL_STATE__`, `window.__STATE__`, `window.INIT_DATA`) from HTML without executing scripts.
 pub fn extract_ssr_map(html: &str) -> std::collections::BTreeMap<String, Value> {
     let document = Html::parse_document(html);
     let mut payloads = std::collections::BTreeMap::new();
+    let mut next_f_stream = String::new();
+    let window_assign_re =
+        regex::Regex::new(r"window\.([A-Za-z0-9_]+)\s*=\s*").expect("constant");
+
     if let Ok(sel) = Selector::parse("script") {
-        for script in document.select(&sel).take(80) {
+        for script in document.select(&sel).take(250) {
             let id = script.value().id().unwrap_or("");
             let r#type = script.value().attr("type").unwrap_or("");
             let raw: String = script.text().collect();
             let raw = raw.trim();
-            if raw.is_empty() || raw.len() > 2 * 1024 * 1024 {
+            if raw.is_empty() || raw.len() > 4 * 1024 * 1024 {
                 continue;
             }
             if (!id.is_empty()
@@ -346,33 +450,136 @@ pub fn extract_ssr_map(html: &str) -> std::collections::BTreeMap<String, Value> 
                 || r#type.eq_ignore_ascii_case("application/ld+json")
             {
                 if let Ok(val) = serde_json::from_str::<Value>(raw) {
-                    let key = if !id.is_empty() {
-                        id.to_owned()
+                    if !id.is_empty() {
+                        payloads.insert(id.to_owned(), val);
+                    } else if let Some(existing) = payloads.get_mut("ld+json") {
+                        if let (Value::Object(ex_map), Value::Object(new_map)) = (existing, &val) {
+                            for (k, v) in new_map {
+                                ex_map.entry(k.clone()).or_insert_with(|| v.clone());
+                            }
+                            let blocks = ex_map
+                                .entry("blocks".to_owned())
+                                .or_insert_with(|| Value::Array(vec![]));
+                            if let Value::Array(arr) = blocks {
+                                arr.push(val);
+                            }
+                        }
                     } else {
-                        "ld+json".to_owned()
-                    };
-                    payloads.insert(key, val);
+                        payloads.insert("ld+json".to_owned(), val);
+                    }
                 }
                 continue;
             }
-            for (name, pattern) in [
-                (
-                    "__INITIAL_STATE__",
-                    r"(?s)window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*;",
-                ),
-                ("__STATE__", r"(?s)window\.__STATE__\s*=\s*(\{.*?\})\s*;"),
-                ("INIT_DATA", r"(?s)window\.INIT_DATA\s*=\s*(\{.*?\})\s*;"),
-                (
-                    "__PRELOADED_STATE__",
-                    r"(?s)window\.__PRELOADED_STATE__\s*=\s*(\{.*?\})\s*;",
-                ),
-            ] {
-                if let Some(cap) = regex::Regex::new(pattern).expect("constant").captures(raw) {
-                    if let Ok(val) = serde_json::from_str::<Value>(&cap[1]) {
-                        payloads.insert(name.into(), val);
+            for cap in window_assign_re.captures_iter(raw).take(20) {
+                let ident = &cap[1];
+                if ident != "INIT_DATA" && !ident.starts_with("__") {
+                    continue;
+                }
+                let Some(m) = cap.get(0) else {
+                    continue;
+                };
+                let rhs = raw[m.end()..].trim_start();
+                if !rhs.starts_with('{') && !rhs.starts_with('[') {
+                    continue;
+                }
+                let mut stream = serde_json::Deserializer::from_str(rhs).into_iter::<Value>();
+                if let Some(Ok(mut val)) = stream.next() {
+                    if ident == "__remixContext" {
+                        if let Some(Value::Object(loader_map)) =
+                            val.pointer("/state/loaderData").cloned()
+                        {
+                            let mut route_data = serde_json::Map::new();
+                            for (rk, rv) in loader_map {
+                                if rk != "root" {
+                                    if let Value::Object(rmap) = rv {
+                                        for (fk, fv) in rmap {
+                                            route_data.entry(fk).or_insert(fv);
+                                        }
+                                    }
+                                }
+                            }
+                            if route_data
+                                .get("buySellArticles")
+                                .is_none_or(|v| v.as_array().is_some_and(|a| a.is_empty()))
+                            {
+                                if let Some(results) = route_data
+                                    .get("sections")
+                                    .and_then(Value::as_array)
+                                    .and_then(|secs| {
+                                        secs.iter().find(|s| {
+                                            s.get("type").and_then(Value::as_str)
+                                                == Some("buy-sell")
+                                        })
+                                    })
+                                    .and_then(|s| s.get("results"))
+                                    .cloned()
+                                {
+                                    route_data.insert("buySellArticles".into(), results);
+                                }
+                            }
+                            if !route_data.is_empty() {
+                                if let Value::Object(top) = &mut val {
+                                    top.insert("routeData".into(), Value::Object(route_data));
+                                }
+                            }
+                        }
+                    } else if ident == "__APOLLO_STATE__" {
+                        if let Value::Object(top) = &mut val {
+                            let mut items = Vec::new();
+                            let mut remove_keys = Vec::new();
+                            for (k, v) in top.iter() {
+                                if k.contains(':') && !k.starts_with('$') {
+                                    if let Value::Object(obj) = v {
+                                        if obj.contains_key("title") || obj.contains_key("url_slug")
+                                        {
+                                            items.push(v.clone());
+                                        }
+                                        remove_keys.push(k.clone());
+                                    }
+                                }
+                            }
+                            for k in remove_keys {
+                                top.remove(&k);
+                            }
+                            if !items.is_empty() {
+                                top.insert("items".into(), Value::Array(items));
+                            }
+                        }
                     }
+                    payloads.insert(ident.to_owned(), val);
                 }
             }
+            let mut search_from = 0;
+            while let Some(pos) = raw[search_from..].find("__next_f.push(") {
+                let start = search_from + pos + "__next_f.push(".len();
+                let rhs = raw[start..].trim_start();
+                if rhs.starts_with('[') {
+                    let mut stream = serde_json::Deserializer::from_str(rhs).into_iter::<Value>();
+                    if let Some(Ok(Value::Array(arr))) = stream.next() {
+                        if let Some(Value::String(chunk)) = arr.get(1) {
+                            next_f_stream.push_str(chunk);
+                        }
+                    }
+                }
+                search_from = start;
+            }
+        }
+    }
+    if !next_f_stream.is_empty() {
+        let mut next_f_obj = serde_json::Map::new();
+        for line in next_f_stream.lines().take(500) {
+            let Some((_, rhs)) = line.split_once(':') else {
+                continue;
+            };
+            let rhs = rhs.trim();
+            if rhs.starts_with('[') || rhs.starts_with('{') {
+                if let Ok(parsed) = serde_json::from_str::<Value>(rhs) {
+                    collect_next_f_props(&parsed, &mut next_f_obj, 0);
+                }
+            }
+        }
+        if !next_f_obj.is_empty() {
+            payloads.insert("__NEXT_F__".to_owned(), Value::Object(next_f_obj));
         }
     }
     payloads
@@ -386,18 +593,294 @@ pub fn extract_ssr_json(html: &str, source: &str, pointer: &str) -> Option<Value
     }
     let root = if source.is_empty() || source == "auto" {
         map.get("__NEXT_DATA__")
+            .or_else(|| map.get("__remixContext"))
+            .or_else(|| map.get("__NEXT_F__"))
+            .or_else(|| map.get("__APOLLO_STATE__"))
+            .or_else(|| map.get("__NUXT_DATA__"))
             .or_else(|| map.get("__INITIAL_STATE__"))
+            .or_else(|| map.get("__PRELOADED_STATE__"))
             .or_else(|| map.get("__STATE__"))
             .or_else(|| map.get("INIT_DATA"))
             .or_else(|| map.values().next())?
     } else {
-        map.get(source)?
+        map.get(source).or_else(|| {
+            if source == "ld+json" {
+                None
+            } else {
+                map.get("__NEXT_DATA__")
+                    .or_else(|| map.get("__remixContext"))
+                    .or_else(|| map.get("__NEXT_F__"))
+                    .or_else(|| map.get("__APOLLO_STATE__"))
+                    .or_else(|| map.get("__NUXT_DATA__"))
+                    .or_else(|| map.get("__INITIAL_STATE__"))
+            }
+        })?
     };
-    if pointer.is_empty() {
-        Some(root.clone())
-    } else {
-        root.pointer(pointer).cloned()
+    resolve_pointer(root, pointer).cloned()
+}
+
+/// Deterministically infer a repeating DOM record `Extraction` when an HTML page contains >= 3 structured item rows.
+pub fn infer_html_extraction(raw: &str, base: &str) -> Option<Extraction> {
+    let document = Html::parse_document(raw);
+    let _base_url = url::Url::parse(base).ok()?;
+    let mut candidates = vec![
+        "div.topic_row".to_string(),
+        "tr.athing".to_string(),
+        "article".to_string(),
+        "li.story".to_string(),
+        "div.post-item".to_string(),
+        "div.search-result".to_string(),
+        "div.result".to_string(),
+        "div.item".to_string(),
+        "li.item".to_string(),
+        "li.post".to_string(),
+    ];
+    if let Ok(scan_sel) = Selector::parse("main *[class], body *[class]") {
+        for el in document.select(&scan_sel).take(600) {
+            let tag = el.value().name();
+            if !matches!(tag, "div" | "li" | "article" | "tr") {
+                continue;
+            }
+            if let Some(cls) = el.value().classes().find(|c| {
+                !c.is_empty()
+                    && c.len() <= 40
+                    && c.chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+                    && [
+                        "row", "item", "topic", "post", "card", "story", "result", "entry",
+                        "article", "thread",
+                    ]
+                    .iter()
+                    .any(|kw| c.to_ascii_lowercase().contains(kw))
+            }) {
+                let cand = format!("{tag}.{cls}");
+                if !candidates.contains(&cand) {
+                    candidates.push(cand);
+                }
+            }
+        }
     }
+
+    let pick_field = |records: &[scraper::ElementRef<'_>],
+                      opts: &[(&str, &str)],
+                      abs_url: bool|
+     -> Option<OutputField> {
+        let min_hits = (records.len() * 4).div_ceil(5).max(2);
+        for &(sel_str, attr_str) in opts {
+            let parsed_sel = if sel_str.is_empty() {
+                None
+            } else {
+                let Ok(s) = Selector::parse(sel_str) else {
+                    continue;
+                };
+                Some(s)
+            };
+            let mut hits = 0usize;
+            for rec in records {
+                let target = if let Some(ref s) = parsed_sel {
+                    let mut m = rec.select(s);
+                    let first = m.next();
+                    if m.next().is_some() {
+                        None
+                    } else {
+                        first
+                    }
+                } else {
+                    Some(*rec)
+                };
+                let val = target
+                    .and_then(|el| {
+                        if attr_str.is_empty() {
+                            Some(element_text(el))
+                        } else {
+                            el.value().attr(attr_str).map(str::to_owned)
+                        }
+                    })
+                    .filter(|v| !v.trim().is_empty() && v.len() <= 16_384);
+                if val.is_some() {
+                    hits += 1;
+                }
+            }
+            if hits >= min_hits {
+                return Some(OutputField {
+                    selector: sel_str.to_string(),
+                    attribute: attr_str.to_string(),
+                    required: false,
+                    absolute_url: abs_url,
+                });
+            }
+        }
+        None
+    };
+
+    for items_sel in candidates {
+        let Ok(sel) = Selector::parse(&items_sel) else {
+            continue;
+        };
+        let records: Vec<_> = document.select(&sel).take(40).collect();
+        if records.len() < 3 {
+            continue;
+        }
+        let mut fields = std::collections::BTreeMap::new();
+        if let Some(f) = pick_field(
+            &records,
+            &[("", "data-topic-state-id"), ("", "data-id"), ("", "id")],
+            false,
+        ) {
+            fields.insert("id".into(), f);
+        }
+        if let Some(f) = pick_field(
+            &records,
+            &[
+                ("h1", ""),
+                ("h2", ""),
+                ("h3", ""),
+                ("h4", ""),
+                ("a.topic-title-link", ""),
+                (".topictitle a", ""),
+                (".titleline > a", ""),
+                (".title a", ""),
+                ("a[class*='title']", ""),
+                ("a", ""),
+            ],
+            false,
+        ) {
+            fields.insert("title".into(), f);
+        }
+        if let Some(f) = pick_field(
+            &records,
+            &[
+                ("a.topic-title-link", "href"),
+                (".topictitle a", "href"),
+                (".titleline > a", "href"),
+                ("h1 a", "href"),
+                ("h2 a", "href"),
+                ("h3 a", "href"),
+                (".title a", "href"),
+                ("a[class*='title']", "href"),
+                ("a[href]", "href"),
+            ],
+            true,
+        ) {
+            fields.insert("url".into(), f);
+        }
+        if !fields.contains_key("title") || !fields.contains_key("url") {
+            continue;
+        }
+        if let Some(f) = pick_field(
+            &records,
+            &[
+                (".topicdesc", ""),
+                (".summary", ""),
+                (".description", ""),
+                (".excerpt", ""),
+                (".snippet", ""),
+                ("p", ""),
+            ],
+            false,
+        ) {
+            fields.insert("summary".into(), f);
+        }
+        if let Some(f) = pick_field(
+            &records,
+            &[
+                (".topicinfo", ""),
+                (".subtext", ""),
+                (".meta", ""),
+                (".byline", ""),
+            ],
+            false,
+        ) {
+            fields.insert("meta".into(), f);
+        }
+        if let Some(f) = pick_field(&records, &[("time[datetime]", "datetime"), ("time", "")], false)
+        {
+            fields.insert("published_at".into(), f);
+        }
+        let extraction = Extraction {
+            items: items_sel,
+            fields,
+            page: std::collections::BTreeMap::new(),
+            limit: 50,
+        };
+        if extraction.valid() && extraction.extract(raw, base).is_some() {
+            return Some(extraction);
+        }
+    }
+    None
+}
+
+/// Extract same-origin category/feed navigation paths from `<nav>` for server-rendered list pages.
+pub fn nav_list_routes(raw: &str, base: &str) -> Vec<String> {
+    let document = Html::parse_document(raw);
+    let Ok(base_url) = url::Url::parse(base) else {
+        return Vec::new();
+    };
+    let Ok(sel) = Selector::parse("header nav a[href], nav a[href]") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for el in document.select(&sel).take(40) {
+        let Some(href) = el.value().attr("href") else {
+            continue;
+        };
+        let Ok(u) = base_url.join(href) else {
+            continue;
+        };
+        if u.origin() != base_url.origin() || u.query().is_some() {
+            continue;
+        }
+        let p = u.path();
+        if p == "/"
+            || p.len() > 36
+            || !p
+                .trim_matches('/')
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            continue;
+        }
+        let lower = p.to_ascii_lowercase();
+        if [
+            "/login",
+            "/signin",
+            "/signup",
+            "/register",
+            "/logout",
+            "/write",
+            "/submit",
+            "/search",
+            "/settings",
+            "/about",
+            "/faq",
+            "/terms",
+            "/privacy",
+            "/support",
+            "/sponsor",
+            "/guidelines",
+            "/start",
+            "/bookmarklet",
+            "/geekbots",
+            "/geekbadge",
+            "/lists",
+            "/threads",
+            "/comments",
+            "/past",
+            "/weekly",
+            "/articles",
+        ]
+        .contains(&lower.as_str())
+        {
+            continue;
+        }
+        if !out.contains(&p.to_string()) {
+            out.push(p.to_string());
+            if out.len() >= 6 {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Summarize SSR JSON payload shapes and CSRF/token selector metadata without exposing secret values.
@@ -555,6 +1038,76 @@ mod tests {
                     "<meta name='current-person' content=''>"
                 ))
                 .is_none()
+        );
+    }
+    #[test]
+    fn ssr_extraction_supports_remix_context_nextjs_flight_and_merged_ld_json() {
+        let html = r#"
+            <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","potentialAction":{"target":{"urlTemplate":"https://example.com/search?q={q}"}}}</script>
+            <script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList","itemListElement":[{"name":"MacBook Pro"}]}</script>
+            <script>window.__remixContext = {"state":{"loaderData":{"root":{"lang":"ko"},"routes/kr.search.buy-sell._index":{"buySellArticles":[{"title":"M3 Max; 16인치"}]}}}}; console.log("done");</script>
+            <script>self.__next_f.push([1,"6:[\"$\",\"$L10\",null,{\"children\":[\"$\",\"$L13\",null,{\"data\":[{\"id\":\"p1\",\"title\":\"Hello Velog\"}]}]}]\n"])</script>
+        "#;
+        let map = extract_ssr_map(html);
+        assert!(map.contains_key("__remixContext"));
+        assert!(map.contains_key("__NEXT_F__"));
+        assert!(map.contains_key("ld+json"));
+        assert_eq!(
+            extract_ssr_json(html, "__remixContext", "/routeData/buySellArticles/0/title"),
+            Some(json!("M3 Max; 16인치"))
+        );
+        assert_eq!(
+            extract_ssr_json(
+                html,
+                "__remixContext",
+                "/state/loaderData/routes/kr.search.buy-sell._index/buySellArticles/0/title"
+            ),
+            Some(json!("M3 Max; 16인치"))
+        );
+        assert_eq!(
+            extract_ssr_json(html, "__NEXT_F__", "/data/0/title"),
+            Some(json!("Hello Velog"))
+        );
+        assert_eq!(
+            extract_ssr_json(html, "ld+json", "/itemListElement/0/name"),
+            Some(json!("MacBook Pro"))
+        );
+    }
+    #[test]
+    fn infer_html_extraction_and_apollo_state_work() {
+        let html = r#"
+            <header><nav><a href="/">Home</a><a href="/new">New</a><a href="/show">Show</a><a href="/login">Login</a></nav></header>
+            <main>
+                <div class='topic_row' data-topic-state-id='101'>
+                    <div class='topictitle'><a href='https://example.org/a' class='topic-title-link'><h2>First Topic</h2></a></div>
+                    <div class='topicdesc'><a href='topic?id=101'>Summary one</a></div>
+                    <div class='topicinfo'><span>10 points</span><time datetime='2026-10-18T00:00:00Z'>1h</time></div>
+                </div>
+                <div class='topic_row' data-topic-state-id='102'>
+                    <div class='topictitle'><a href='https://example.org/b' class='topic-title-link'><h2>Second Topic</h2></a></div>
+                    <div class='topicdesc'><a href='topic?id=102'>Summary two</a></div>
+                    <div class='topicinfo'><span>20 points</span><time datetime='2026-10-18T01:00:00Z'>2h</time></div>
+                </div>
+                <div class='topic_row' data-topic-state-id='103'>
+                    <div class='topictitle'><a href='https://example.org/c' class='topic-title-link'><h2>Third Topic</h2></a></div>
+                    <div class='topicdesc'><a href='topic?id=103'>Summary three</a></div>
+                    <div class='topicinfo'><span>30 points</span><time datetime='2026-10-18T02:00:00Z'>3h</time></div>
+                </div>
+            </main>
+            <script>window.__APOLLO_STATE__ = {"ROOT_QUERY":{"searchPosts":{"count":1}},"Post:abc-123":{"id":"abc-123","title":"Rust Guide","url_slug":"rust-guide"}};</script>
+        "#;
+        let ext = infer_html_extraction(html, "https://news.hada.io/").expect("inferred");
+        assert_eq!(ext.items, "div.topic_row");
+        let extracted = ext.extract(html, "https://news.hada.io/").expect("extracted");
+        assert_eq!(extracted["items"][0]["id"], "101");
+        assert_eq!(extracted["items"][0]["title"], "First Topic");
+        assert_eq!(extracted["items"][0]["url"], "https://example.org/a");
+        assert_eq!(extracted["items"][0]["summary"], "Summary one");
+        let nav = nav_list_routes(html, "https://news.hada.io/");
+        assert_eq!(nav, vec!["/new".to_string(), "/show".to_string()]);
+        assert_eq!(
+            extract_ssr_json(html, "__ NEXT_F__", "/items/0/title"),
+            Some(json!("Rust Guide"))
         );
     }
 }

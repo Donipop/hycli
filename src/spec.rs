@@ -185,7 +185,7 @@ impl Operation {
         })?;
         if let Some(exp) = expected {
             if !exp.extract_pointer.is_empty() {
-                parsed = parsed.pointer(&exp.extract_pointer)?.clone();
+                parsed = crate::html::resolve_pointer(&parsed, &exp.extract_pointer)?.clone();
             }
         }
         Some(parsed)
@@ -202,7 +202,7 @@ impl Operation {
                 expected
                     .required_pointers
                     .iter()
-                    .all(|p| body.pointer(p).is_some())
+                    .all(|p| crate::html::resolve_pointer(&body, p).is_some())
             }),
             "html" => {
                 if !expected.ssr_json.is_empty() {
@@ -211,10 +211,10 @@ impl Operation {
                             expected
                                 .required_pointers
                                 .iter()
-                                .all(|p| body.pointer(p).is_some())
+                                .all(|p| crate::html::resolve_pointer(&body, p).is_some())
                         });
                 }
-                !expected.required_html_fields.is_empty()
+                (!expected.required_html_fields.is_empty() || expected.html.is_some())
                     && response.header("content-type").contains("text/html")
                     && !response.bytes.is_empty()
                     && {

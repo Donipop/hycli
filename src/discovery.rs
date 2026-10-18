@@ -419,6 +419,38 @@ fn normalize_bundle_path(raw: &str) -> Option<String> {
     // Convert Express/router style `:id` segments -> `{id}`
     let colon_re = regex::Regex::new(r"/:([A-Za-z_][A-Za-z0-9_]*)").expect("constant");
     cleaned = colon_re.replace_all(&cleaned, "/{$1}").into_owned();
+    // Sanitize all `{...}` segments to valid lowercase parameter IDs
+    let brace_re = regex::Regex::new(r"\{([^}]+)\}").expect("constant");
+    cleaned = brace_re
+        .replace_all(&cleaned, |caps: &regex::Captures<'_>| {
+            let raw_id = caps[1].trim();
+            let sanitized = if matches!(
+                raw_id,
+                "String" | "Number" | "encodeURIComponent" | "this" | "undefined" | "null"
+            ) {
+                "id".to_string()
+            } else {
+                raw_id
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() {
+                            c.to_ascii_lowercase()
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect::<String>()
+                    .trim_matches('_')
+                    .to_string()
+            };
+            let final_id = if crate::util::valid_id(&sanitized) {
+                sanitized
+            } else {
+                "id".to_string()
+            };
+            format!("{{{final_id}}}")
+        })
+        .into_owned();
     let trimmed = cleaned.trim_end_matches('/').to_owned();
     let path = if trimmed.is_empty() {
         "/".to_owned()
@@ -452,12 +484,18 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
     // 1. Normalize JS string concatenation inside fetch(...) e.g.
     //    fetch('/api/entries/' + encodeURIComponent(id) + '/comments', { method: 'POST' })
     let concat_re = regex::Regex::new(
-        r#"["'`]\s*\+\s*(?:encodeURIComponent\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*\)?\s*(?:\+\s*["'`])?"#,
+        r#"["'`]\s*\+\s*(?:(?:encodeURIComponent|String|Number)\s*\(\s*)?([A-Za-z_][A-Za-z0-9_.]*)\s*\)?\s*(?:\+\s*["'`])?"#,
     )
     .expect("constant");
     let normalized = concat_re
         .replace_all(text, |caps: &regex::Captures<'_>| {
-            let ident = caps[1].rsplit('.').next().unwrap_or("id");
+            let raw_ident = caps[1].rsplit('.').next().unwrap_or("id");
+            let ident = if matches!(raw_ident, "String" | "Number" | "encodeURIComponent" | "this")
+            {
+                "id".to_string()
+            } else {
+                raw_ident.to_ascii_lowercase()
+            };
             let has_trailing_quote = caps[0].ends_with('"')
                 || caps[0].ends_with('\'')
                 || caps[0].ends_with('`');
@@ -537,8 +575,8 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
         };
         let start = m.get(0).map(|x| x.start()).unwrap_or(0);
         let end = m.get(0).map(|x| x.end()).unwrap_or(0);
-        let window_start = start.saturating_sub(120);
-        let window_end = (end + 180).min(normalized.len());
+        let window_start = normalized.floor_char_boundary(start.saturating_sub(120));
+        let window_end = normalized.ceil_char_boundary((end + 180).min(normalized.len()));
         let nearby = &normalized[window_start..window_end];
         if let Some(mc) = method_re.captures(nearby) {
             routes.insert((mc[1].to_ascii_uppercase(), path.clone()));
@@ -549,7 +587,36 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
         }
     }
 
-    // 5. Match HTML `<form action="..." method="...">` routes
+    // 5. Match `new URL("/path", ...)` and Schema.org `urlTemplate` routes
+    let new_url_re = regex::Regex::new(
+        r#"(?:new\s+URL\s*\(\s*|["']urlTemplate["']\s*:\s*)["'`]((?:https?://[^/"'`\s]+)?/[^"'`\s]{1,260})["'`]"#,
+    )
+    .expect("constant");
+    for cap in new_url_re.captures_iter(&normalized).take(500) {
+        let raw_target = &cap[1];
+        let raw_path = if let Some(idx) = raw_target
+            .find("://")
+            .and_then(|i| raw_target[i + 3..].find('/').map(|j| i + 3 + j))
+        {
+            &raw_target[idx..]
+        } else {
+            raw_target
+        };
+        if let Some(path) = normalize_bundle_path(raw_path) {
+            routes.insert(("GET".into(), path));
+        }
+    }
+    let search_lit_re = regex::Regex::new(
+        r#"["'`](/(?:[a-z]{2}/)?search(?:/[A-Za-z0-9_.-]+)?)(?:\?[A-Za-z0-9_=&.-]*)?["'`]"#,
+    )
+    .expect("constant");
+    for cap in search_lit_re.captures_iter(&normalized).take(200) {
+        if let Some(path) = normalize_bundle_path(&cap[1]) {
+            routes.insert(("GET".into(), path));
+        }
+    }
+
+    // 6. Match HTML `<form action="..." method="...">` routes
     let form_re = regex::Regex::new(r"(?is)<form\b([^>]*)>").expect("constant");
     let action_re = regex::Regex::new(
         r#"(?i)\baction\s*=\s*["']((?:https?://[^/"'\s]+)?/[^"'\s<>]{1,260})["']"#,
@@ -583,17 +650,87 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
     routes
 }
 
-/// Extract same-site `<script src="...">` bundle URLs from HTML.
+fn bundle_priority(url: &str) -> usize {
+    let lower = url.to_ascii_lowercase();
+    if [
+        "polyfill",
+        "vendor",
+        "webpack-",
+        "framework-",
+        "runtime-",
+        "main-app-",
+        "commons-",
+        "fd9d1056-",
+    ]
+    .iter()
+    .any(|low| lower.contains(low))
+    {
+        return 3;
+    }
+    if [
+        "/app/",
+        "/pages/",
+        "/routes/",
+        "/_remix/",
+        "/page-",
+        "/_index-",
+        "/index-",
+        "entry.client",
+        "search",
+        "query",
+        "mutation",
+        "graphql",
+        "api",
+        "manifest",
+    ]
+    .iter()
+    .any(|hi| lower.contains(hi))
+    {
+        return 0;
+    }
+    2
+}
+
+/// Extract application JS bundle URLs from `<script src>`, `<link rel="modulepreload">`, and inline ES module imports.
 pub fn bundle_urls(base: &Url, html: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     let script_re =
         regex::Regex::new(r#"(?is)<script\b[^>]*\bsrc\s*=\s*["']([^"'<>\s]+)["']"#).expect("constant");
-    for cap in script_re.captures_iter(html).take(100) {
-        let raw = cap[1].replace("&amp;", "&");
+    let link_re = regex::Regex::new(
+        r#"(?is)<link\b[^>]*\b(?:rel\s*=\s*["']modulepreload["']|as\s*=\s*["']script["'])[^>]*\bhref\s*=\s*["']([^"'<>\s]+)["']|<link\b[^>]*\bhref\s*=\s*["']([^"'<>\s]+)["'][^>]*\b(?:rel\s*=\s*["']modulepreload["']|as\s*=\s*["']script["'])"#,
+    )
+    .expect("constant");
+    let import_re = regex::Regex::new(
+        r#"\bimport\s+(?:[^"'`;\n]{1,120}\s+from\s+)?["']((?:https?://[^/"'\s]+)?/[^"'\s]+\.m?js(?:\?[^"'\s]*)?)["']"#,
+    )
+    .expect("constant");
+
+    let raw_candidates = script_re
+        .captures_iter(html)
+        .take(120)
+        .filter_map(|c| c.get(1).map(|m| m.as_str()))
+        .chain(
+            link_re
+                .captures_iter(html)
+                .take(120)
+                .filter_map(|c| c.get(1).or_else(|| c.get(2)).map(|m| m.as_str())),
+        )
+        .chain(
+            import_re
+                .captures_iter(html)
+                .take(120)
+                .filter_map(|c| c.get(1).map(|m| m.as_str())),
+        );
+
+    for raw_match in raw_candidates {
+        let raw = raw_match.replace("&amp;", "&");
         let Ok(mut url) = base.join(&raw) else {
             continue;
         };
+        if !matches!(url.scheme(), "http" | "https") {
+            continue;
+        }
         url.set_fragment(None);
         let lower = url.as_str().to_ascii_lowercase();
         if [
@@ -605,32 +742,95 @@ pub fn bundle_urls(base: &Url, html: &str) -> Vec<String> {
             "sentry",
             "facebook.net",
             "connect.facebook",
+            "amplitude.com",
+            "datadoghq",
+            "braze",
+            "intercom",
+            "channel.io",
+            "wcs.naver.net",
+            "kakao.com/sdk",
         ]
         .iter()
         .any(|skip| lower.contains(skip))
         {
             continue;
         }
-        if crate::net::same_site_origin(&url, base) || lower.contains("/_next/static/") || lower.contains("/assets/") {
+        let path_lower = url.path().to_ascii_lowercase();
+        if crate::net::same_site_origin(&url, base)
+            || path_lower.ends_with(".js")
+            || path_lower.ends_with(".mjs")
+            || lower.contains("/_next/static/")
+            || lower.contains("/_remix/")
+            || lower.contains("/assets/")
+        {
             let s = url.to_string();
             if seen.insert(s.clone()) {
                 out.push(s);
             }
         }
-        if out.len() >= 12 {
+        if out.len() >= 80 {
             break;
         }
     }
+    let base_pri: Vec<usize> = out.iter().map(|u| bundle_priority(u)).collect();
+    let mut indexed: Vec<(usize, String)> = out.into_iter().enumerate().collect();
+    indexed.sort_by_key(|(i, _)| {
+        let p = base_pri[*i];
+        if p == 2 && (base_pri.get(i + 1) == Some(&0) || base_pri.get(i + 2) == Some(&0)) {
+            1
+        } else {
+            p
+        }
+    });
+    let mut out: Vec<String> = indexed.into_iter().map(|(_, u)| u).collect();
+    out.truncate(24);
     out
 }
 
 /// Extract same-site API server origins referenced inside HTML or JS bundles.
 pub fn bundle_api_bases(base: &Url, text: &str) -> BTreeSet<String> {
     let mut bases = BTreeSet::new();
-    let url_re = regex::Regex::new(r#"https?://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/api(?:/v[0-9]+)?|/v[1-9][0-9]*|/graphql|/gql)?"#).expect("constant");
+    let url_re = regex::Regex::new(
+        r#"https?://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/api(?:/v[0-9]+)?|/v[1-9][0-9]*|/graphql|/gql|/rest)?"#,
+    )
+    .expect("constant");
     for m in url_re.find_iter(text).take(1000) {
         if let Ok(url) = Url::parse(m.as_str()) {
-            if safe_server(&url) && crate::net::same_site_origin(&url, base) {
+            if !safe_server(&url) || !crate::net::same_site_origin(&url, base) {
+                continue;
+            }
+            let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+            if [
+                "images.",
+                "img.",
+                "cdn.",
+                "assets.",
+                "static.",
+                "media.",
+                "cache.",
+                "fonts.",
+            ]
+            .iter()
+            .any(|p| host.starts_with(p))
+            {
+                continue;
+            }
+            let has_api_path = url.path() != "/" && !url.path().is_empty();
+            let has_api_host = [
+                "api.",
+                "api-",
+                "v1.",
+                "v2.",
+                "v3.",
+                "gql.",
+                "graphql.",
+                "gateway.",
+                "backend.",
+                "studio-api",
+            ]
+            .iter()
+            .any(|p| host.starts_with(p));
+            if has_api_path || has_api_host || url.origin() == base.origin() {
                 bases.insert(url.origin().ascii_serialization());
             }
         }
@@ -799,5 +999,29 @@ mod tests {
                 ("POST".into(), "/teams/{team}/items".into())
             ])
         );
+    }
+    #[test]
+    fn bundle_routes_and_urls_handle_multibyte_utf8_remix_preload_and_priority_sorting() {
+        let korean_js = format!(
+            "{}\"/api/v1/topics\"{}; new URL(\"/api/trending-posts?limit=20\", window.location.origin); {{\"urlTemplate\":\"https://www.daangn.com/kr/search/?q={{search_string}}\"}}",
+            "가나다라마바사아자차카타파하을를이히".repeat(4),
+            "한글텍스트경계테스트입니다".repeat(4)
+        );
+        let routes = bundle_routes(&korean_js);
+        assert!(routes.contains(&("GET".into(), "/api/v1/topics".into())));
+        assert!(routes.contains(&("GET".into(), "/api/trending-posts".into())));
+        assert!(routes.contains(&("GET".into(), "/kr/search".into())));
+
+        let base = Url::parse("https://www.daangn.com/kr/").unwrap();
+        let html = r#"
+            <script src="/_next/static/chunks/polyfills-abc.js"></script>
+            <script src="https://assets.velcdn.com/_next/static/chunks/app/(list)/page-123.js"></script>
+            <link rel="modulepreload" href="/_remix/entry.client-xyz.js" />
+            <script type="module">import * as route0 from "/_remix/routes/kr.search.buy-sell._index-def.js";</script>
+        "#;
+        let urls = bundle_urls(&base, html);
+        assert_eq!(urls.len(), 4);
+        assert!(urls[0].contains("page-123.js") || urls[0].contains("_remix"));
+        assert!(urls.last().unwrap().contains("polyfills-abc.js"));
     }
 }
