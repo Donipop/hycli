@@ -437,21 +437,32 @@ pub fn extract_ssr_map(html: &str) -> std::collections::BTreeMap<String, Value> 
     if let Ok(sel) = Selector::parse("script") {
         for script in document.select(&sel).take(250) {
             let id = script.value().id().unwrap_or("");
+            let script_key = if !id.is_empty() {
+                id
+            } else {
+                script
+                    .value()
+                    .attr("data-target")
+                    .or_else(|| script.value().attr("data-island"))
+                    .or_else(|| script.value().attr("data-ssr"))
+                    .unwrap_or("")
+            };
             let r#type = script.value().attr("type").unwrap_or("");
             let raw: String = script.text().collect();
             let raw = raw.trim();
             if raw.is_empty() || raw.len() > 4 * 1024 * 1024 {
                 continue;
             }
-            if (!id.is_empty()
-                && (id == "__NEXT_DATA__"
-                    || id == "__NUXT_DATA__"
-                    || r#type.contains("json")))
+            if (!script_key.is_empty()
+                && (script_key == "__NEXT_DATA__"
+                    || script_key == "__NUXT_DATA__"
+                    || r#type.contains("json")
+                    || script_key.ends_with(".embeddedData")))
                 || r#type.eq_ignore_ascii_case("application/ld+json")
             {
                 if let Ok(val) = serde_json::from_str::<Value>(raw) {
-                    if !id.is_empty() {
-                        payloads.insert(id.to_owned(), val);
+                    if !script_key.is_empty() {
+                        payloads.insert(script_key.to_owned(), val);
                     } else if let Some(existing) = payloads.get_mut("ld+json") {
                         if let (Value::Object(ex_map), Value::Object(new_map)) = (existing, &val) {
                             for (k, v) in new_map {

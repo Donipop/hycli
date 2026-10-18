@@ -418,8 +418,16 @@ impl Policy {
                     "INSERT INTO request_gate(scope) VALUES(?1) ON CONFLICT(scope) DO NOTHING",
                     [scope],
                 )?;
-                let (lease_until, next_at, cooldown, paused): (i64, i64, i64, String) = tx.query_row("SELECT lease_until,next_at,cooldown,paused FROM request_gate WHERE scope=?1", [scope], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+                let (lease_until, next_at, mut cooldown, mut paused): (i64, i64, i64, String) = tx.query_row("SELECT lease_until,next_at,cooldown,paused FROM request_gate WHERE scope=?1", [scope], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
                 let now = util::unix_ms();
+                if paused == "blocked_by_site" && (cooldown == 0 || now >= cooldown) {
+                    tx.execute(
+                        "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
+                        [scope],
+                    )?;
+                    paused.clear();
+                    cooldown = 0;
+                }
                 if !paused.is_empty() {
                     return Err(AppError::api(
                         &paused,
@@ -439,9 +447,15 @@ impl Policy {
                 }
                 let wait = (lease_until.max(next_at) - now).max(0);
                 if wait == 0 {
+                    let jitter = if self.interval_ms >= 500 {
+                        ((now as u64 ^ token.as_bytes().first().copied().unwrap_or(0) as u64) % 180)
+                            as i64
+                    } else {
+                        0
+                    };
                     tx.execute(
                         "UPDATE request_gate SET lease=?2,lease_until=?3,next_at=?4 WHERE scope=?1",
-                        params![scope, token, now + 120_000, now + self.interval_ms],
+                        params![scope, token, now + 120_000, now + self.interval_ms + jitter],
                     )?;
                     tx.execute(
                         "INSERT INTO request_event(scope,at) VALUES(?1,?2)",
@@ -475,7 +489,7 @@ impl Policy {
             .map_err(|_| AppError::api("internal", 500))?;
         let pause = if status == 401 {
             "auth_required"
-        } else if status == 403 || challenge {
+        } else if challenge {
             "blocked_by_site"
         } else {
             ""
@@ -486,6 +500,8 @@ impl Policy {
                     .unwrap_or(Duration::from_secs(60))
                     .as_millis()
                     .min(i64::MAX as u128) as i64
+        } else if challenge {
+            util::unix_ms() + 30_000
         } else {
             0
         };
@@ -497,7 +513,7 @@ impl Policy {
             .lock()
             .map_err(|_| AppError::api("internal", 500))?
             .execute(
-                "UPDATE request_gate SET paused='' WHERE scope=?1 AND paused='auth_required'",
+                "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1 AND paused IN ('auth_required','blocked_by_site')",
                 [scope],
             )?;
         Ok(())
@@ -506,7 +522,10 @@ impl Policy {
         self.conn
             .lock()
             .map_err(|_| AppError::api("internal", 500))?
-            .execute("UPDATE request_gate SET paused='' WHERE scope=?1", [scope])?;
+            .execute(
+                "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
+                [scope],
+            )?;
         Ok(())
     }
 }
