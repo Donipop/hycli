@@ -40,7 +40,7 @@ enum Cmd {
         #[arg(long)]
         draft: Option<String>,
         /// Maximum number of JS bundles to scan for API routes.
-        #[arg(long, default_value_t = 4)]
+        #[arg(long, default_value_t = 8)]
         max_bundles: usize,
     },
     /// Inspect the local evidence and activity database.
@@ -625,7 +625,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             max_bundles,
         } => {
             let core = runner(&deps)?;
-            let (mut report, spec) = core.recon(&deps.site, &url, max_bundles.min(4)).await?;
+            let (mut report, spec) = core.recon(&deps.site, &url, max_bundles.min(24)).await?;
             if let Some(out_path) = draft {
                 let yaml = serde_yaml::to_string(&spec)
                     .map_err(|e| apperr::spec(format!("Failed to serialize YAML ({e})"), ""))?;

@@ -429,6 +429,48 @@ pub fn ssr_payloads(html: &str) -> Value {
     })
 }
 
+/// Structural form descriptors (action, method, and named input/select/textarea controls) without field values.
+pub fn forms(html: &str) -> Value {
+    let document = Html::parse_document(html);
+    let mut out = Vec::new();
+    let Ok(form_sel) = Selector::parse("form") else {
+        return json!(out);
+    };
+    let control_sel = Selector::parse("input[name], select[name], textarea[name]").unwrap();
+    for form in document.select(&form_sel).take(40) {
+        let action = form.value().attr("action").unwrap_or("").trim();
+        let method = form
+            .value()
+            .attr("method")
+            .unwrap_or("GET")
+            .trim()
+            .to_ascii_uppercase();
+        let mut inputs = Vec::new();
+        for ctrl in form.select(&control_sel).take(60) {
+            let Some(name) = ctrl.value().attr("name").filter(|n| stable_name(n)) else {
+                continue;
+            };
+            let tag = ctrl.value().name();
+            let kind = ctrl
+                .value()
+                .attr("type")
+                .unwrap_or(if tag == "input" { "text" } else { tag });
+            let required = ctrl.value().attr("required").is_some();
+            inputs.push(json!({
+                "name": name,
+                "type": kind,
+                "required": required,
+            }));
+        }
+        out.push(json!({
+            "action": action,
+            "method": method,
+            "inputs": inputs,
+        }));
+    }
+    json!(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

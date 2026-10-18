@@ -77,7 +77,13 @@ pub fn priority(url: &str) -> i32 {
         return 700;
     }
     if lower.ends_with(".js") {
-        return 100;
+        if ["polyfill", "vendor", "framework", "runtime", "turbopack"]
+            .iter()
+            .any(|noise| lower.contains(noise))
+        {
+            return 100;
+        }
+        return 300;
     }
     200
 }
@@ -259,7 +265,7 @@ pub fn api_schema(text: &str) -> Option<serde_json::Value> {
 
 pub fn route_matches(path: &str, documented: &str, prefixes: &BTreeSet<String>) -> bool {
     fn shape(path: &str) -> String {
-        regex::Regex::new(r"\{[^}]+\}")
+        regex::Regex::new(r"\{\{[^}]+\}\}|\{[^}]+\}")
             .unwrap()
             .replace_all(path, "{}")
             .into_owned()
@@ -268,7 +274,7 @@ pub fn route_matches(path: &str, documented: &str, prefixes: &BTreeSet<String>) 
         if shape(path) == shape(template) {
             return true;
         }
-        let variables = regex::Regex::new(r"\{[^}/]+\}").unwrap();
+        let variables = regex::Regex::new(r"\{\{[^}/]+\}\}|\{[^}/]+\}").unwrap();
         let mut pattern = String::from("^");
         let mut end = 0;
         for variable in variables.find_iter(template) {
@@ -540,6 +546,38 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
             routes.insert(("POST".into(), path));
         } else {
             routes.insert(("GET".into(), path));
+        }
+    }
+
+    // 5. Match HTML `<form action="..." method="...">` routes
+    let form_re = regex::Regex::new(r"(?is)<form\b([^>]*)>").expect("constant");
+    let action_re = regex::Regex::new(
+        r#"(?i)\baction\s*=\s*["']((?:https?://[^/"'\s]+)?/[^"'\s<>]{1,260})["']"#,
+    )
+    .expect("constant");
+    let form_method_re =
+        regex::Regex::new(r#"(?i)\bmethod\s*=\s*["'](GET|POST|PUT|PATCH|DELETE)["']"#)
+            .expect("constant");
+    for cap in form_re.captures_iter(text).take(200) {
+        let attrs = &cap[1];
+        let Some(act) = action_re.captures(attrs) else {
+            continue;
+        };
+        let raw_target = &act[1];
+        let raw_path = if let Some(idx) = raw_target
+            .find("://")
+            .and_then(|i| raw_target[i + 3..].find('/').map(|j| i + 3 + j))
+        {
+            &raw_target[idx..]
+        } else {
+            raw_target
+        };
+        if let Some(path) = normalize_bundle_path(raw_path) {
+            let method = form_method_re
+                .captures(attrs)
+                .map(|m| m[1].to_ascii_uppercase())
+                .unwrap_or_else(|| "GET".into());
+            routes.insert((method, path));
         }
     }
     routes

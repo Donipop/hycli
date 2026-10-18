@@ -76,11 +76,31 @@ pub struct PreparationReport {
     pub workflows_total: usize,
     pub workflows_complete: usize,
 }
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(default)]
+pub struct SelfQa {
+    pub lens: String,
+    pub question: String,
+    pub evidence: String,
+    pub answer: String,
+    pub action_taken: String,
+}
+impl SelfQa {
+    pub fn redact(&mut self) {
+        self.lens = util::redact_text(&self.lens);
+        self.question = util::redact_text(&self.question);
+        self.evidence = util::redact_text(&self.evidence);
+        self.answer = util::redact_text(&self.answer);
+        self.action_taken = util::redact_text(&self.action_taken);
+    }
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WebsiteUnderstanding {
     pub summary: String,
     pub workflows: Vec<WebsiteWorkflow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub self_qa: Vec<SelfQa>,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]

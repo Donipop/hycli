@@ -8,17 +8,19 @@ Validate with `hycli spec validate FILE`, install with `hycli spec install FILE`
 
 ## Requests
 
-The root has `spec_version: 1`, `site` (`name`, `title`, `base_url`, optional `source_url`), optional `defaults.headers`, `auth`, and `operations`. Each operation has a unique `name`, `desc`, `method`, `/path`, `effect`, and `evidence`. `effect` is `read`, `write`, or `unknown`; an agent's declaration never overrides the runtime's classification.
+The root has `spec_version` (`1` or `2`), `site` (`name`, `title`, `base_url`, optional `source_url`), optional `defaults.headers`, `auth`, and `operations`. Each operation has a unique `name`, `desc`, `method`, `/path`, `effect`, and `evidence`. `effect` is `read`, `write`, or `unknown`; an agent's declaration never overrides the runtime's classification.
 
 | Field | Meaning |
 | --- | --- |
 | `params` | Named `{variables}` in the path, escaped as individual segments. |
-| `query` | URL query parameters. |
+| `preflight` | Optional `spec_version: 2` read-only GET steps (`name`, `path`, `extract`) that extract dynamic tokens, CSRF nonces, or `buildId` values (`json:/pointer`, `ssr:<key>#<pointer>`, `css:selector@attr`, `header:name`, `cookie:name`) for `{{step.<name>.<var>}}` interpolation across `path`, `query`, `headers`, and `body`. |
+| `query` | URL query parameters (supports `{{step.<name>.<var>}}` and `{{<input>}}` interpolation in `spec_version: 2`). |
 | `body.json` | Fields serialized in a JSON object. |
+| `body.json_template` | Optional `spec_version: 2` nested JSON structure interpolating `{{<input>}}` and `{{step.<name>.<var>}}` values. |
 | `body.form` | Fields encoded as `application/x-www-form-urlencoded`. Choose one body encoding. |
 | `base_url` | Optional operation-specific server supported by published evidence. |
 | `transport` | Omit or use `http` for HTTP. `browser` is for rendered HTML GET reads. |
-| `response` | Expected format, required structure and optional HTML extraction. |
+| `response` | Expected format, required structure, optional SSR JSON extraction (`ssr_json`, `extract_pointer`, `strip_prefix`), and optional HTML extraction. |
 
 Input definitions contain `type` (`string`, `int`, `float`, `bool`, `json`), `required`, and optional `default`. Required inputs have no defaults. `json` accepts a nested object or array as one input, such as a GraphQL `variables` object. Input names are exact: a literal hyphenated name is preserved. CLI `--arg 'name=value'` splits on the first equals sign.
 
@@ -61,7 +63,7 @@ For JavaScript-rendered pages, set `transport: browser`, `method: GET` and the s
 
 ## Accounts and secrets
 
-Public operations omit `auth`. Header authentication declares a named strategy with `kind: header`, the documented `header`, optional `prefix`, and `value_from: store:SITE/KEY`. The user supplies the value in **Website API keys**. A browser strategy uses `kind: browser` and a verified account from the local vault. Operations refer to a strategy by name.
+Public operations omit `auth`. Header authentication declares a named strategy with `kind: header`, the documented `header`, optional `prefix`, and `value_from: store:SITE/KEY`. The user supplies the value in **Website API keys**. A browser strategy uses `kind: browser` and a verified account from the local vault. A `spec_version: 2` derived strategy uses `kind: derived`, `header`, optional `prefix`, and `value_from: cookie:<name>`, `storage:<key>[#<json_pointer>]`, or `header:<captured_name>` to project a verified browser session value into a request header without exposing secrets to prompts or outputs. Operations refer to a strategy by name.
 
 An operation on a different API origin does not inherit the website's cookies or token. Header authentication has its own exact origin scope. A website's browser login cannot substitute for a separately documented API key. Generated recipes reference local key names and structure while credential values stay outside model prompts and exports.
 

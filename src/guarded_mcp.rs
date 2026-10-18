@@ -104,22 +104,22 @@ impl Server {
                 ),
                 (
                     "hycli_recon",
-                    "Deterministic fast recon without an AI loop: fetches the URL, mines SSR JSON (__NEXT_DATA__, window.__STATE__), documented routes, and JS bundle fetch/axios/GraphQL endpoints.",
-                    json!({"type":"object","properties":{"url":{"type":"string"},"site":{"type":"string"},"max_bundles":{"type":"integer","default":4}},"required":["url"],"additionalProperties":false}),
+                    "Deterministic fast recon without an AI loop: fetches the URL, mines SSR JSON (__NEXT_DATA__, __NUXT_DATA__, ld+json, window.__STATE__), HTML forms, documented routes, and prioritized JS bundle fetch/axios/GraphQL endpoints (up to 24 bundles). Use this to exhaust the raw surface before authoring or requesting tools.",
+                    json!({"type":"object","properties":{"url":{"type":"string"},"site":{"type":"string"},"max_bundles":{"type":"integer","default":8}},"required":["url"],"additionalProperties":false}),
                 ),
                 (
                     "hycli_prepare",
-                    "Prepare tools using actual documentation and bounded reads. No live writes, fuzzing or guessed endpoint sweeps.",
+                    "Prepare website tools using structured adversarial self-interrogation (self_qa), SSR/JS bundle/form recon, SiteSpec v2 preflight extractors, derived session headers, and live read verification. No live writes, fuzzing or guessed endpoint sweeps.",
                     json!({"type":"object","properties":{"url":{"type":"string"},"provider":{"type":"string"},"intent":{"type":"string","description":"The user outcome to support, including prerequisite list/search actions for opaque identifiers"}},"required":["url"],"additionalProperties":false}),
                 ),
                 (
                     "hycli_request",
-                    "Ask the AI to add missing capabilities to an installed website while preserving its existing actions. Returns a preparation job; follow hycli_job for added actions and capability gaps. Does not execute website changes.",
+                    "Ask the AI to add missing capabilities to an installed website while preserving its existing actions. Runs adversarial self-interrogation (self_qa) across SSR state, JS bundles, HTML forms, and preflight/derived auth to close workflow gaps. Follow hycli_job for added actions, self_qa audit trail, and capability gaps. Does not execute website changes.",
                     json!({"type":"object","properties":{"site":{"type":"string"},"instruction":{"type":"string","description":"Missing functionality in the user's own words, including full workflows such as editing and publishing blog posts"},"provider":{"type":"string"}},"required":["site","instruction"],"additionalProperties":false}),
                 ),
                 (
                     "hycli_job",
-                    "Read preparation progress or a sanitized action result. Never contains sign-in secrets.",
+                    "Read preparation progress, structured self_qa audit trail, or a sanitized action result. Never contains sign-in secrets.",
                     json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),
                 ),
                 (
@@ -232,10 +232,10 @@ impl Server {
                     let max_bundles = args
                         .get("max_bundles")
                         .and_then(Value::as_u64)
-                        .unwrap_or(4) as usize;
+                        .unwrap_or(8) as usize;
                     let (report, _) = self
                         .core
-                        .recon(get("site"), get("url"), max_bundles.min(8))
+                        .recon(get("site"), get("url"), max_bundles.min(24))
                         .await?;
                     return Ok(report);
                 }

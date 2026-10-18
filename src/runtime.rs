@@ -583,7 +583,7 @@ impl Runtime {
             Some(&request.account_id),
         )?;
         let effect = policy::operation_effect(op, &request.inputs);
-        let (url, mut body) = sp.build_request(op, &request.inputs)?;
+        let (mut url, mut body) = sp.build_request(op, &request.inputs)?;
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
@@ -606,7 +606,11 @@ impl Runtime {
                 &mut secrets,
             )
             .await?;
-            let (_, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
+            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
+            if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
+                return Err(AppError::api("unsafe_target", 400));
+            }
+            url = rebuilt_url;
             body = rebuilt_body;
             let empty_resolved = BTreeMap::new();
             for (_, v) in &mut headers {
@@ -859,7 +863,12 @@ impl Runtime {
                     None
                 };
                 if let Some(val) = extracted.filter(|s| !s.is_empty()) {
-                    secrets.push(val.clone());
+                    if expr.starts_with("cookie:")
+                        || expr.starts_with("header:")
+                        || util::secret_field(var)
+                    {
+                        secrets.push(val.clone());
+                    }
                     effective_inputs.insert(format!("step.{}.{var}", step.name), val.clone());
                     effective_inputs.entry(var.clone()).or_insert(val);
                 }
@@ -1227,26 +1236,43 @@ impl Runtime {
         let doc_routes = crate::discovery::documented_routes(&vis);
         let mut bundle_routes = crate::discovery::bundle_routes(&text);
         let mut api_bases = crate::discovery::bundle_api_bases(&r_url, &text);
-        let max_bundles = max_bundles.min(4);
-        let script_urls = crate::discovery::bundle_urls(&r_url, &text);
+        let max_bundles = max_bundles.clamp(1, 24);
+        let mut script_urls: Vec<String> = crate::discovery::bundle_urls(&r_url, &text)
+            .into_iter()
+            .collect();
+        script_urls.sort_by_key(|u| {
+            let lower = u.to_ascii_lowercase();
+            if lower.contains("polyfill")
+                || lower.contains("vendor")
+                || lower.contains("runtime")
+                || lower.contains("framework")
+            {
+                1usize
+            } else {
+                0usize
+            }
+        });
         let mut scanned_bundles = Vec::new();
         for bundle_url in script_urls.into_iter().take(max_bundles) {
-            if !crate::net::validate_url(&bundle_url)
-                .is_ok_and(|u| crate::net::same_site_origin(&u, &r_url))
-            {
+            let Ok(parsed_bundle) = crate::net::validate_url(&bundle_url) else {
                 continue;
-            }
-            if let Ok(br) = self.read_page(&bundle_url, &account_id).await {
+            };
+            let bundle_account = if crate::net::same_site_origin(&parsed_bundle, &r_url) {
+                account_id.as_str()
+            } else {
+                ""
+            };
+            if let Ok(br) = self.read_page(&bundle_url, bundle_account).await {
                 if br.successful() {
                     let btext = String::from_utf8_lossy(&br.bytes);
                     for route in crate::discovery::bundle_routes(&btext) {
-                        if bundle_routes.len() < 48 {
+                        if bundle_routes.len() < 96 {
                             bundle_routes.insert(route);
                         }
                     }
                     if let Ok(br_url) = crate::net::validate_url(&br.url) {
                         for base in crate::discovery::bundle_api_bases(&br_url, &btext) {
-                            if api_bases.len() < 8 {
+                            if api_bases.len() < 16 {
                                 api_bases.insert(base);
                             }
                         }
@@ -1434,6 +1460,7 @@ impl Runtime {
                 "bundle_routes": bundle_route_strs,
                 "scanned_bundles": scanned_bundles,
                 "ssr_payloads": ssr_payloads,
+                "forms": crate::html::forms(&text),
                 "draft_operations": draft.operations.iter().map(|o| json!({
                     "name": o.name,
                     "method": o.method,

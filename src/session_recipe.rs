@@ -220,7 +220,9 @@ impl Runtime {
         offset: usize,
     ) -> AppResult<Value> {
         let credential = self.credential(account)?;
-        if credential.origin != origin {
+        if credential.origin != origin
+            && !crate::runtime::same_site_url(&credential.origin, origin).unwrap_or(false)
+        {
             return Err(AppError::api("unsafe_target", 400));
         }
         let keys: Vec<_> = credential

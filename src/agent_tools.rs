@@ -44,13 +44,14 @@ pub fn catalog(environment: &Environment) -> Value {
     json!([
         {"tool":"environment.inspect","arguments":{},"purpose":"Refresh the actual OS, installed/running browsers, registered profiles and available capabilities. Paths are private handles."},
         {"tool":"web.read","arguments":{"url":"published URL"},"purpose":"Read one evidenced page, reference or script. A failed read is evidence: choose another source or browser rendering, rather than repeat it."},
+        {"tool":"web.recon","arguments":{"url":"published URL"},"purpose":"Deterministically inspect SSR state payloads (__NEXT_DATA__, __NUXT_DATA__, JSON-LD), linked JavaScript bundles, HTML forms, and discovered API routes/bases without browser rendering."},
         {"tool":"evidence.search","arguments":{"source_url":"previously read URL","query":"heading or relevant text","offset":0},"purpose":"Retrieve a relevant section from a large source, including content beyond the initial excerpt. Empty query uses character offset."},
         {"tool":"session.import","arguments":{"profile_id":"profile handle from environment"},"purpose":"Import only this website's cookies and origin storage from one discovered profile. Cookie presence is not verified login."},
-        {"tool":"session.inspect","arguments":{"account_id":"candidate account handle","storage_key":"optional exact key to inspect its JSON shape","offset":0},"purpose":"List local key names and types, never values. Select storage_key to inspect nested JSON structure for a connection recipe. Use next_offset to read more keys."},
-        {"tool":"session.observe","arguments":{"account_id":"candidate account handle","url":"published or observed same-origin GET URL"},"purpose":"Inspect a candidate session before identity verification: returns actual status, JSON structure or selectable HTML fields, and published links without private field values. Use this on the website entry or observed account page to construct a JSON or HTML identity recipe. Does not mark the account or operation verified. No browser engine required."},
+        {"tool":"session.inspect","arguments":{"account_id":"candidate account handle","storage_key":"optional exact key to inspect its JSON shape","offset":0},"purpose":"List local storage key names, types, cookie_names, and captured_headers (never secret values). Select storage_key to inspect nested JSON structure for a connection recipe or derived auth."},
+        {"tool":"session.observe","arguments":{"account_id":"candidate account handle","url":"published or observed same-site GET URL"},"purpose":"Inspect a candidate session before identity verification: returns actual status, JSON structure or selectable HTML fields, SSR keys, cookie_names, and published links without private field values. Use this on the website entry or observed account page to construct a JSON or HTML identity recipe. Does not mark the account or operation verified. No browser engine required."},
         {"tool":"session.verify","arguments":{"account_id":"candidate account handle","recipe":{"identity_url":"evidenced current-account GET URL","headers":[{"header":"Authorization","source":"local_storage|cookie|captured_header","key":"observed local key","json_pointer":"optional JSON pointer","prefix":"documented prefix or empty string"}],"identity":{"user_id":"/id","email":"/email","name":"/name"},"identity_html":{"user_id":{"selector":"observed CSS selector","attribute":"observed attribute or empty for text"},"email":{"selector":"optional observed selector","attribute":"value"},"name":{"selector":"optional observed selector","attribute":""}},"evidence":"exact supporting source URL"}},"purpose":"Verify the current account against an anonymous baseline. For JSON use identity pointers and omit identity_html. For HTML use identity_html fields observed by session.observe or browser.render, and empty headers for cookie authentication. Each selector must match one nonempty value, and anonymous access must not expose an identity. Never infer login from a public profile or cookie alone. No browser engine required."},
-        {"tool":"session.read","arguments":{"account_id":"verified account handle","url":"evidenced GET URL"},"purpose":"Check whether this verified browser session can actually read an evidenced route. Returns status and JSON structure without private leaf values. On success a matching operation may use auth kind=browser. A browser session never configures a separate API or bot key."},
-        {"tool":"browser.render","available":environment.browsers.iter().any(|b| b.protocol=="chromium-cdp"),"arguments":{"url":"published page or app entry URL","engine_id":"available browser handle","account_id":"optional candidate account handle"},"purpose":"Render a page with a discovered engine, optionally restore this site's session, and observe read requests and account context. No clicks, form submission or test writes. Returns HTML text, published links, request shapes and observed authentication header names."}
+        {"tool":"session.read","arguments":{"account_id":"verified account handle","url":"evidenced GET URL"},"purpose":"Check whether this verified browser session can actually read an evidenced route. Returns status and JSON structure without private leaf values. On success a matching operation may use auth kind=browser or kind=derived. A browser session never configures a separate API or bot key."},
+        {"tool":"browser.render","available":environment.browsers.iter().any(|b| b.protocol=="chromium-cdp"),"arguments":{"url":"published page or app entry URL","engine_id":"available browser handle","account_id":"optional candidate account handle"},"purpose":"Render a page with a discovered engine, optionally restore this site's session, and observe read/preflight requests and account context. No clicks, form submission or test writes. Returns HTML text, published links, request shapes and observed authentication header names."}
     ])
 }
 
@@ -77,8 +78,10 @@ impl Context<'_> {
             .get(id)
             .cloned()
             .ok_or_else(|| AppError::api("not_found", 404))?;
+        let job_url = crate::net::validate_url(&self.job.url)?;
+        let acct_url = crate::net::validate_url(&view.site_url)?;
         if view.site_id != self.job.site_id
-            || view.site_url != crate::runtime::origin(&self.job.url)?
+            || !crate::net::same_site_origin(&acct_url, &job_url)
         {
             return Err(AppError::api("unsafe_target", 400));
         }
@@ -105,6 +108,29 @@ impl Runtime {
                 let url = context.url(argument(call, "url"))?;
                 outcome.read_url = Some(url.to_string());
                 outcome.content = json!({"queued":true,"url":url.as_str()});
+            }
+            "web.recon" => {
+                let url = context.url(argument(call, "url"))?;
+                let (report, draft) = self.recon(&context.job.site_id, url.as_str(), 12).await?;
+                for op in &draft.operations {
+                    outcome
+                        .routes
+                        .insert((op.method.to_ascii_uppercase(), op.path.clone()));
+                }
+                if let Some(arr) = report["bundle_routes"].as_array() {
+                    for item in arr.iter().filter_map(Value::as_str) {
+                        if let Some((m, p)) = item.split_once(' ') {
+                            outcome.routes.insert((m.to_string(), p.to_string()));
+                        }
+                    }
+                }
+                if let Some(arr) = report["scanned_bundles"].as_array() {
+                    for item in arr.iter().filter_map(Value::as_str) {
+                        outcome.links.insert(item.to_string());
+                    }
+                }
+                outcome.content = json!({"recon":report,"draft_operations":draft.operations});
+                outcome.document = Some((url.to_string(), outcome.content.to_string()));
             }
             "evidence.search" => {
                 let source = argument(call, "source_url");
@@ -195,7 +221,16 @@ impl Runtime {
                 let body = response.json();
                 let html = response.header("content-type").contains("html");
                 let js_routes = crate::discovery::bundle_routes(&text);
-                outcome.content = json!({"url":response.url,"status":response.status,"successful":response.successful(),"format":if body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"ssr_payloads":if html{crate::html::ssr_payloads(&text)}else{json!(null)},"bundle_routes":js_routes,"values_exposed":false});
+                let ssr_keys: Vec<_> = if html {
+                    crate::html::extract_ssr_map(&text).into_keys().collect()
+                } else {
+                    vec![]
+                };
+                let cookie_names: Vec<_> = self
+                    .credential(account)
+                    .map(|c| c.cookies.into_iter().map(|ck| ck.name).collect())
+                    .unwrap_or_default();
+                outcome.content = json!({"url":response.url,"status":response.status,"successful":response.successful(),"format":if body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"ssr_keys":ssr_keys,"ssr_payloads":if html{crate::html::ssr_payloads(&text)}else{json!(null)},"bundle_routes":js_routes,"cookie_names":cookie_names,"values_exposed":false});
                 if response.successful() {
                     let final_url = crate::net::validate_url(&response.url)?;
                     outcome
@@ -249,7 +284,12 @@ impl Runtime {
                 }
                 let html = response.header("content-type").contains("html");
                 let text = String::from_utf8_lossy(&response.bytes);
-                outcome.content = json!({"url":url.as_str(),"status":response.status,"successful":response.successful(),"format":if json_body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":json_body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"ssr_payloads":if html{crate::html::ssr_payloads(&text)}else{json!(null)},"authentication":"browser","values_exposed":false});
+                let ssr_keys: Vec<_> = if html {
+                    crate::html::extract_ssr_map(&text).into_keys().collect()
+                } else {
+                    vec![]
+                };
+                outcome.content = json!({"url":url.as_str(),"status":response.status,"successful":response.successful(),"format":if json_body.is_some(){"json"}else if html{"html"}else{"text"},"response_shape":json_body.as_ref().map(|body|crate::session_recipe::shape(body,0)),"html_structure":if html{crate::html::structure(&text)}else{json!([])},"html_fields":if html{crate::html::fields(&text)}else{json!([])},"ssr_keys":ssr_keys,"ssr_payloads":if html{crate::html::ssr_payloads(&text)}else{json!(null)},"authentication":"browser","values_exposed":false});
             }
             "session.verify" => {
                 let account = argument(call, "account_id");

@@ -1727,7 +1727,7 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
                         r#"<!doctype html><html><head><title>Synthetic Studio</title>
                         <meta name="csrf-token" content="csrf-live-777">
                         <script src="/_next/static/chunks/app.js"></script></head>
-                        <body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"clips":[{"id":"clip-1","title":"First Song"}]}}}</script></body></html>"#,
+                        <body><script id="__NEXT_DATA__" type="application/json">{"buildId":"build-2026","props":{"pageProps":{"clips":[{"id":"clip-1","title":"First Song"}]}}}</script></body></html>"#,
                     )
                 }),
             )
@@ -1748,36 +1748,44 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
                 }),
             )
             .route(
-                "/api/v2/feed",
-                get(|headers: HeaderMap| async move {
-                    let xsrf = headers
-                        .get("x-xsrf-token")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("");
-                    let csrf = headers
-                        .get("x-csrf-token")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("");
-                    if xsrf != "ct0-cookie-val" || csrf != "csrf-live-777" {
-                        return (
-                            StatusCode::UNAUTHORIZED,
+                "/api/v2/feed/{build_id}",
+                get(
+                    |axum::extract::Path(build_id): axum::extract::Path<String>,
+                     headers: HeaderMap| async move {
+                        let xsrf = headers
+                            .get("x-xsrf-token")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+                        let csrf = headers
+                            .get("x-csrf-token")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+                        if xsrf != "ct0-cookie-val"
+                            || csrf != "csrf-live-777"
+                            || build_id != "build-2026"
+                        {
+                            return (
+                                StatusCode::UNAUTHORIZED,
+                                [("content-type", "application/json")],
+                                r#"{"error":"missing derived or preflight parameters"}"#.to_string(),
+                            );
+                        }
+                        (
+                            StatusCode::OK,
                             [("content-type", "application/json")],
-                            r#"{"error":"missing derived or preflight headers"}"#.to_string(),
-                        );
-                    }
-                    (
-                        StatusCode::OK,
-                        [("content-type", "application/json")],
-                        ")]}'\n{\"data\":{\"items\":[{\"id\":\"feed-99\",\"echo_csrf\":\"csrf-live-777\",\"echo_xsrf\":\"ct0-cookie-val\"}]}}".to_string(),
-                    )
-                }),
+                            format!(
+                                ")]}}'\n{{\"data\":{{\"items\":[{{\"id\":\"feed-99\",\"build_id\":\"{build_id}\",\"echo_csrf\":\"csrf-live-777\",\"echo_xsrf\":\"ct0-cookie-val\"}}]}}}}"
+                            ),
+                        )
+                    },
+                ),
             ),
     )
     .await;
 
     let core = runtime();
     let (report, draft) = core
-        .recon("studio", &format!("{base}/"), 4)
+        .recon("studio", &format!("{base}/"), 8)
         .await
         .expect("deterministic recon");
     assert_eq!(report["title"], "Synthetic Studio");
@@ -1830,7 +1838,7 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
                 {
                     "name": "protected-feed",
                     "method": "GET",
-                    "path": "/api/v2/feed",
+                    "path": "/api/v2/feed/{{step.csrf.build_id}}",
                     "effect": "read",
                     "evidence": "Synthetic feed read",
                     "auth": "xsrf",
@@ -1839,7 +1847,8 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
                             "name": "csrf",
                             "path": "/",
                             "extract": {
-                                "token": "css:meta[name='csrf-token']@content"
+                                "token": "css:meta[name='csrf-token']@content",
+                                "build_id": "ssr:__NEXT_DATA__#/buildId"
                             }
                         }
                     ],
@@ -1902,28 +1911,20 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
         .body
         .unwrap();
     assert_eq!(feed_res[0]["id"], "feed-99");
+    assert_eq!(feed_res[0]["build_id"], "build-2026");
     assert_eq!(feed_res[0]["echo_csrf"], "[private]");
     assert_eq!(feed_res[0]["echo_xsrf"], "[private]");
 
-    let exfil_spec = spec::parse(
-        json!({
-            "spec_version": 2,
-            "site": { "name": "studio", "base_url": base },
-            "operations": [{
-                "name": "exfil-attempt",
-                "method": "GET",
-                "path": "/api/{{step.csrf.token}}",
-                "effect": "read",
-                "evidence": "Rejected step interpolation in path",
-                "response": { "format": "json", "required_pointers": ["/ok"] }
-            }]
-        })
-        .to_string()
-        .as_bytes(),
-    )
-    .unwrap();
-    assert!(!exfil_spec.validate().is_empty());
-    assert!(core.install(&exfil_spec).is_err());
+    let (encoded_url, _) = v2_spec
+        .build_request(
+            v2_spec.op("protected-feed").unwrap(),
+            &BTreeMap::from([("step.csrf.build_id".into(), "../../evil@attacker.com".into())]),
+        )
+        .unwrap();
+    assert_eq!(
+        encoded_url,
+        format!("{base}/api/v2/feed/..%2F..%2Fevil%40attacker.com")
+    );
     server.abort();
 }
 

@@ -458,28 +458,6 @@ impl Spec {
                         "",
                     );
                 }
-                if op.path.contains("{{step.") {
-                    add(
-                        &mut out,
-                        &format!("{id}.path"),
-                        "preflight step interpolation is forbidden in URL paths".into(),
-                        "Use {{step.*}} only in headers or body",
-                    );
-                }
-                for (qname, qparam) in &op.query {
-                    if qparam
-                        .default
-                        .as_ref()
-                        .is_some_and(|v| value_to_plain_string(v).contains("{{step."))
-                    {
-                        add(
-                            &mut out,
-                            &format!("{id}.query.{qname}"),
-                            "preflight step interpolation is forbidden in URL query parameters".into(),
-                            "Use {{step.*}} only in headers or body",
-                        );
-                    }
-                }
                 if !op.auth.is_empty() && !auths.contains(&op.auth) {
                     add(
                         &mut out,
@@ -614,13 +592,16 @@ impl Spec {
         op: &Operation,
         args: &std::collections::BTreeMap<String, String>,
     ) -> AppResult<(String, Option<Vec<u8>>)> {
-        let mut path = op.path.clone();
+        let mut path = interpolate_path_template(&op.path, args);
         for n in path_vars(&op.path) {
             let p = op
                 .params
                 .get(&n)
                 .ok_or_else(|| apperr::spec(format!("Undeclared path parameter: {n}"), ""))?;
-            let v = coerce_str(p, &n, args, false)?;
+            let mut v = coerce_str(p, &n, args, true)?;
+            if v.contains("{{") {
+                v = interpolate_template_str(&v, &std::collections::BTreeMap::new(), args);
+            }
             path = path.replace(&format!("{{{n}}}"), &urlencode_path(&v));
         }
         let mut url_s = format!(
@@ -629,6 +610,7 @@ impl Spec {
             path.trim_start_matches('/')
         );
 
+        let empty_resolved = std::collections::BTreeMap::new();
         let mut q = FormEncoder::default();
         for (name, p) in &op.query {
             let present = args.contains_key(name);
@@ -641,7 +623,10 @@ impl Spec {
                 }
                 continue;
             }
-            let v = coerce_str(p, name, args, true)?;
+            let mut v = coerce_str(p, name, args, true)?;
+            if v.contains("{{") {
+                v = interpolate_template_str(&v, &empty_resolved, args);
+            }
             q.append_pair(name, &v);
         }
         let qs = q.finish();
@@ -664,7 +649,11 @@ impl Spec {
                         }
                         continue;
                     }
-                    form.append_pair(name, &coerce_str(p, name, args, true)?);
+                    let mut v = coerce_str(p, name, args, true)?;
+                    if v.contains("{{") {
+                        v = interpolate_template_str(&v, &empty_resolved, args);
+                    }
+                    form.append_pair(name, &v);
                 }
                 body = Some(form.finish().into_bytes());
             } else if let Some(template) = &b.json_template {
@@ -697,7 +686,13 @@ impl Spec {
                         }
                         continue;
                     }
-                    obj.insert(name.clone(), coerce_value(p, name, args)?);
+                    let mut val = coerce_value(p, name, args)?;
+                    if let Value::String(s) = &val {
+                        if s.contains("{{") {
+                            val = Value::String(interpolate_template_str(s, &empty_resolved, args));
+                        }
+                    }
+                    obj.insert(name.clone(), val);
                 }
                 body = Some(serde_json::to_vec(&Value::Object(obj)).unwrap_or_default());
             }
@@ -750,10 +745,24 @@ fn convert_type(v: &Value, t: &str) -> Value {
 }
 
 fn path_vars(path: &str) -> Vec<String> {
+    let mut stripped = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(start) = rest.find("{{") {
+        stripped.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        if let Some(end) = after.find("}}") {
+            rest = &after[end + 2..];
+        } else {
+            stripped.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    stripped.push_str(rest);
+
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut in_var = false;
-    for c in path.chars() {
+    for c in stripped.chars() {
         match c {
             '{' => {
                 in_var = true;
@@ -761,12 +770,38 @@ fn path_vars(path: &str) -> Vec<String> {
             }
             '}' => {
                 in_var = false;
-                out.push(cur.clone());
+                if !cur.is_empty() {
+                    out.push(cur.clone());
+                }
             }
             _ if in_var => cur.push(c),
             _ => {}
         }
     }
+    out
+}
+
+fn interpolate_path_template(
+    template: &str,
+    raw_args: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after_start = &rest[start + 2..];
+        if let Some(end) = after_start.find("}}") {
+            let var = after_start[..end].trim();
+            if let Some(raw) = raw_args.get(var) {
+                out.push_str(&urlencode_path(raw));
+            }
+            rest = &after_start[end + 2..];
+        } else {
+            out.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+    out.push_str(rest);
     out
 }
 
@@ -861,6 +896,12 @@ fn value_to_plain_string(v: &Value) -> String {
 }
 
 fn urlencode_path(s: &str) -> String {
+    if s == "." {
+        return "%2E".into();
+    }
+    if s == ".." {
+        return "%2E%2E".into();
+    }
     let mut out = String::new();
     for b in s.bytes() {
         match b {
