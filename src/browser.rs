@@ -1,5 +1,5 @@
 //! Browser rendering with a discovered engine and its normal platform defaults.
-use chromiumoxide::{Browser, browser::BrowserConfig};
+use chromiumoxide::Browser;
 use futures_util::StreamExt;
 
 use crate::apperr::{self, AppError};
@@ -15,25 +15,12 @@ pub struct Observation {
     pub content_type: String,
 }
 
-/// Legacy entry point retained for CLI compatibility; no fingerprint or language overrides.
-pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
-    let environment = tokio::task::spawn_blocking(crate::environment::inspect)
-        .await
-        .map_err(|_| AppError::api("browser_unavailable", 422))?;
-    let engine = environment
-        .browsers
-        .iter()
-        .find(|b| b.protocol == "chromium-cdp")
-        .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
-    let config = BrowserConfig::builder()
-        .chrome_executable(&engine.executable)
-        .window_size(1280, 800)
-        .arg("--headless=new")
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--disable-dev-shm-usage")
-        .arg("--disable-blink-features=AutomationControlled")
-        .build()
+async fn run_probe_with_mode(
+    engine: &crate::environment::BrowserEngine,
+    url: &str,
+    headed: bool,
+) -> Result<Observation, AppError> {
+    let config = crate::browser_session::build_stealth_browser_config(engine, None, url, headed)
         .map_err(|e| {
             apperr::runtime_msg(
                 format!("Browser configuration failed: {e}"),
@@ -53,6 +40,36 @@ pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
     let _ = browser.close().await;
     let _ = drive.abort();
     outcome
+}
+
+pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
+    let environment = tokio::task::spawn_blocking(crate::environment::inspect)
+        .await
+        .map_err(|_| AppError::api("browser_unavailable", 422))?;
+    let engine = environment
+        .browsers
+        .iter()
+        .find(|b| b.protocol == "chromium-cdp")
+        .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
+    let force_headed = std::env::var_os("HYCLI_HEADED").is_some();
+    let first = run_probe_with_mode(engine, url, force_headed).await?;
+    if !force_headed
+        && matches!(
+            first.defense.as_str(),
+            "cloudflare_challenge" | "bot_manager" | "captcha"
+        )
+        && crate::browser_session::can_run_headed()
+    {
+        if let Ok(escalated) = run_probe_with_mode(engine, url, true).await {
+            if !matches!(
+                escalated.defense.as_str(),
+                "cloudflare_challenge" | "bot_manager" | "captcha"
+            ) {
+                return Ok(escalated);
+            }
+        }
+    }
+    Ok(first)
 }
 
 async fn observe(browser: &Browser, url: &str) -> Result<Observation, AppError> {

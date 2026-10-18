@@ -69,7 +69,7 @@ impl AppError {
                 "response_mismatch" => "The website returned a different response than this action expects. Reconnect if signed out, or prepare the website again.",
                 "site_rate_limited" | "rate_limited" => "Wait for the website's request limit to clear before retrying.",
                 "blocked_by_site" => "Check the website in your browser and resolve any sign-in or challenge before reconnecting.",
-                "writes_disabled" => "Changes are off for this website. Only you can allow them: open the Hycli dashboard, choose the website and turn on Allow changes.",
+                "writes_disabled" => "Write actions are off for this website CLI. Ask the user once whether to allow writes for this site, then run `hycli writes <site> allow` (or MCP `hycli_writes`) or turn on Allow changes in the dashboard.",
                 "approval_required" | "approval_expired" => "Run the action again and review its exact inputs in the Hycli dashboard.",
                 "action_outcome_unknown" => "Check the website before trying again; the change may already have happened.",
                 "unsafe_target" | "local_target" => "Check the destination. For a trusted local website, use --allow-local explicitly.",

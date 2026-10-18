@@ -156,6 +156,8 @@ pub struct UserGuide {
     pub site_title: String,
     pub summary: String,
     pub headline: String,
+    pub writes_enabled: bool,
+    pub enable_writes_command: String,
     pub agent_instruction: String,
     pub read_capabilities: Vec<ActionCapability>,
     pub write_capabilities: Vec<ActionCapability>,
@@ -258,15 +260,7 @@ pub fn build_user_guide(
         } else {
             op.description.clone()
         };
-        let natural_prompt = if op.effect == crate::policy::Effect::Read {
-            format!("Use {} to {} ({})", site.title, title.to_lowercase(), op.id)
-        } else {
-            format!(
-                "Use {} to {} (requests approval in dashboard)",
-                site.title,
-                title.to_lowercase()
-            )
-        };
+        let natural_prompt = format!("Use {} to {} ({})", site.title, title.to_lowercase(), op.id);
         let cap = ActionCapability {
             id: op.id.clone(),
             title,
@@ -313,7 +307,7 @@ pub fn build_user_guide(
         site.title.clone()
     };
     let headline = format!(
-        "{} ({}) is ready: {} read action(s) and {} approval-guarded write action(s).",
+        "{} ({}) is ready: {} read action(s) and {} write action(s).",
         site_title,
         site.id,
         read_capabilities.len(),
@@ -323,12 +317,23 @@ pub fn build_user_guide(
         "hycli request {} \"Describe additional capabilities to add\"",
         site.id
     );
+    let enable_writes_command = format!("hycli writes {} allow", site.id);
+    let agent_instruction = if !write_capabilities.is_empty() && !site.writes {
+        format!(
+            "Present these capabilities to the user in a clear, user-friendly summary: explain what they can read and what website actions/changes are available, and share 2-3 example commands. Write actions are currently off for '{}' (default for a new CLI): ask the user ONCE for this CLI whether to allow write actions (e.g., '{} CLI에서 쓰기를 허용할까요?'), and if they confirm, run `{}` (or MCP `hycli_writes`) once to enable direct write execution.",
+            site.id, site_title, enable_writes_command
+        )
+    } else {
+        "Present these capabilities to the user in a clear, user-friendly summary: explain what they can read and what website actions/changes they can trigger directly, and share 2-3 example commands or natural-language prompts they can run right now.".into()
+    };
     UserGuide {
         site_id: site.id.clone(),
         site_title,
         summary: site.summary.clone(),
         headline,
-        agent_instruction: "Present these capabilities to the user in a clear, user-friendly summary: explain what they can read immediately, what changes they can trigger (with dashboard approval), and share 2-3 example commands or natural-language prompts they can run right now.".into(),
+        writes_enabled: site.writes,
+        enable_writes_command,
+        agent_instruction,
         read_capabilities,
         write_capabilities,
         workflows,
@@ -354,7 +359,14 @@ pub fn format_user_briefing(guide: &UserGuide) -> String {
         }
     }
     if !guide.write_capabilities.is_empty() {
-        out.push_str("  Write capabilities (approval-guarded):\n");
+        if guide.writes_enabled {
+            out.push_str("  Write capabilities (enabled — run directly):\n");
+        } else {
+            out.push_str(&format!(
+                "  Write capabilities (ask user once to allow, then run `{}`):\n",
+                guide.enable_writes_command
+            ));
+        }
         for cap in guide.write_capabilities.iter().take(6) {
             out.push_str(&format!(
                 "    - {} ({}): {}\n      Run: {}\n",
@@ -484,7 +496,7 @@ pub fn help(site: &crate::runtime::SiteView, action: Option<&str>) -> AppResult<
     } else {
         let guide = build_user_guide(site, None);
         text.push_str(&format!(
-            "Usage: hycli {} <ACTION> [OPTIONS]\n\nWhat you can do:\n  {} immediate read action(s), {} approval-guarded write action(s)\n\nActions:\n",
+            "Usage: hycli {} <ACTION> [OPTIONS]\n\nWhat you can do:\n  {} read action(s), {} write action(s)\n\nActions:\n",
             site.id,
             guide.read_capabilities.len(),
             guide.write_capabilities.len()
@@ -581,6 +593,8 @@ mod tests {
         let guide = build_user_guide(&site, None);
         assert_eq!(guide.read_capabilities.len(), 1);
         assert_eq!(guide.write_capabilities.len(), 1);
+        assert!(guide.writes_enabled);
+        assert_eq!(guide.enable_writes_command, "hycli writes guild allow");
         assert_eq!(
             guide.read_capabilities[0].example_command,
             "hycli guild list-channels"
@@ -591,8 +605,22 @@ mod tests {
         );
         let briefing = format_user_briefing(&guide);
         assert!(briefing.contains("Read capabilities (run immediately):"));
-        assert!(briefing.contains("Write capabilities (approval-guarded):"));
+        assert!(briefing.contains("Write capabilities (enabled — run directly):"));
         assert!(briefing.contains("hycli guild list-channels"));
+
+        let mut locked = site.clone();
+        locked.writes = false;
+        let locked_guide = build_user_guide(&locked, None);
+        assert!(!locked_guide.writes_enabled);
+        assert!(
+            locked_guide
+                .agent_instruction
+                .contains("hycli writes guild allow")
+        );
+        let locked_briefing = format_user_briefing(&locked_guide);
+        assert!(
+            locked_briefing.contains("ask user once to allow, then run `hycli writes guild allow`")
+        );
     }
 
     #[test]

@@ -238,7 +238,25 @@ impl Credential {
 pub fn browser_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "authorization" | "x-csrf-token" | "x-xsrf-token" | "x-csrftoken" | "x-api-key" | "api-key"
+        "authorization"
+            | "x-csrf-token"
+            | "x-xsrf-token"
+            | "x-csrftoken"
+            | "csrf-token"
+            | "x-api-key"
+            | "api-key"
+            | "x-super-properties"
+            | "x-discord-locale"
+            | "x-discord-timezone"
+            | "x-atok"
+            | "x-cross-site-security"
+            | "x-requested-with"
+            | "x-ig-app-id"
+            | "x-asbd-id"
+            | "x-twitter-active-user"
+            | "x-twitter-auth-type"
+            | "x-goog-authuser"
+            | "x-goog-visitor-id"
     )
 }
 pub fn cookie_matches(cookie: &Cookie, url: &url::Url) -> bool {

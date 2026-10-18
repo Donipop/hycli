@@ -71,7 +71,7 @@ impl Server {
                     if action.effect == Effect::Read {
                         "Runs a bounded read."
                     } else {
-                        "Requests user approval in the Hycli dashboard; does not execute a change until the user approves."
+                        "Runs a website change."
                     }
                 );
                 out.push(
@@ -95,7 +95,7 @@ impl Server {
         out.push(Tool::new("hycli_check","Replay each website's recorded reads without AI. Tells an expired sign-in (verdict signed_out: ask the user to reconnect) apart from a changed website (site_changed: request a repair) before you retry anything. Never runs a change.",Arc::new(check_schema)).with_annotations(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(true)));
         out.push(Tool::new("hycli_activity", "Read current work, completed stages, agent status and plain-language work notes. No credential values or raw request details.", Arc::new(serde_json::from_value(json!({"type":"object","properties":{},"additionalProperties":false}))?)).with_annotations(ToolAnnotations::new().read_only(true).destructive(false).idempotent(true).open_world(false)));
         if !self.sites_only {
-            out.push(Tool::new("hycli_run", "Run an installed website action by ID, including actions prepared during this connection. Inspect hycli_sites for typed inputs. Reads run immediately; changes return a receipt for the user to review in the dashboard.", Arc::new(serde_json::from_value(json!({"type":"object","properties":{"site":{"type":"string"},"action":{"type":"string"},"inputs":{"type":"object","additionalProperties":true},"account":{"type":"string","description":"Optional saved website account ID; omit to use the selected account"}},"required":["site","action"],"additionalProperties":false}))?)).with_annotations(ToolAnnotations::new().read_only(false).destructive(true).idempotent(false).open_world(true)));
+            out.push(Tool::new("hycli_run", "Run an installed website action by ID, including actions prepared during this connection. Inspect hycli_sites for typed inputs.", Arc::new(serde_json::from_value(json!({"type":"object","properties":{"site":{"type":"string"},"action":{"type":"string"},"inputs":{"type":"object","additionalProperties":true},"account":{"type":"string","description":"Optional saved website account ID; omit to use the selected account"}},"required":["site","action"],"additionalProperties":false}))?)).with_annotations(ToolAnnotations::new().read_only(false).destructive(true).idempotent(false).open_world(true)));
             for (name, description, schema) in [
                 (
                     "hycli_sites",
@@ -126,6 +126,11 @@ impl Server {
                     "hycli_accounts",
                     "List account metadata. Credential values are never returned.",
                     json!({"type":"object","properties":{},"additionalProperties":false}),
+                ),
+                (
+                    "hycli_writes",
+                    "Enable or disable write actions for an installed website CLI after asking the user once per CLI whether to allow writes.",
+                    json!({"type":"object","properties":{"site":{"type":"string","description":"Installed website ID"},"allow":{"type":"boolean","description":"Set to true after the user confirms once to allow write actions for this CLI; false to disable writes"}},"required":["site","allow"],"additionalProperties":false}),
                 ),
             ] {
                 out.push(
@@ -297,6 +302,16 @@ impl Server {
                         .run_action(get("site"), get("action"), inputs, account, &locale)
                         .await;
                 }
+                "hycli_writes" => {
+                    let site = get("site");
+                    self.allowed(site)?;
+                    let allow = args
+                        .get("allow")
+                        .and_then(Value::as_bool)
+                        .ok_or_else(|| AppError::api("bad_request", 400))?;
+                    self.core.set_writes(site, allow)?;
+                    return Ok(json!({"site": site, "writes": allow}));
+                }
                 _ => {}
             }
         }
@@ -331,11 +346,12 @@ impl Server {
         let sp = self.core.spec(site)?;
         let op = sp.op(action)?;
         let request = self.core.request(&sp, action, inputs, account)?;
-        if policy::operation_effect(op, &request.inputs) != Effect::Read {
-            let review = self.core.approval(request, locale)?;
-            return Ok(
-                json!({"status":"awaiting_user_approval","approval":review,"result_id":review.id,"next":"The user must approve this exact action in the Hycli dashboard. Keep this receipt and use hycli_result to read its status and result. Do not submit a duplicate action while it is pending."}),
-            );
+        let effect = policy::operation_effect(op, &request.inputs);
+        if op.effect == Effect::Read && effect != Effect::Read {
+            return Err(AppError::api("approval_required", 409));
+        }
+        if effect != Effect::Read {
+            self.core.ensure_writes(site)?;
         }
         let (result, _) = self.core.execute_observed(request, locale).await?;
         Ok(json!(result))

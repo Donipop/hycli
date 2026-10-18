@@ -104,7 +104,7 @@ impl Inventory {
             return;
         };
         let path = std::fs::canonicalize(&path).unwrap_or(path);
-        if source == "user_configuration" {
+        if matches!(source, "user_configuration" | "cloakbrowser_stealth") {
             self.engines.remove(&path);
         }
         self.engines
@@ -124,6 +124,54 @@ impl Inventory {
                 discovered_from: source.into(),
                 executable: path,
             });
+    }
+
+    fn cloakbrowser_apps(&mut self, cache_roots: &[PathBuf]) {
+        if let Some(override_bin) = std::env::var_os("CLOAKBROWSER_BINARY_PATH") {
+            let bin = PathBuf::from(override_bin);
+            if bin.is_file() {
+                self.engine(bin, "cloakbrowser_stealth", Some("CloakBrowser"));
+            }
+        }
+        let mut candidates: Vec<(Vec<u32>, bool, PathBuf)> = Vec::new();
+        for root in cache_roots {
+            let Ok(entries) = std::fs::read_dir(root) else {
+                continue;
+            };
+            for entry in entries.filter_map(Result::ok).take(128) {
+                let dir_name = entry.file_name().to_string_lossy().into_owned();
+                let Some(ver_raw) = dir_name.strip_prefix("chromium-") else {
+                    continue;
+                };
+                let (ver_str, is_pro) = match ver_raw.strip_suffix("-pro") {
+                    Some(v) => (v, true),
+                    None => (ver_raw, false),
+                };
+                let version: Vec<u32> = ver_str
+                    .split('.')
+                    .filter_map(|part| part.parse::<u32>().ok())
+                    .collect();
+                if version.is_empty() {
+                    continue;
+                }
+                let dir_path = entry.path();
+                for rel in [
+                    "chrome",
+                    "chrome.exe",
+                    "Chromium.app/Contents/MacOS/Chromium",
+                ] {
+                    let bin = dir_path.join(rel);
+                    if bin.is_file() {
+                        candidates.push((version.clone(), is_pro, bin));
+                        break;
+                    }
+                }
+            }
+        }
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+        if let Some((_, _, best_bin)) = candidates.into_iter().next() {
+            self.engine(best_bin, "cloakbrowser_stealth", Some("CloakBrowser"));
+        }
     }
 
     fn profile(&mut self, path: PathBuf, browser: &str, label: Option<&str>) {
@@ -220,6 +268,15 @@ impl Inventory {
                 Some("Chromium"),
             );
         }
+        let mut cloak_roots = Vec::new();
+        if let Some(custom) = std::env::var_os("CLOAKBROWSER_CACHE_DIR") {
+            cloak_roots.push(PathBuf::from(custom));
+        }
+        if let Some(dirs) = directories::BaseDirs::new() {
+            cloak_roots.push(dirs.home_dir().join(".cloakbrowser"));
+            cloak_roots.push(dirs.data_local_dir().join("cloakbrowser"));
+        }
+        self.cloakbrowser_apps(&cloak_roots);
         if let Some(paths) = std::env::var_os("PATH") {
             for root in std::env::split_paths(&paths) {
                 let Ok(entries) = std::fs::read_dir(root) else {
@@ -638,9 +695,10 @@ fn inventory_snapshot(inventory: &Inventory, pending: bool) -> Environment {
         (
             match b.discovered_from.as_str() {
                 "user_configuration" => 0,
-                "running_application" => 1,
-                "application_registration" => 2,
-                _ => 3,
+                "cloakbrowser_stealth" => 1,
+                "running_application" => 2,
+                "application_registration" => 3,
+                _ => 4,
             },
             b.name.clone(),
             b.id.clone(),
@@ -739,6 +797,36 @@ mod tests {
         let profile = inventory.profiles.into_values().next().unwrap();
         assert_eq!(profile.browser, "Chromium");
         assert_eq!(profile.profile, "Default");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn discovers_and_prioritizes_cloakbrowser_stealth_binary() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/tests")
+            .join(util::id());
+        let older = root.join("chromium-145.0.7632.109.2/chrome");
+        let newer = root.join("chromium-146.0.7680.177.5/chrome");
+        let stock = root.join("system-bin/chromium");
+        std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(newer.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(stock.parent().unwrap()).unwrap();
+        std::fs::write(&older, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&newer, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&stock, b"#!/bin/sh\n").unwrap();
+
+        let mut inventory = Inventory::default();
+        inventory.engine(stock.clone(), "executable_search_path", Some("Chromium"));
+        inventory.cloakbrowser_apps(std::slice::from_ref(&root));
+        let snapshot = inventory_snapshot(&inventory, false);
+        assert_eq!(snapshot.browsers.len(), 2);
+        assert_eq!(snapshot.browsers[0].name, "CloakBrowser");
+        assert_eq!(snapshot.browsers[0].discovered_from, "cloakbrowser_stealth");
+        assert_eq!(snapshot.browsers[0].protocol, "chromium-cdp");
+        assert_eq!(
+            snapshot.browsers[0].executable,
+            std::fs::canonicalize(&newer).unwrap_or(newer)
+        );
+        assert_eq!(snapshot.browsers[1].name, "Chromium");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

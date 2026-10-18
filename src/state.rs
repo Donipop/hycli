@@ -129,7 +129,7 @@ pub struct SiteMeta {
     pub preparation: Option<PreparationReport>,
     pub icon_type: String,
     pub icon_source: String,
-    /// Changes are off until the user allows them for this website in the dashboard.
+    /// Off until confirmed once for this CLI (`hycli writes <site> allow`, MCP `hycli_writes`, or dashboard toggle).
     pub writes: bool,
     /// Reads that passed during preparation, replayed by `hycli check` without AI.
     pub smoke: Vec<crate::smoke::ReadCheck>,

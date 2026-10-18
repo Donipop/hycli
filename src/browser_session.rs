@@ -51,7 +51,194 @@ try {
         : origQuery.apply(this, arguments);
     };
   }
+} catch (_) {}
+try {
+  if (!window.__hycli_apis && typeof window.fetch === 'function') {
+    window.__hycli_apis = [];
+    const origFetch = window.fetch;
+    window.fetch = async function(...args) {
+      const req = args[0];
+      const init = args[1] || {};
+      const url = typeof req === 'string' ? req : (req && req.url ? req.url : '');
+      const method = String((init && init.method) || (req && req.method) || 'GET').toUpperCase();
+      const body = typeof init.body === 'string' ? init.body.slice(0, 4096) : '';
+      const resp = await origFetch.apply(this, args);
+      try {
+        if (window.__hycli_apis.length < 40 && resp && resp.ok) {
+          const ct = (resp.headers && resp.headers.get && resp.headers.get('content-type')) || '';
+          if (ct.includes('json')) {
+            const clone = resp.clone();
+            clone.json().then((data) => {
+              if (window.__hycli_apis.length < 40) {
+                window.__hycli_apis.push({ url, method, status: resp.status, body, data });
+              }
+            }).catch(() => {});
+          }
+        }
+      } catch (_) {}
+      return resp;
+    };
+  }
 } catch (_) {}"#;
+
+pub fn is_cloakbrowser_engine(engine: &crate::environment::BrowserEngine) -> bool {
+    engine.name.eq_ignore_ascii_case("CloakBrowser")
+        || engine.discovered_from == "cloakbrowser_stealth"
+        || engine
+            .executable
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .contains("cloakbrowser")
+}
+
+pub fn fingerprint_seed(seed_input: &str) -> u32 {
+    let digest = util::hash(seed_input.as_bytes());
+    let prefix = u32::from_str_radix(&digest[..8], 16).unwrap_or(42_000);
+    10_000 + (prefix % 90_000)
+}
+
+pub fn can_run_headed() -> bool {
+    if std::env::var_os("HYCLI_DISABLE_HEADED").is_some() {
+        return false;
+    }
+    if std::env::var_os("HYCLI_HEADED").is_some() {
+        return true;
+    }
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        true
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
+    }
+}
+
+pub fn build_stealth_browser_config(
+    engine: &crate::environment::BrowserEngine,
+    profile_dir: Option<&std::path::Path>,
+    seed_input: &str,
+    headed: bool,
+) -> Result<BrowserConfig, String> {
+    let mut builder = BrowserConfig::builder()
+        .chrome_executable(&engine.executable)
+        .disable_default_args()
+        .no_sandbox()
+        .viewport(None)
+        .env("CLOAKBROWSER_SUPPRESS_FONT_WARNING", "1");
+    if let Some(dir) = profile_dir {
+        builder = builder.user_data_dir(dir);
+    }
+    if headed {
+        builder = builder
+            .with_head()
+            .arg("ignore-gpu-blocklist")
+            .arg(("window-position", "-32000,-32000"))
+            .window_size(1920, 1080);
+    } else {
+        builder = builder.new_headless_mode().window_size(1920, 947);
+        #[cfg(windows)]
+        {
+            builder = builder.arg("ignore-gpu-blocklist");
+        }
+    }
+    // Pass clean Chromium argument keys without leading `--` because chromiumoxide's
+    // ArgsBuilder formats keys with `format!("--{}", key)`.
+    builder = builder
+        .arg("no-first-run")
+        .arg("no-default-browser-check")
+        .arg("disable-background-networking")
+        .arg("disable-background-timer-throttling")
+        .arg("disable-backgrounding-occluded-windows")
+        .arg("disable-breakpad")
+        .arg("disable-client-side-phishing-detection")
+        .arg("disable-component-extensions-with-background-pages")
+        .arg("disable-default-apps")
+        .arg("disable-dev-shm-usage")
+        .arg("disable-hang-monitor")
+        .arg("disable-ipc-flooding-protection")
+        .arg("disable-popup-blocking")
+        .arg("disable-prompt-on-repost")
+        .arg("disable-renderer-backgrounding")
+        .arg("disable-sync")
+        .arg(("password-store", "basic"))
+        .arg("use-mock-keychain")
+        .arg(("disable-blink-features", "AutomationControlled"));
+
+    if is_cloakbrowser_engine(engine) {
+        let seed = fingerprint_seed(seed_input).to_string();
+        let platform = if cfg!(target_os = "macos") {
+            "macos"
+        } else {
+            "windows"
+        };
+        builder = builder
+            .arg(("fingerprint", seed.as_str()))
+            .arg(("fingerprint-platform", platform));
+    }
+    builder.build()
+}
+
+fn cookie_param_for(cookie: &accounts::Cookie, fallback_origin: &str) -> network::CookieParam {
+    let mut value = network::CookieParam::new(&cookie.name, &cookie.value);
+    let scheme = if fallback_origin.starts_with("http://") && !cookie.secure {
+        "http"
+    } else {
+        "https"
+    };
+    let clean_domain = cookie.domain.trim_start_matches('.');
+    let path = if cookie.path.starts_with('/') {
+        cookie.path.as_str()
+    } else {
+        "/"
+    };
+    if !clean_domain.is_empty() {
+        value.url = Some(format!("{scheme}://{clean_domain}{path}"));
+    } else {
+        value.url = Some(format!("{fallback_origin}/"));
+    }
+    if !cookie.host_only && !clean_domain.is_empty() {
+        value.domain = Some(format!(".{clean_domain}"));
+    }
+    value.path = Some(path.to_string());
+    value.secure = Some(cookie.secure);
+    value.http_only = Some(cookie.http_only);
+    value.same_site = match cookie.same_site.as_str() {
+        "strict" => Some(network::CookieSameSite::Strict),
+        "lax" => Some(network::CookieSameSite::Lax),
+        "no_restriction" => Some(network::CookieSameSite::None),
+        _ => None,
+    };
+    value
+}
+
+fn capture_needs_headed_escalation(capture: &Capture) -> bool {
+    let (cls, _) = crate::defend::classify(&crate::defend::Observation {
+        status_code: capture.status,
+        headers: Vec::new(),
+        body_snippet: capture.html.chars().take(4096).collect(),
+    });
+    if matches!(
+        cls,
+        crate::defend::Class::Cloudflare
+            | crate::defend::Class::BotManager
+            | crate::defend::Class::Captcha
+    ) {
+        return true;
+    }
+    if matches!(capture.status, 403 | 429 | 503) {
+        let lower = capture.html.to_ascii_lowercase();
+        if lower.contains("access denied")
+            || lower.contains("edgesuite")
+            || lower.contains("akamai")
+            || lower.contains("just a moment")
+            || lower.contains("cf-chl")
+        {
+            return true;
+        }
+    }
+    false
+}
 
 pub struct InPageFetchRequest<'a> {
     pub credential: &'a Credential,
@@ -207,6 +394,36 @@ pub async fn capture(
     capture_with_engine(credential, entry, allow_local, engine).await
 }
 
+async fn run_capture_with_mode(
+    credential: &Credential,
+    entry: &str,
+    allow_local: bool,
+    engine: &crate::environment::BrowserEngine,
+    headed: bool,
+) -> AppResult<Capture> {
+    let (profile_dir, _profile_lock, _snapshot) =
+        acquire_profile_dir(&credential.origin).map_err(unavailable)?;
+    let config =
+        build_stealth_browser_config(engine, Some(&profile_dir), &credential.origin, headed)
+            .map_err(unavailable)?;
+    let (mut browser, mut handler) =
+        tokio::time::timeout(Duration::from_secs(35), Browser::launch(config))
+            .await
+            .map_err(unavailable)?
+            .map_err(unavailable)?;
+    let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
+    let result = tokio::time::timeout(
+        Duration::from_secs(35),
+        observe(&browser, credential, entry, allow_local),
+    )
+    .await
+    .map_err(unavailable)
+    .and_then(|r| r);
+    let _ = browser.close().await;
+    drive.abort();
+    result
+}
+
 pub async fn capture_with_engine(
     credential: &Credential,
     entry: &str,
@@ -219,31 +436,44 @@ pub async fn capture_with_engine(
         return Err(AppError::api("unsafe_target", 400));
     }
     crate::net::resolve(&url, allow_local).await?;
-    let (profile_dir, _profile_lock, _snapshot) =
-        acquire_profile_dir(&credential.origin).map_err(unavailable)?;
     if engine.protocol != "chromium-cdp" {
         return Err(AppError::api("browser_unavailable", 422));
     }
-    let builder = BrowserConfig::builder()
-        .chrome_executable(&engine.executable)
-        .user_data_dir(&profile_dir)
-        .window_size(1280, 800)
-        .arg("--headless=new")
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--disable-background-networking")
-        .arg("--disable-dev-shm-usage")
-        .arg("--disable-blink-features=AutomationControlled");
-    let config = builder.build().map_err(unavailable)?;
+    let force_headed = std::env::var_os("HYCLI_HEADED").is_some();
+    let first = run_capture_with_mode(credential, entry, allow_local, engine, force_headed).await?;
+    if !force_headed && capture_needs_headed_escalation(&first) && can_run_headed() {
+        if let Ok(escalated) =
+            run_capture_with_mode(credential, entry, allow_local, engine, true).await
+        {
+            if !capture_needs_headed_escalation(&escalated)
+                || escalated.observations.len() > first.observations.len()
+            {
+                return Ok(escalated);
+            }
+        }
+    }
+    Ok(first)
+}
+
+async fn run_fetch_in_page_with_mode(
+    req: &InPageFetchRequest<'_>,
+    origin_str: &str,
+    engine: &crate::environment::BrowserEngine,
+    headed: bool,
+) -> AppResult<InPageFetchResponse> {
+    let (profile_dir, _profile_lock, _snapshot) =
+        acquire_profile_dir(origin_str).map_err(unavailable)?;
+    let config = build_stealth_browser_config(engine, Some(&profile_dir), origin_str, headed)
+        .map_err(unavailable)?;
     let (mut browser, mut handler) =
-        tokio::time::timeout(Duration::from_secs(35), Browser::launch(config))
+        tokio::time::timeout(Duration::from_secs(30), Browser::launch(config))
             .await
             .map_err(unavailable)?
             .map_err(unavailable)?;
     let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
     let result = tokio::time::timeout(
-        Duration::from_secs(35),
-        observe(&browser, credential, entry, allow_local),
+        Duration::from_secs(30),
+        execute_in_page_fetch(&browser, req, origin_str),
     )
     .await
     .map_err(unavailable)
@@ -293,36 +523,30 @@ pub async fn fetch_in_page(req: InPageFetchRequest<'_>) -> AppResult<InPageFetch
         .iter()
         .find(|b| b.protocol == "chromium-cdp")
         .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
-    let (profile_dir, _profile_lock, _snapshot) =
-        acquire_profile_dir(&origin_str).map_err(unavailable)?;
-    let config = BrowserConfig::builder()
-        .chrome_executable(&engine.executable)
-        .user_data_dir(&profile_dir)
-        .window_size(1280, 800)
-        .arg("--headless=new")
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--disable-background-networking")
-        .arg("--disable-dev-shm-usage")
-        .arg("--disable-blink-features=AutomationControlled")
-        .build()
-        .map_err(unavailable)?;
-    let (mut browser, mut handler) =
-        tokio::time::timeout(Duration::from_secs(30), Browser::launch(config))
-            .await
-            .map_err(unavailable)?
-            .map_err(unavailable)?;
-    let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
-    let result = tokio::time::timeout(
-        Duration::from_secs(30),
-        execute_in_page_fetch(&browser, &req, &origin_str),
-    )
-    .await
-    .map_err(unavailable)
-    .and_then(|r| r);
-    let _ = browser.close().await;
-    drive.abort();
-    result
+    let force_headed = std::env::var_os("HYCLI_HEADED").is_some();
+    let first = run_fetch_in_page_with_mode(&req, &origin_str, engine, force_headed).await?;
+    let (cls, _) = crate::defend::classify(&crate::defend::Observation {
+        status_code: first.status,
+        headers: first.headers.clone(),
+        body_snippet: String::from_utf8_lossy(&first.bytes)
+            .chars()
+            .take(4096)
+            .collect(),
+    });
+    if !force_headed
+        && matches!(
+            cls,
+            crate::defend::Class::Cloudflare
+                | crate::defend::Class::BotManager
+                | crate::defend::Class::Captcha
+        )
+        && can_run_headed()
+    {
+        if let Ok(escalated) = run_fetch_in_page_with_mode(&req, &origin_str, engine, true).await {
+            return Ok(escalated);
+        }
+    }
+    Ok(first)
 }
 
 async fn execute_in_page_fetch(
@@ -332,26 +556,13 @@ async fn execute_in_page_fetch(
 ) -> AppResult<InPageFetchResponse> {
     let page = browser.new_page("about:blank").await.map_err(unavailable)?;
     for cookie in &req.credential.cookies {
-        let mut value = network::CookieParam::new(&cookie.name, &cookie.value);
-        value.url = Some(format!("{origin_str}/"));
-        if !cookie.host_only && !cookie.domain.is_empty() {
-            value.domain = Some(cookie.domain.clone());
-        }
-        value.path = Some(cookie.path.clone());
-        value.secure = Some(cookie.secure);
-        value.http_only = Some(cookie.http_only);
-        value.same_site = match cookie.same_site.as_str() {
-            "strict" => Some(network::CookieSameSite::Strict),
-            "lax" => Some(network::CookieSameSite::Lax),
-            "no_restriction" => Some(network::CookieSameSite::None),
-            _ => None,
-        };
+        let value = cookie_param_for(cookie, origin_str);
         page.set_cookie(value).await.map_err(unavailable)?;
     }
     let origin_json = serde_json::to_string(origin_str)?;
     let storage_json = serde_json::to_string(&req.credential.local_storage)?;
     page.evaluate_on_new_document(format!(
-        "{STEALTH_INIT_SCRIPT}\nif(location.origin==={origin_json}){{for(const [key,value] of Object.entries({storage_json})){{localStorage.setItem(key,value)}}}}"
+        "{STEALTH_INIT_SCRIPT}\nif(location.origin==={origin_json}){{for(const [key,value] of Object.entries({storage_json})){{try{{localStorage.setItem(key,value);sessionStorage.setItem(key,value)}}catch(_){{}}}}}}"
     ))
     .await
     .map_err(unavailable)?;
@@ -552,26 +763,13 @@ async fn observe(
 ) -> AppResult<Capture> {
     let page = browser.new_page("about:blank").await.map_err(unavailable)?;
     for cookie in &credential.cookies {
-        let mut value = network::CookieParam::new(&cookie.name, &cookie.value);
-        value.url = Some(format!("{}/", credential.origin));
-        if !cookie.host_only && !cookie.domain.is_empty() {
-            value.domain = Some(cookie.domain.clone());
-        }
-        value.path = Some(cookie.path.clone());
-        value.secure = Some(cookie.secure);
-        value.http_only = Some(cookie.http_only);
-        value.same_site = match cookie.same_site.as_str() {
-            "strict" => Some(network::CookieSameSite::Strict),
-            "lax" => Some(network::CookieSameSite::Lax),
-            "no_restriction" => Some(network::CookieSameSite::None),
-            _ => None,
-        };
+        let value = cookie_param_for(cookie, &credential.origin);
         page.set_cookie(value).await.map_err(unavailable)?;
     }
     let origin = serde_json::to_string(&credential.origin)?;
     let storage = serde_json::to_string(&credential.local_storage)?;
     page.evaluate_on_new_document(format!(
-        "{STEALTH_INIT_SCRIPT}\nif(location.origin==={origin}){{for(const [key,value] of Object.entries({storage})){{localStorage.setItem(key,value)}}}}"
+        "{STEALTH_INIT_SCRIPT}\nif(location.origin==={origin}){{for(const [key,value] of Object.entries({storage})){{try{{localStorage.setItem(key,value);sessionStorage.setItem(key,value)}}catch(_){{}}}}}}"
     ))
     .await
     .map_err(unavailable)?;
@@ -598,6 +796,7 @@ async fn observe(
     let task_page = page.clone();
     let target_origin = credential.origin.clone();
     let target_url = crate::net::validate_url(&target_origin)?;
+    let listener_target_url = target_url.clone();
     let listener = tokio::spawn(async move {
         let mut requests = std::collections::HashMap::new();
         let mut identities = std::collections::HashMap::new();
@@ -608,7 +807,7 @@ async fn observe(
             tokio::select! {
                 Some(event) = paused.next() => {
                     let parsed = crate::net::validate_url(&event.request.url).ok();
-                    let same = parsed.as_ref().is_some_and(|u| crate::net::same_site_origin(u, &target_url));
+                    let same = parsed.as_ref().is_some_and(|u| crate::net::same_site_origin(u, &listener_target_url));
                     let method = event.request.method.to_ascii_uppercase();
                     let post_data = event
                         .request
@@ -687,7 +886,9 @@ async fn observe(
                             if !headers.is_empty() {
                                 if let Ok(mut capture) = captured.lock() {
                                     capture.authenticated_requests += 1;
-                                    if capture.headers.is_empty() { capture.headers = headers.clone(); }
+                                    for (k, v) in &headers {
+                                        capture.headers.entry(k.clone()).or_insert_with(|| v.clone());
+                                    }
                                 }
                             }
                             let body_schema = extract_post_body_schema(post_data.as_deref());
@@ -741,7 +942,9 @@ async fn observe(
                                     if let Ok(mut capture) = captured.lock() {
                                         capture.identity = Some(identity);
                                         capture.identity_url = url.to_string();
-                                        capture.headers = headers;
+                                        for (k, v) in headers {
+                                            capture.headers.insert(k, v);
+                                        }
                                     }
                                 }
                             }
@@ -771,10 +974,16 @@ async fn observe(
     let _ = tokio::time::timeout(Duration::from_secs(18), page.goto(entry)).await;
     let anonymous = credential.cookies.is_empty() && credential.local_storage.is_empty();
     for tick in 0..24 {
+        if tick == 2 {
+            // Trigger lazy-loaded list items and scroll-activated XHR/fetch endpoints.
+            let _ = page
+                .evaluate("try { window.scrollBy(0, 2000); } catch (_) {}")
+                .await;
+        }
         if result.lock().is_ok_and(|c| c.identity.is_some()) {
             break;
         }
-        if anonymous && tick >= 2 && result.lock().is_ok_and(|c| (200..400).contains(&c.status)) {
+        if anonymous && tick >= 3 && result.lock().is_ok_and(|c| (200..400).contains(&c.status)) {
             if let Ok(dom) = page.content().await {
                 let lower = dom.to_ascii_lowercase();
                 if dom.len() > 256
@@ -790,6 +999,72 @@ async fn observe(
     }
     listener.abort();
     let _ = listener.await;
+    if let Ok(eval) = page
+        .evaluate("() => Array.isArray(window.__hycli_apis) ? window.__hycli_apis : []")
+        .await
+    {
+        if let Ok(Value::Array(items)) = eval.into_value::<Value>() {
+            if let Ok(mut capture) = result.lock() {
+                for item in items.into_iter().take(40) {
+                    let Some(raw_url) = item.get("url").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let Ok(parsed) = target_url.join(raw_url) else {
+                        continue;
+                    };
+                    if !crate::net::same_site_origin(&parsed, &target_url) {
+                        continue;
+                    }
+                    let method = item
+                        .get("method")
+                        .and_then(Value::as_str)
+                        .unwrap_or("GET")
+                        .to_ascii_uppercase();
+                    let status = item.get("status").and_then(Value::as_u64).unwrap_or(200) as u16;
+                    let path_str = parsed.path().to_string();
+                    let pointers = item
+                        .get("data")
+                        .map(extract_json_pointers)
+                        .unwrap_or_default();
+                    if capture.identity.is_none() && accounts::identity_endpoint(&parsed) {
+                        if let Some(data) = item.get("data") {
+                            if let Some(identity) = accounts::extract_identity(data) {
+                                capture.identity = Some(identity);
+                                capture.identity_url = parsed.to_string();
+                            }
+                        }
+                    }
+                    if let Some(existing) = capture
+                        .observations
+                        .iter_mut()
+                        .find(|o| o.method == method && o.path == path_str)
+                    {
+                        if existing.response_pointers.is_empty() && !pointers.is_empty() {
+                            existing.response_pointers = pointers;
+                        }
+                    } else if capture.observations.len() < 80 {
+                        let auth_headers: Vec<String> = capture.headers.keys().cloned().collect();
+                        capture.observations.push(Observation {
+                            method,
+                            path: path_str,
+                            query: parsed
+                                .query_pairs()
+                                .filter(|(k, _)| !util::secret_field(k))
+                                .map(|(k, _)| (k.into_owned(), "string".into()))
+                                .collect(),
+                            body: extract_post_body_schema(
+                                item.get("body").and_then(Value::as_str),
+                            ),
+                            status,
+                            observed_at: util::now(),
+                            response_pointers: pointers,
+                            auth_headers,
+                        });
+                    }
+                }
+            }
+        }
+    }
     let html = page.content().await.unwrap_or_default();
     let final_url = page
         .url()
@@ -859,4 +1134,77 @@ async fn identity_body(page: &Page, id: network::RequestId) -> AppResult<Value> 
         body.body.into_bytes()
     };
     serde_json::from_slice(&bytes).map_err(|_| AppError::api("data_invalid", 400))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn stealth_browser_config_activates_cloakbrowser_flags_without_double_dashes() {
+        let engine = crate::environment::BrowserEngine {
+            id: "browser-cloak".into(),
+            name: "CloakBrowser".into(),
+            protocol: "chromium-cdp".into(),
+            discovered_from: "cloakbrowser_stealth".into(),
+            executable: PathBuf::from("/opt/cloakbrowser/chromium-146.0.7680.177.5/chrome"),
+        };
+        assert!(is_cloakbrowser_engine(&engine));
+        let seed = fingerprint_seed("https://discord.com");
+        assert!((10_000..=99_999).contains(&seed));
+        assert_eq!(seed, fingerprint_seed("https://discord.com"));
+
+        let cfg = build_stealth_browser_config(&engine, None, "https://discord.com", false)
+            .expect("config should build");
+        let debug_str = format!("{cfg:?}");
+        assert!(debug_str.contains("disable_default_args: true"));
+        assert!(debug_str.contains("viewport: None"));
+        assert!(debug_str.contains("sandbox: false"));
+        assert!(debug_str.contains("New"));
+        assert!(debug_str.contains("fingerprint"));
+        assert!(debug_str.contains("fingerprint-platform"));
+        assert!(!debug_str.contains("\"--"));
+    }
+
+    #[test]
+    fn cookie_param_for_preserves_host_only_and_subdomain_scoping() {
+        let host_only = accounts::Cookie {
+            name: "__Host-user_session".into(),
+            value: "tok1".into(),
+            domain: "github.com".into(),
+            path: "/".into(),
+            secure: true,
+            http_only: true,
+            host_only: true,
+            expires: None,
+            same_site: "lax".into(),
+            store_id: String::new(),
+            partition_key: None,
+        };
+        let param = cookie_param_for(&host_only, "https://github.com");
+        assert_eq!(param.url.as_deref(), Some("https://github.com/"));
+        assert!(param.domain.is_none());
+
+        let domain_scoped = accounts::Cookie {
+            name: "ad962bd2sb".into(),
+            value: "oauth2_tok".into(),
+            domain: ".upwork.com".into(),
+            path: "/nx/find-work/".into(),
+            secure: true,
+            http_only: true,
+            host_only: false,
+            expires: None,
+            same_site: "lax".into(),
+            store_id: String::new(),
+            partition_key: None,
+        };
+        let param2 = cookie_param_for(&domain_scoped, "https://www.upwork.com");
+        assert_eq!(
+            param2.url.as_deref(),
+            Some("https://upwork.com/nx/find-work/")
+        );
+        assert_eq!(param2.domain.as_deref(), Some(".upwork.com"));
+        assert_eq!(param2.path.as_deref(), Some("/nx/find-work/"));
+    }
 }

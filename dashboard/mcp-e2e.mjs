@@ -40,17 +40,12 @@ try{
  const refused=await scoped.rpc('tools/call',{name:'library_create-task',arguments:{title:'MCP fixture task'}});assert.ok(refused.isError);assert.match(refused.content[0].text,/writes_disabled/);
  const check=await scoped.call('hycli_check',{});assert.equal(check[0].site,'library');assert.ok(['ok','no_checks'].includes(check[0].verdict),JSON.stringify(check));
  assert.equal((await allowChanges(true)).status,200);
- const before=await count();const change=await scoped.call('library_create-task',{title:'MCP fixture task'});assert.equal(change.status,'awaiting_user_approval');assert.equal(await count(),before);
- assert.equal((await scoped.call('hycli_result',{id:change.result_id})).status,'awaiting_user_approval');
- const approve=()=>fetch(ports.dashboard+`/api/approvals/${change.result_id}/approve`,{method:'POST',headers:{cookie,'x-hycli-csrf':csrf}});
- assert.equal((await approve()).status,200);
- let result;for(let i=0;i<120;i++){result=await scoped.call('hycli_result',{id:change.result_id});if(['completed','failed'].includes(result.status))break;await sleep(250);}
- assert.equal(result.status,'completed');assert.equal(result.result.title,'MCP fixture task');assert.equal(await count(),before+1);assert.equal((await approve()).status,409);
+ const before=await count();const change=await scoped.call('library_create-task',{title:'MCP fixture task'});assert.equal(change.status,200);assert.equal(change.body.title,'MCP fixture task');assert.equal(await count(),before+1);
 }finally{scoped.close();}
 const general=await connect(['mcp','--allow-local']);
 try{
  const tools=(await general.rpc('tools/list',{})).tools;
- for(const name of ['hycli_prepare','hycli_sites','hycli_run','hycli_accounts'])assert.ok(tools.some(t=>t.name===name),name);
+ for(const name of ['hycli_prepare','hycli_sites','hycli_run','hycli_accounts','hycli_writes'])assert.ok(tools.some(t=>t.name===name),name);
  assert.equal(general.initialized.capabilities.tools.listChanged,true);
  const read=await general.call('hycli_run',{site:'library',action:'find-articles',inputs:{q:'fixture'}});assert.equal(read.status,200);
  // Install after the MCP handshake: the same connection must discover and run new tools.
@@ -61,10 +56,12 @@ try{
  for(let i=0;i<40&&!general.notifications.some(n=>n.method==='notifications/tools/list_changed');i++)await sleep(250);
  assert.ok(general.notifications.some(n=>n.method==='notifications/tools/list_changed'));
  assert.ok((await general.rpc('tools/list',{})).tools.some(t=>t.name==='mcp-new-site_list-articles'));
- const before=await count();const receipt=await general.call('hycli_run',{site:'library',action:'create-task',inputs:{title:'Generic MCP action'}});assert.equal(receipt.status,'awaiting_user_approval');assert.equal(await count(),before);
- assert.equal((await fetch(ports.dashboard+`/api/approvals/${receipt.result_id}/reject`,{method:'POST',headers:auth})).status,200);
+ await general.call('hycli_writes',{site:'library',allow:false});
+ const refusedRun=await general.rpc('tools/call',{name:'hycli_run',arguments:{site:'library',action:'create-task',inputs:{title:'Blocked'}}});assert.ok(refusedRun.isError);assert.match(refusedRun.content[0].text,/writes_disabled/);
+ await general.call('hycli_writes',{site:'library',allow:true});
+ const before=await count();const created=await general.call('hycli_run',{site:'library',action:'create-task',inputs:{title:'Generic MCP action'}});assert.equal(created.status,200);assert.equal(created.body.title,'Generic MCP action');assert.equal(await count(),before+1);
  assert.equal((await fetch(ports.dashboard+'/api/sites/mcp-new-site',{method:'DELETE',headers:auth})).status,200);
  assert.equal((await allowChanges(false)).status,200);
  await fs.rm(specFile);
- console.log(JSON.stringify({mcp:'passed',scoped:'one website',general:'preparation and generic execution',installed_after_connect:'usable with tool-list notification',read:'sanitized',write:'one exact approval receipt',replay:'rejected'},null,2));
+ console.log(JSON.stringify({mcp:'passed',scoped:'one website',general:'preparation and generic execution',installed_after_connect:'usable with tool-list notification',read:'sanitized',write:'per-CLI write permission and direct execution'},null,2));
 }finally{general.close();}

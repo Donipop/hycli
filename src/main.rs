@@ -121,6 +121,12 @@ enum Cmd {
         #[arg(long)]
         account: Option<String>,
     },
+    /// Check or set whether write actions are allowed for an installed website CLI.
+    Writes {
+        site: String,
+        /// Pass `allow` (`on` / `true`) after asking the user once for this CLI, or `deny` (`off` / `false`) to disable. Omit to inspect status.
+        mode: Option<String>,
+    },
     /// List saved website accounts without exposing sign-in secrets.
     Accounts {
         #[arg(long)]
@@ -578,6 +584,37 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
                 .run_op_for_account(&sp, &action, &args, account.as_deref())
                 .await?;
             emit.data(&result.mapped.or(result.body));
+            Ok(())
+        }
+        Cmd::Writes { site, mode } => {
+            find_spec(&site)?;
+            let core = runner(&deps)?;
+            let writes = match mode.as_deref().map(str::to_ascii_lowercase).as_deref() {
+                None | Some("status") => core
+                    .state
+                    .read()?
+                    .sites
+                    .get(&site)
+                    .is_some_and(|m| m.writes),
+                Some("allow" | "on" | "true" | "enable" | "yes" | "1") => {
+                    core.set_writes(&site, true)?;
+                    true
+                }
+                Some("deny" | "off" | "false" | "disable" | "no" | "0") => {
+                    core.set_writes(&site, false)?;
+                    false
+                }
+                Some(other) => {
+                    return Err(apperr::usage(
+                        format!("Unknown writes mode: {other}"),
+                        format!("Use `hycli writes {site} allow` or `hycli writes {site} deny`."),
+                    ));
+                }
+            };
+            emit.data(&serde_json::json!({
+                "site": site,
+                "writes": writes,
+            }));
             Ok(())
         }
         Cmd::Open { port, no_open } => {

@@ -466,23 +466,31 @@ impl Runtime {
                     )
                     .await
                     {
+                        let has_headers = !capture.headers.is_empty();
+                        let has_observations = !capture.observations.is_empty();
+                        if has_headers {
+                            credential.headers.extend(capture.headers);
+                        }
                         if let Some(identity) = capture.identity {
-                            credential.headers = capture.headers;
                             credential.identity_source = capture.identity_url.clone();
                             self.vault
                                 .lock()
                                 .map_err(|_| crate::apperr::AppError::api("internal", 500))?
                                 .set("accounts", &id, &serde_json::to_string(&credential)?)?;
+                            let observations = capture.observations;
+                            let identity_url = capture.identity_url;
                             self.state.update(|data| {
                                 if let Some(view) = data.accounts.get_mut(&id) {
                                     crate::accounts::apply_identity(view, identity);
                                     view.checked_at = util::now();
                                 }
                                 let meta = data.sites.entry(effective_id.clone()).or_default();
-                                if !meta.identity_paths.contains(&capture.identity_url) {
-                                    meta.identity_paths.push(capture.identity_url);
+                                if !identity_url.is_empty()
+                                    && !meta.identity_paths.contains(&identity_url)
+                                {
+                                    meta.identity_paths.push(identity_url);
                                 }
-                                for observation in capture.observations {
+                                for observation in observations {
                                     if !meta.observations.iter().any(|old| {
                                         old.method == observation.method
                                             && old.path == observation.path
@@ -494,6 +502,26 @@ impl Runtime {
                             })?;
                             // Replay the captured read through the executor before selecting it.
                             let _ = self.refresh_account(&id).await;
+                        } else if has_headers || has_observations {
+                            if has_headers {
+                                self.vault
+                                    .lock()
+                                    .map_err(|_| crate::apperr::AppError::api("internal", 500))?
+                                    .set("accounts", &id, &serde_json::to_string(&credential)?)?;
+                            }
+                            let observations = capture.observations;
+                            self.state.update(|data| {
+                                let meta = data.sites.entry(effective_id.clone()).or_default();
+                                for observation in observations {
+                                    if !meta.observations.iter().any(|old| {
+                                        old.method == observation.method
+                                            && old.path == observation.path
+                                    }) {
+                                        meta.observations.push(observation);
+                                    }
+                                }
+                                Ok(())
+                            })?;
                         }
                     }
                 }

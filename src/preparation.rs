@@ -667,9 +667,32 @@ impl Runtime {
                     let mut content = if is_js {
                         json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"api_bases":crate::discovery::bundle_api_bases(&base, &text)})
                     } else {
+                        let forms_val = crate::html::forms(&text);
+                        if let Some(arr) = forms_val.as_array() {
+                            for f in arr {
+                                let method = f
+                                    .get("method")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("GET")
+                                    .to_ascii_uppercase();
+                                let action = f.get("action").and_then(Value::as_str).unwrap_or("");
+                                if let Ok(action_url) = base.join(action) {
+                                    if crate::net::same_site_origin(&action_url, &base) {
+                                        let form_path = if action_url.path().is_empty() {
+                                            "/".to_string()
+                                        } else {
+                                            action_url.path().to_string()
+                                        };
+                                        evidence.insert(form_path.clone());
+                                        routes.insert((method.clone(), form_path.clone()));
+                                        doc_routes.insert((method, form_path));
+                                    }
+                                }
+                            }
+                        }
                         let ssr_keys: Vec<_> =
                             crate::html::extract_ssr_map(&text).into_keys().collect();
-                        json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"ssr_keys":ssr_keys,"ssr_payloads":crate::html::ssr_payloads(&text),"forms":crate::html::forms(&text),"html_structure":crate::html::structure(&text),"observed_paths":paths.into_iter().take(120).collect::<Vec<_>>()})
+                        json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"ssr_keys":ssr_keys,"ssr_payloads":crate::html::ssr_payloads(&text),"forms":forms_val,"html_structure":crate::html::structure(&text),"observed_paths":paths.into_iter().take(120).collect::<Vec<_>>()})
                     };
                     let secrets = if account_id.is_empty() {
                         vec![]
@@ -744,7 +767,7 @@ impl Runtime {
                 "For browser-session actions (after session.verify or when an account is connected), use auth strategy {name: \"browser-session\", kind: \"browser\"} or {name: \"csrf-header\", kind: \"derived\", header: \"X-CSRF-Token\", prefix: \"\", value_from: \"cookie:<cookie_name>\"} (also supports \"storage:<key>[#<json_pointer>]\" and \"header:<captured_header>\") and set operation.auth to that strategy name. Browser and derived auth reference the local browser session and require no separately entered key. A declared kind=\"header\" strategy always requires its own stored API credential (store:<site_id>/<key>); a browser login cannot substitute for an external API key.",
                 "Use an exact base_url from documented_api_bases; operation paths start with / and are relative to that base, without duplicating its path prefix. An operation may set its own base_url to another exact documented_api_bases entry when the website and API use different servers or same-site subdomains (e.g. api.example.com).",
                 "Inputs types: string, int, float, bool, json (for nested arrays/objects). Never put literal cookies, tokens or secret values in the spec. For documented API-key or bearer authentication, declare kind=\"header\" with the documented header/prefix and a store:<site_id>/<key> reference, and set each protected operation.auth to that strategy name. Omit auth for public operations.",
-                "Write/unknown actions can be listed, but never tested; user approval is mandatory at execution.",
+                "Write/unknown actions must be implemented from documented routes, JS bundles, or HTML forms, and never tested during preparation.",
                 "SiteSpec v2 supports declarative preflight steps on any operation: preflight: [{\"name\": \"csrf\", \"path\": \"/entry\", \"extract\": {\"token\": \"css:meta[name='csrf-token']@content\", \"build_id\": \"ssr:__NEXT_DATA__#/buildId\"}}] (extractors support css:<selector>@<attr>, ssr:<key>#<pointer>, json:/<pointer>, header:<name>, cookie:<name>). Interpolate extracted values or inputs via {{step.<name>.<var>}} or {{<input>}} in path, query, headers, body.form, body.json, or body.json_template. Use preflight and auth.kind=\"derived\" to satisfy dynamic CSRF tokens, Next.js buildIds, and session headers instead of reporting them as capability gaps.",
                 "Provide default values only for optional inputs. Params/query/body.json/body.form is a map of input names to type/required/default. For complex nested JSON or GraphQL bodies, set body.json to declare the typed user inputs and body.json_template to the nested JSON structure containing \"{{input}}\" or \"{{step.name.var}}\" placeholders. Use body.form for application/x-www-form-urlencoded requests, or body.json / body.json_template for JSON; never both form and json.",
                 "Set response.format to json, html, text, xml or empty and response.required_pointers to important JSON fields supported by evidence. For SSR HTML pages containing __NEXT_DATA__, __NUXT_DATA__, ld+json, or __INITIAL_STATE__, you can set response: {format: \"json\", ssr_json: \"auto\" (or the exact ssr_keys entry), extract_pointer: \"/props/pageProps\", required_pointers: [\"/...\"]} to return clean structured JSON directly from an HTML route! If a JSON endpoint prepends an anti-XSSI prefix (like \")]}'\\n\"), set response.strip_prefix. For HTML DOM extraction, use response.html: {items: observed repeated-record CSS selector or empty for the document, fields: {title: {selector: relative CSS selector, attribute: empty for text, required: true}, url: {selector: relative CSS selector, attribute: \"href\", absolute_url: true}}, page: {next_url: {selector: observed next-page link, attribute: \"href\", absolute_url: true}}, limit: 100} and include response.required_html_fields as observed {selector, attribute} entries that must have a unique nonempty value.",
@@ -931,7 +954,8 @@ impl Runtime {
                         .map(|op| format!("{} {}", op.method, op.path))
                         .collect();
                     let site_base = sp.site.base_url.clone();
-                    sp.operations.retain(|op| {
+                    let spec_auth = sp.auth.clone();
+                    sp.operations.retain_mut(|op| {
                         let method = op.method.to_uppercase();
                         let path = &op.path;
                         let operation_base = if op.base_url.is_empty() {
@@ -942,7 +966,7 @@ impl Runtime {
                         if !api_bases.contains(operation_base.trim_end_matches('/')) {
                             return false;
                         }
-                        let is_session_auth = sp.auth.iter().any(|auth| {
+                        let is_session_auth = spec_auth.iter().any(|auth| {
                             auth.name == op.auth
                                 && matches!(auth.kind.as_str(), "browser" | "derived")
                         });
@@ -969,16 +993,30 @@ impl Runtime {
                                 },
                             );
                             if method == "GET" {
-                                if (account_id.is_empty() && !proven_read)
-                                    || (has_openapi_req && !proven_read)
-                                {
+                                if account_id.is_empty() && !proven_read {
                                     return false;
                                 }
-                            } else if account_id.is_empty()
-                                || op.transport == "browser"
-                                || (has_openapi_req && !proven_session_route)
-                            {
+                                if has_openapi_req && !proven_read {
+                                    if auth_requirements
+                                        .get(&(method.clone(), path.clone()))
+                                        .is_some_and(|req| req.is_some())
+                                    {
+                                        op.auth.clear();
+                                    } else {
+                                        return false;
+                                    }
+                                }
+                            } else if account_id.is_empty() || op.transport == "browser" {
                                 return false;
+                            } else if has_openapi_req && !proven_session_route {
+                                if auth_requirements
+                                    .get(&(method.clone(), path.clone()))
+                                    .is_some_and(|req| req.is_some())
+                                {
+                                    op.auth.clear();
+                                } else {
+                                    return false;
+                                }
                             }
                         }
                         routes.iter().any(|(m, p)| {

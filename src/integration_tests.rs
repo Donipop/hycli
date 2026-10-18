@@ -364,16 +364,35 @@ async fn a_change_needs_exact_single_use_approval_and_is_never_tested() {
     core.install(&sp).unwrap();
     allow_changes(&core, &sp.site.name);
     let args = BTreeMap::from([("title".into(), "A concrete task".into())]);
-    assert!(core.run_op(&sp, "create-item", &args).await.is_err());
+    // Candidate verification during preparation must never execute a write.
+    assert!(
+        core.verify_candidate_with_inputs(&sp, "create-item", "", args.clone())
+            .await
+            .is_err()
+    );
     assert_eq!(count.load(Ordering::SeqCst), 0);
-    let review = core.policy.pending().unwrap().remove(0);
+    // Direct execution runs when writes are enabled.
+    assert_eq!(
+        core.run_op(&sp, "create-item", &args)
+            .await
+            .unwrap()
+            .0
+            .status,
+        200
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    // Explicit dashboard approval tokens remain single-use and bound to exact inputs.
+    let req = core
+        .request(&sp, "create-item", args.clone(), None)
+        .unwrap();
+    let review = core.approval(req, "en").unwrap();
     let request = core.policy.review(&review.id).unwrap().request.unwrap();
     let mut changed = request.clone();
     changed
         .inputs
         .insert("title".into(), "A different task".into());
     assert!(core.execute(changed, Some(&review.id)).await.is_err());
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(count.load(Ordering::SeqCst), 1);
     assert_eq!(
         core.execute(request.clone(), Some(&review.id))
             .await
@@ -382,9 +401,9 @@ async fn a_change_needs_exact_single_use_approval_and_is_never_tested() {
             .status,
         200
     );
-    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(count.load(Ordering::SeqCst), 2);
     assert!(core.execute(request, Some(&review.id)).await.is_err());
-    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(count.load(Ordering::SeqCst), 2);
     server.abort();
 }
 #[tokio::test]
@@ -1606,11 +1625,6 @@ async fn websites_stay_read_only_until_the_user_allows_changes() {
     let sp = spec_for(&url);
     core.install(&sp).unwrap();
     let args = BTreeMap::from([("title".into(), "A concrete task".into())]);
-    let Err(error) = core.run_op(&sp, "create-item", &args).await else {
-        panic!("change ran while read-only")
-    };
-    assert_eq!(error.public_code, "writes_disabled");
-    assert!(core.policy.pending().unwrap().is_empty());
     let mcp = crate::guarded_mcp::Server {
         core: core.clone(),
         sites_only: false,
@@ -1624,25 +1638,46 @@ async fn websites_stay_read_only_until_the_user_allows_changes() {
             .map(|tool| tool.name.to_string())
             .collect()
     };
+    // Newly installed sites start with writes off until confirmed once for that CLI.
     assert!(names(&mcp).contains(&"fixture_read-items".to_string()));
     assert!(!names(&mcp).contains(&"fixture_create-item".to_string()));
-    allow_changes(&core, &sp.site.name);
+    let Err(error) = core.run_op(&sp, "create-item", &args).await else {
+        panic!("change ran while read-only")
+    };
+    assert_eq!(error.public_code, "writes_disabled");
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+
+    // Enabling writes once for this CLI exposes write tools and allows direct execution.
+    core.set_writes(&sp.site.name, true).unwrap();
     assert!(names(&mcp).contains(&"fixture_create-item".to_string()));
-    assert!(core.run_op(&sp, "create-item", &args).await.is_err());
-    let review = core.policy.pending().unwrap().remove(0);
-    let request = core.policy.review(&review.id).unwrap().request.unwrap();
-    // Turning changes off again also stops an approval issued while they were on.
-    core.state
-        .update(|d| {
-            d.sites.get_mut(&sp.site.name).unwrap().writes = false;
-            Ok(())
-        })
+    assert_eq!(
+        core.run_op(&sp, "create-item", &args)
+            .await
+            .unwrap()
+            .0
+            .status,
+        200
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+
+    let req = core
+        .request(&sp, "create-item", args.clone(), None)
         .unwrap();
+    let review = core.approval(req, "en").unwrap();
+    let request = core.policy.review(&review.id).unwrap().request.unwrap();
+
+    // Turning changes off stops both direct write calls and any approval issued while they were on.
+    core.set_writes(&sp.site.name, false).unwrap();
+    assert!(!names(&mcp).contains(&"fixture_create-item".to_string()));
+    let Err(error) = core.run_op(&sp, "create-item", &args).await else {
+        panic!("change ran after being turned off")
+    };
+    assert_eq!(error.public_code, "writes_disabled");
     let Err(error) = core.execute(request, Some(&review.id)).await else {
         panic!("change ran after being turned off")
     };
     assert_eq!(error.public_code, "writes_disabled");
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(count.load(Ordering::SeqCst), 1);
     server.abort();
 }
 #[tokio::test]
@@ -1727,7 +1762,12 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
                         r#"<!doctype html><html><head><title>Synthetic Studio</title>
                         <meta name="csrf-token" content="csrf-live-777">
                         <script src="/_next/static/chunks/app.js"></script></head>
-                        <body><script id="__NEXT_DATA__" type="application/json">{"buildId":"build-2026","props":{"pageProps":{"clips":[{"id":"clip-1","title":"First Song"}]}}}</script></body></html>"#,
+                        <body>
+                        <form action="/api/v2/clips/quick-create" method="post">
+                            <input name="title" type="text">
+                            <input name="genre" type="text">
+                        </form>
+                        <script id="__NEXT_DATA__" type="application/json">{"buildId":"build-2026","props":{"pageProps":{"clips":[{"id":"clip-1","title":"First Song"}]}}}</script></body></html>"#,
                     )
                 }),
             )
@@ -1803,6 +1843,18 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
     assert!(
         draft.operations.iter().any(|o| o.name == "read-next-data"),
         "missing read-next-data operation"
+    );
+    let form_write_op = draft
+        .operations
+        .iter()
+        .find(|o| o.method == "POST" && o.path == "/api/v2/clips/quick-create")
+        .expect("synthesized HTML form POST operation");
+    assert_eq!(form_write_op.effect, Effect::Write);
+    assert!(
+        form_write_op
+            .body
+            .as_ref()
+            .is_some_and(|b| b.form.contains_key("title") && b.form.contains_key("genre"))
     );
 
     let v2_spec = spec::parse(

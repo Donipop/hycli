@@ -94,6 +94,7 @@ impl ConnectionRecipe {
                     .cookies
                     .iter()
                     .find(|c| c.name == rule.key && crate::accounts::cookie_matches(c, &url))
+                    .or_else(|| credential.cookies.iter().find(|c| c.name == rule.key))
                     .map(|c| c.value.clone()),
                 "captured_header" => credential
                     .headers

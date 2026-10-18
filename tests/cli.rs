@@ -50,6 +50,9 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
                     count.fetch_add(1, Ordering::SeqCst);
                     Json(json!({"inputs":query}))
                 }
+            })
+            .post(|Json(body): Json<Value>| async move {
+                Json(json!({"created":true,"received":body}))
             }),
         )
         .route(
@@ -104,7 +107,7 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
     let value = json!({"site":{"name":"sample","title":"Sample library","base_url":url},
     "auth":[{"name":"browser","kind":"browser"}],
     "operations":[
-        {"name":"create-item","method":"POST","path":"/items","effect":"write","evidence":"Synthetic documentation"},
+        {"name":"create-item","method":"POST","path":"/items","effect":"write","evidence":"Synthetic documentation","body":{"json":{"title":{"type":"string","required":true}}}},
         {"name":"search","desc":"Search the sample collection.","method":"GET","path":"/items","effect":"read","evidence":"Synthetic documentation", "query":{
             "q":{"type":"string","required":true}, "sort-order":{"type":"string"}, "sort_order":{"type":"string"},
             "include_archived":{"type":"bool"}, "page":{"type":"int","default":1}}},
@@ -268,6 +271,35 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
     .await);
     assert_eq!(first["id"], "one");
     assert_eq!(second["id"], "two");
+    let refused_write = cli(
+        &root,
+        &[
+            "sample",
+            "create-item",
+            "--allow-local",
+            "--title",
+            "New book",
+        ],
+    )
+    .await;
+    assert_eq!(refused_write.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused_write.stderr).contains("writes_disabled"));
+    let allowed = ok(cli(&root, &["writes", "sample", "allow"]).await);
+    assert_eq!(allowed["site"], "sample");
+    assert_eq!(allowed["writes"], true);
+    let created = ok(cli(
+        &root,
+        &[
+            "sample",
+            "create-item",
+            "--allow-local",
+            "--title",
+            "New book",
+        ],
+    )
+    .await);
+    assert_eq!(created["created"], true);
+    assert_eq!(created["received"]["title"], "New book");
     // Explicitly choose a public input-free read; the first definition is a write.
     let mut sp = core.spec("sample").unwrap();
     sp.health = Some(spec::Health {

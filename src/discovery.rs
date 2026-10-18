@@ -586,6 +586,8 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
             routes.insert((mc[1].to_ascii_uppercase(), path.clone()));
         } else if path.contains("graphql") || path.ends_with("/gql") {
             routes.insert(("POST".into(), path));
+        } else if crate::policy::dangerous_intent(&path) {
+            routes.insert(("POST".into(), path));
         } else {
             routes.insert(("GET".into(), path));
         }

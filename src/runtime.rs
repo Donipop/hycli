@@ -453,12 +453,26 @@ impl Runtime {
             credential_hash: util::hash(&serde_json::to_vec(&headers)?),
         })
     }
-    /// Only the dashboard can turn changes on; CLI and MCP have no path to this setting.
+    /// Websites start with writes off until enabled once for that CLI (`hycli writes <site> allow`, MCP `hycli_writes`, or dashboard toggle).
     pub fn ensure_writes(&self, site: &str) -> AppResult<()> {
         if self.state.read()?.sites.get(site).is_some_and(|m| m.writes) {
             return Ok(());
         }
         Err(AppError::api("writes_disabled", 409))
+    }
+    pub fn set_writes(&self, site: &str, writes: bool) -> AppResult<()> {
+        self.spec(site)?;
+        self.state.update(|d| {
+            let m = d.sites.entry(site.to_string()).or_default();
+            m.writes = writes;
+            m.updated_at = util::now();
+            Ok(())
+        })?;
+        if !writes {
+            self.policy.invalidate(Some(site), None)?;
+        }
+        self.changed();
+        Ok(())
     }
     pub fn approval(&self, request: ExecutionRequest, locale: &str) -> AppResult<Approval> {
         self.ensure_writes(&request.site_id)?;
@@ -523,18 +537,23 @@ impl Runtime {
         args: &BTreeMap<String, String>,
         account: Option<&str>,
     ) -> AppResult<(OpResult, i64)> {
-        let request = self.request(sp, op, args.clone(), account)?;
-        if policy::operation_effect(sp.op(op)?, args) != Effect::Read {
-            let review = self.approval(request, "en")?;
-            return Err(crate::apperr::usage(
-                format!("User approval required: {}", review.id),
-                "Open the Hycli dashboard and review this exact action. No request was sent.",
-            ));
+        let op_def = sp.op(op)?;
+        let effect = policy::operation_effect(op_def, args);
+        if op_def.effect == Effect::Read && effect != Effect::Read {
+            return Err(AppError::api("approval_required", 409));
         }
-        self.execute_observed(request, &self.state.read()?.settings.locale)
-            .await
+        if effect != Effect::Read {
+            self.ensure_writes(&sp.site.name)?;
+        }
+        let request = self.request(sp, op, args.clone(), account)?;
+        if self.spec(&sp.site.name).is_ok() {
+            self.execute_observed(request, &self.state.read()?.settings.locale)
+                .await
+        } else {
+            self.execute_definition(sp, request, None, false).await
+        }
     }
-    /// Approval IDs are accepted only through the authenticated dashboard handler.
+    /// Approval IDs are validated when supplied by the dashboard handler; direct CLI/MCP calls execute when writes are enabled.
     pub(crate) async fn execute(
         &self,
         request: ExecutionRequest,
@@ -584,11 +603,13 @@ impl Runtime {
         let (mut headers, mut secrets) = self.headers(&sp, op, &url, &request.account_id)?;
         checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
         if effect != Effect::Read {
+            if op.effect == Effect::Read {
+                return Err(AppError::api("approval_required", 409));
+            }
             self.ensure_writes(&sp.site.name)?;
-            self.policy.consume(
-                approval.ok_or_else(|| AppError::api("approval_required", 409))?,
-                &checked,
-            )?;
+            if let Some(approval_id) = approval {
+                self.policy.consume(approval_id, &checked)?;
+            }
         }
         if !op.preflight.is_empty() {
             let mut effective_inputs = request.inputs.clone();
@@ -651,7 +672,6 @@ impl Runtime {
             policy::Policy::strategy_key(&op.method, &url, "http", &request.account_id);
         let prefer_browser_fetch = op.transport == "browser-fetch"
             || (!is_local_url
-                && effect == Effect::Read
                 && op.transport.is_empty()
                 && (self
                     .policy
@@ -686,7 +706,9 @@ impl Runtime {
                 .await
             {
                 Ok(r) => Ok(r),
-                Err(_) if op.transport != "browser-fetch" => self.network.fetch(req_input).await,
+                Err(_) if op.transport != "browser-fetch" && effect == Effect::Read => {
+                    self.network.fetch(req_input).await
+                }
                 Err(e) => Err(e),
             }
         } else {
@@ -1532,6 +1554,8 @@ impl Runtime {
         .unwrap_or("");
 
         let mut form_query_map: BTreeMap<String, BTreeMap<String, spec::Param>> = BTreeMap::new();
+        let mut form_body_map: BTreeMap<(String, String), BTreeMap<String, spec::Param>> =
+            BTreeMap::new();
         if let Some(forms_arr) = crate::html::forms(&text).as_array() {
             for f in forms_arr {
                 let method = f
@@ -1539,7 +1563,7 @@ impl Runtime {
                     .and_then(Value::as_str)
                     .unwrap_or("GET")
                     .to_ascii_uppercase();
-                if method != "GET" {
+                if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
                     continue;
                 }
                 let action = f.get("action").and_then(Value::as_str).unwrap_or("");
@@ -1572,14 +1596,26 @@ impl Runtime {
                 } else {
                     clean_path.to_string()
                 };
-                form_query_map
-                    .entry(norm_path.clone())
-                    .or_default()
-                    .extend(qmap.clone());
-                form_query_map
-                    .entry(action_url.path().to_string())
-                    .or_default()
-                    .extend(qmap);
+                if method == "GET" {
+                    form_query_map
+                        .entry(norm_path.clone())
+                        .or_default()
+                        .extend(qmap.clone());
+                    form_query_map
+                        .entry(action_url.path().to_string())
+                        .or_default()
+                        .extend(qmap);
+                } else {
+                    bundle_routes.insert((method.clone(), norm_path.clone()));
+                    form_body_map
+                        .entry((method.clone(), norm_path))
+                        .or_default()
+                        .extend(qmap.clone());
+                    form_body_map
+                        .entry((method, action_url.path().to_string()))
+                        .or_default()
+                        .extend(qmap);
+                }
             }
         }
         if let Some(ld) = ssr_map.get("ld+json") {
@@ -1915,7 +1951,11 @@ impl Runtime {
                     }
                 }
             }
-            let mut query = form_query_map.get(path).cloned().unwrap_or_default();
+            let mut query = if method == "GET" {
+                form_query_map.get(path).cloned().unwrap_or_default()
+            } else {
+                BTreeMap::new()
+            };
             if method == "GET" && path.contains("search") && !query.contains_key("q") {
                 query.insert(
                     "q".into(),
@@ -1926,6 +1966,17 @@ impl Runtime {
                     },
                 );
             }
+            let body = if method != "GET" {
+                form_body_map
+                    .get(&(method.clone(), path.clone()))
+                    .filter(|fields| !fields.is_empty())
+                    .map(|fields| spec::Body {
+                        form: fields.clone(),
+                        ..Default::default()
+                    })
+            } else {
+                None
+            };
             let is_api_route = path.starts_with("/api/")
                 || path.starts_with("/v1/")
                 || path.starts_with("/v2/")
@@ -1966,6 +2017,7 @@ impl Runtime {
                 },
                 params,
                 query,
+                body,
                 desc: route_key.clone(),
                 effect: if is_read { Effect::Read } else { Effect::Write },
                 evidence: format!("Discovered {route_key} during deterministic recon"),

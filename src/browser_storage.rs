@@ -44,12 +44,8 @@ fn chromium_string(bytes: &[u8]) -> Option<String> {
     }
 }
 
-fn chromium_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
-    use rusty_leveldb::{DB, LdbIterator, Options};
-    let source = profile.join("Local Storage/leveldb");
-    if !source.is_dir() {
-        return Ok(Storage::new());
-    }
+fn open_chromium_leveldb(source: &Path) -> Result<(Snapshot, rusty_leveldb::DB), ()> {
+    use rusty_leveldb::{DB, Options};
     let snapshot = Snapshot::new()?;
     let stamp = |path: &Path| -> Result<BTreeMap<String, (u64, std::time::SystemTime)>, ()> {
         std::fs::read_dir(path)
@@ -68,7 +64,7 @@ fn chromium_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
             })
             .collect()
     };
-    let before = stamp(&source)?;
+    let before = stamp(source)?;
     if before.len() > 1024 || before.values().map(|(n, _)| n).sum::<u64>() > 512 * 1024 * 1024 {
         return Err(());
     }
@@ -76,10 +72,10 @@ fn chromium_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
         let bytes = util::read_bounded(&source.join(name), 128 * 1024 * 1024).map_err(|_| ())?;
         util::atomic_file(&snapshot.0.join(name), &bytes).map_err(|_| ())?;
     }
-    if before != stamp(&source)? {
+    if before != stamp(source)? {
         return Err(());
     }
-    let mut db = DB::open(
+    let db = DB::open(
         &snapshot.0,
         Options {
             create_if_missing: false,
@@ -87,27 +83,107 @@ fn chromium_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
         },
     )
     .map_err(|_| ())?;
-    let mut iter = db.new_iter().map_err(|_| ())?;
-    let prefix = format!("_{origin}\0").into_bytes();
-    iter.seek(&prefix);
+    Ok((snapshot, db))
+}
+
+fn decode_session_string(bytes: &[u8]) -> Option<String> {
+    chromium_string(bytes).or_else(|| {
+        std::str::from_utf8(bytes)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn chromium_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
+    use rusty_leveldb::LdbIterator;
     let mut values = Storage::new();
-    loop {
-        let Some((key, value)) = iter.current() else {
-            break;
-        };
-        if !key.starts_with(&prefix) {
-            break;
-        }
-        if value.len() <= 1024 * 1024 && values.len() < 1000 {
-            if let (Some(key), Some(value)) = (
-                chromium_string(&key[prefix.len()..]),
-                chromium_string(&value),
-            ) {
-                values.insert(key, value);
+    let local_source = profile.join("Local Storage/leveldb");
+    if local_source.is_dir() {
+        let (_snapshot, mut db) = open_chromium_leveldb(&local_source)?;
+        let mut iter = db.new_iter().map_err(|_| ())?;
+        let prefix = format!("_{origin}\0").into_bytes();
+        iter.seek(&prefix);
+        loop {
+            let Some((key, value)) = iter.current() else {
+                break;
+            };
+            if !key.starts_with(&prefix) {
+                break;
+            }
+            if value.len() <= 1024 * 1024 && values.len() < 1000 {
+                if let (Some(key), Some(value)) = (
+                    chromium_string(&key[prefix.len()..]),
+                    chromium_string(&value),
+                ) {
+                    values.insert(key, value);
+                }
+            }
+            if !iter.advance() {
+                break;
             }
         }
-        if !iter.advance() {
-            break;
+    }
+    let session_source = profile.join("Session Storage/leveldb");
+    if session_source.is_dir() {
+        if let Ok((_snapshot, mut db)) = open_chromium_leveldb(&session_source) {
+            if let Ok(mut iter) = db.new_iter() {
+                let ns_prefix = b"namespace-";
+                let suffix_plain = format!("-{origin}");
+                let suffix_slash = format!("-{origin}/");
+                let mut map_ids = std::collections::BTreeSet::new();
+                iter.seek(ns_prefix);
+                loop {
+                    let Some((key, value)) = iter.current() else {
+                        break;
+                    };
+                    if !key.starts_with(ns_prefix) {
+                        break;
+                    }
+                    if let Ok(key_str) = std::str::from_utf8(&key) {
+                        // Format: namespace-<session_id>-<origin>/
+                        if key_str.starts_with("namespace-")
+                            && (key_str.ends_with(&suffix_plain)
+                                || key_str.ends_with(&suffix_slash))
+                        {
+                            if let Ok(map_id) = std::str::from_utf8(&value) {
+                                let trimmed = map_id.trim();
+                                if !trimmed.is_empty()
+                                    && trimmed.bytes().all(|b| b.is_ascii_digit())
+                                {
+                                    map_ids.insert(trimmed.to_owned());
+                                }
+                            }
+                        }
+                    }
+                    if !iter.advance() {
+                        break;
+                    }
+                }
+                for map_id in map_ids {
+                    let map_prefix = format!("map-{map_id}-").into_bytes();
+                    iter.seek(&map_prefix);
+                    loop {
+                        let Some((key, value)) = iter.current() else {
+                            break;
+                        };
+                        if !key.starts_with(&map_prefix) {
+                            break;
+                        }
+                        if value.len() <= 1024 * 1024 && values.len() < 1000 {
+                            if let (Some(k), Some(v)) = (
+                                decode_session_string(&key[map_prefix.len()..]),
+                                decode_session_string(&value),
+                            ) {
+                                values.entry(k).or_insert(v);
+                            }
+                        }
+                        if !iter.advance() {
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
     Ok(values)
