@@ -306,8 +306,12 @@ pub struct Issue {
 }
 
 pub fn parse(data: &[u8]) -> AppResult<Spec> {
-    let mut s: Spec = serde_yaml::from_slice(data)
-        .map_err(|e| apperr::spec(format!("Failed to parse SiteSpec YAML ({e})"), "Check YAML syntax."))?;
+    let mut s: Spec = serde_yaml::from_slice(data).map_err(|e| {
+        apperr::spec(
+            format!("Failed to parse SiteSpec YAML ({e})"),
+            "Check YAML syntax.",
+        )
+    })?;
     if s.spec_version == 0 {
         s.spec_version = SPEC_VERSION;
     }
@@ -374,7 +378,12 @@ impl Spec {
                     "Provide an https:// absolute URL",
                 );
             } else if !self.site.base_url.starts_with("http") {
-                add(&mut out, "site.base_url", "missing http(s) scheme".into(), "");
+                add(
+                    &mut out,
+                    "site.base_url",
+                    "missing http(s) scheme".into(),
+                    "",
+                );
             }
 
             let mut auths = std::collections::HashSet::new();
@@ -456,6 +465,14 @@ impl Spec {
                         &format!("{id}.path"),
                         format!("must start with /: {}", op.path),
                         "",
+                    );
+                }
+                if !["", "http", "browser-fetch", "browser"].contains(&op.transport.as_str()) {
+                    add(
+                        &mut out,
+                        &format!("{id}.transport"),
+                        format!("unsupported transport: {}", op.transport),
+                        "http|browser-fetch|browser",
                     );
                 }
                 if !op.auth.is_empty() && !auths.contains(&op.auth) {
@@ -706,8 +723,12 @@ impl Spec {
             Some(m) => m,
             None => return Ok(serde_json::from_slice(raw).unwrap_or(Value::Null)),
         };
-        let doc: Value = serde_json::from_slice(raw)
-            .map_err(|e| apperr::spec(format!("Failed to parse JSON while applying model ({e})"), ""))?;
+        let doc: Value = serde_json::from_slice(raw).map_err(|e| {
+            apperr::spec(
+                format!("Failed to parse JSON while applying model ({e})"),
+                "",
+            )
+        })?;
         let mut out = Map::new();
         for (field, f) in model {
             let path = if f.path.is_empty() {
@@ -954,7 +975,12 @@ pub fn render_json_template(
     match template {
         Value::Object(map) => Value::Object(
             map.iter()
-                .map(|(k, v)| (k.clone(), render_json_template(v, resolved_values, raw_args)))
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        render_json_template(v, resolved_values, raw_args),
+                    )
+                })
                 .collect(),
         ),
         Value::Array(items) => Value::Array(
@@ -964,7 +990,10 @@ pub fn render_json_template(
                 .collect(),
         ),
         Value::String(s) => {
-            if let Some(var) = s.strip_prefix("{{").and_then(|rest| rest.strip_suffix("}}")) {
+            if let Some(var) = s
+                .strip_prefix("{{")
+                .and_then(|rest| rest.strip_suffix("}}"))
+            {
                 let var = var.trim();
                 if !var.contains("{{") {
                     if let Some(val) = resolved_values.get(var) {
@@ -1007,4 +1036,3 @@ pub fn interpolate_template_str(
     out.push_str(rest);
     out
 }
-

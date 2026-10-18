@@ -17,6 +17,58 @@ use std::{
     time::Duration,
 };
 
+pub const STEALTH_INIT_SCRIPT: &str = r#"try {
+  delete Object.getPrototypeOf(navigator).webdriver;
+  Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
+} catch (_) {}
+try {
+  if (!window.chrome) {
+    Object.defineProperty(window, 'chrome', {
+      value: { runtime: {}, app: { isInstalled: false }, csi: () => ({}), loadTimes: () => ({}) },
+      configurable: true
+    });
+  }
+} catch (_) {}
+try {
+  if (!navigator.languages || navigator.languages.length === 0) {
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+  }
+} catch (_) {}
+try {
+  if (navigator.plugins && navigator.plugins.length === 0) {
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [{ name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }],
+      configurable: true
+    });
+  }
+} catch (_) {}
+try {
+  if (window.Notification && window.Permissions && Permissions.prototype.query) {
+    const origQuery = Permissions.prototype.query;
+    Permissions.prototype.query = function(parameters) {
+      return parameters && parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission, onchange: null })
+        : origQuery.apply(this, arguments);
+    };
+  }
+} catch (_) {}"#;
+
+pub struct InPageFetchRequest<'a> {
+    pub credential: &'a Credential,
+    pub method: &'a str,
+    pub url: &'a str,
+    pub headers: &'a [(String, String)],
+    pub body: Option<&'a [u8]>,
+    pub allow_local: bool,
+}
+
+pub struct InPageFetchResponse {
+    pub url: String,
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Default)]
 pub struct Capture {
     pub identity: Option<Identity>,
@@ -41,11 +93,109 @@ pub fn navigation_safe(url: &url::Url) -> bool {
             ))
 }
 
+fn discover_live_cdp_endpoint(credential: &Credential) -> Option<String> {
+    for env_key in ["HYCLI_CDP", "CHROME_CDP"] {
+        if let Ok(val) = std::env::var(env_key) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    if !credential.source_profile.is_empty() {
+        let profile_path = std::path::Path::new(&credential.source_profile);
+        let mut candidates = vec![profile_path.join("DevToolsActivePort")];
+        if let Some(parent) = profile_path.parent() {
+            candidates.push(parent.join("DevToolsActivePort"));
+        }
+        for port_file in candidates {
+            if let Ok(bytes) = util::read_bounded(&port_file, 4096) {
+                if let Ok(text) = String::from_utf8(bytes) {
+                    let mut lines = text.lines();
+                    if let (Some(port_str), Some(ws_path)) = (lines.next(), lines.next()) {
+                        if let Ok(port) = port_str.trim().parse::<u16>() {
+                            let ws = ws_path.trim();
+                            if ws.starts_with('/') {
+                                return Some(format!("ws://127.0.0.1:{port}{ws}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn acquire_profile_dir(
+    origin: &str,
+) -> Result<
+    (
+        std::path::PathBuf,
+        Option<std::fs::File>,
+        Option<crate::browser_storage::Snapshot>,
+    ),
+    (),
+> {
+    use sha2::{Digest, Sha256};
+    let base = std::env::var_os("HYCLI_TEST_DATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            directories::ProjectDirs::from("", "", "hycli").map(|d| d.cache_dir().to_path_buf())
+        });
+    if let Some(root) = base {
+        let mut hasher = Sha256::new();
+        hasher.update(origin.as_bytes());
+        let key: String = hasher
+            .finalize()
+            .iter()
+            .take(8)
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let warm_dir = root.join("browser-profiles").join(key);
+        if util::private_dir(&warm_dir).is_ok() {
+            let lock_path = warm_dir.join(".hycli-profile.lock");
+            if let Ok(lock) = util::file_lock(&lock_path, true) {
+                if !warm_dir.join("SingletonLock").exists() {
+                    return Ok((warm_dir, Some(lock), None));
+                }
+            }
+        }
+    }
+    let snapshot = crate::browser_storage::Snapshot::new()?;
+    let path = snapshot.0.clone();
+    Ok((path, None, Some(snapshot)))
+}
+
 pub async fn capture(
     credential: &Credential,
     entry: &str,
     allow_local: bool,
 ) -> AppResult<Capture> {
+    if let Some(cdp_url) = discover_live_cdp_endpoint(credential) {
+        if let Ok(Ok((browser, mut handler))) =
+            tokio::time::timeout(Duration::from_secs(3), Browser::connect(cdp_url)).await
+        {
+            let url = crate::net::validate_url(entry)?;
+            let cred_origin = crate::net::validate_url(&credential.origin)?;
+            if !crate::net::same_site_origin(&url, &cred_origin) || !navigation_safe(&url) {
+                return Err(AppError::api("unsafe_target", 400));
+            }
+            crate::net::resolve(&url, allow_local).await?;
+            let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
+            let result = tokio::time::timeout(
+                Duration::from_secs(35),
+                observe(&browser, credential, entry, allow_local),
+            )
+            .await
+            .map_err(unavailable)
+            .and_then(|r| r);
+            drive.abort();
+            if result.is_ok() {
+                return result;
+            }
+        }
+    }
     let environment = tokio::task::spawn_blocking(crate::environment::inspect)
         .await
         .map_err(unavailable)?;
@@ -69,14 +219,18 @@ pub async fn capture_with_engine(
         return Err(AppError::api("unsafe_target", 400));
     }
     crate::net::resolve(&url, allow_local).await?;
-    let snapshot = crate::browser_storage::Snapshot::new().map_err(unavailable)?;
+    let (profile_dir, _profile_lock, _snapshot) =
+        acquire_profile_dir(&credential.origin).map_err(unavailable)?;
     if engine.protocol != "chromium-cdp" {
         return Err(AppError::api("browser_unavailable", 422));
     }
     let builder = BrowserConfig::builder()
         .chrome_executable(&engine.executable)
-        .user_data_dir(&snapshot.0)
+        .user_data_dir(&profile_dir)
+        .window_size(1280, 800)
+        .arg("--headless=new")
         .arg("--no-first-run")
+        .arg("--no-default-browser-check")
         .arg("--disable-background-networking")
         .arg("--disable-dev-shm-usage")
         .arg("--disable-blink-features=AutomationControlled");
@@ -97,6 +251,235 @@ pub async fn capture_with_engine(
     let _ = browser.close().await;
     drive.abort();
     result
+}
+
+pub async fn fetch_in_page(req: InPageFetchRequest<'_>) -> AppResult<InPageFetchResponse> {
+    let target = crate::net::validate_url(req.url)?;
+    crate::net::resolve(&target, req.allow_local).await?;
+    let origin_str = if req.credential.origin.is_empty() {
+        target.origin().ascii_serialization()
+    } else {
+        let cred_origin = crate::net::validate_url(&req.credential.origin)?;
+        if !crate::net::same_site_origin(&target, &cred_origin) {
+            return Err(AppError::api("unsafe_target", 400));
+        }
+        cred_origin.origin().ascii_serialization()
+    };
+
+    if let Some(cdp_url) = discover_live_cdp_endpoint(req.credential) {
+        if let Ok(Ok((browser, mut handler))) =
+            tokio::time::timeout(Duration::from_secs(3), Browser::connect(cdp_url)).await
+        {
+            let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
+            let res = tokio::time::timeout(
+                Duration::from_secs(30),
+                execute_in_page_fetch(&browser, &req, &origin_str),
+            )
+            .await
+            .map_err(unavailable)
+            .and_then(|r| r);
+            drive.abort();
+            if res.is_ok() {
+                return res;
+            }
+        }
+    }
+
+    let environment = tokio::task::spawn_blocking(crate::environment::inspect)
+        .await
+        .map_err(unavailable)?;
+    let engine = environment
+        .browsers
+        .iter()
+        .find(|b| b.protocol == "chromium-cdp")
+        .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
+    let (profile_dir, _profile_lock, _snapshot) =
+        acquire_profile_dir(&origin_str).map_err(unavailable)?;
+    let config = BrowserConfig::builder()
+        .chrome_executable(&engine.executable)
+        .user_data_dir(&profile_dir)
+        .window_size(1280, 800)
+        .arg("--headless=new")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .arg("--disable-background-networking")
+        .arg("--disable-dev-shm-usage")
+        .arg("--disable-blink-features=AutomationControlled")
+        .build()
+        .map_err(unavailable)?;
+    let (mut browser, mut handler) =
+        tokio::time::timeout(Duration::from_secs(30), Browser::launch(config))
+            .await
+            .map_err(unavailable)?
+            .map_err(unavailable)?;
+    let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        execute_in_page_fetch(&browser, &req, &origin_str),
+    )
+    .await
+    .map_err(unavailable)
+    .and_then(|r| r);
+    let _ = browser.close().await;
+    drive.abort();
+    result
+}
+
+async fn execute_in_page_fetch(
+    browser: &Browser,
+    req: &InPageFetchRequest<'_>,
+    origin_str: &str,
+) -> AppResult<InPageFetchResponse> {
+    let page = browser.new_page("about:blank").await.map_err(unavailable)?;
+    for cookie in &req.credential.cookies {
+        let mut value = network::CookieParam::new(&cookie.name, &cookie.value);
+        value.url = Some(format!("{origin_str}/"));
+        if !cookie.host_only && !cookie.domain.is_empty() {
+            value.domain = Some(cookie.domain.clone());
+        }
+        value.path = Some(cookie.path.clone());
+        value.secure = Some(cookie.secure);
+        value.http_only = Some(cookie.http_only);
+        value.same_site = match cookie.same_site.as_str() {
+            "strict" => Some(network::CookieSameSite::Strict),
+            "lax" => Some(network::CookieSameSite::Lax),
+            "no_restriction" => Some(network::CookieSameSite::None),
+            _ => None,
+        };
+        page.set_cookie(value).await.map_err(unavailable)?;
+    }
+    let origin_json = serde_json::to_string(origin_str)?;
+    let storage_json = serde_json::to_string(&req.credential.local_storage)?;
+    page.evaluate_on_new_document(format!(
+        "{STEALTH_INIT_SCRIPT}\nif(location.origin==={origin_json}){{for(const [key,value] of Object.entries({storage_json})){{localStorage.setItem(key,value)}}}}"
+    ))
+    .await
+    .map_err(unavailable)?;
+
+    let bootstrap_url = format!("{origin_str}/");
+    let _ = tokio::time::timeout(Duration::from_secs(12), page.goto(&bootstrap_url)).await;
+    for _ in 0..10 {
+        if let Ok(dom) = page.content().await {
+            let lower = dom.to_ascii_lowercase();
+            if !lower.contains("just a moment")
+                && !lower.contains("cf-chl")
+                && !lower.contains("challenge-platform")
+            {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    use base64::Engine;
+    let body_b64 = req
+        .body
+        .map(|b| base64::engine::general_purpose::STANDARD.encode(b));
+    let cfg = serde_json::json!({
+        "url": req.url,
+        "method": req.method.to_ascii_uppercase(),
+        "headers": req.headers,
+        "bodyBase64": body_b64,
+    });
+    let script = format!(
+        r#"(async () => {{
+  const cfg = {cfg};
+  const headers = {{}};
+  for (const [k, v] of cfg.headers) {{
+    const lower = String(k).toLowerCase();
+    if (!['cookie', 'cookie2', 'host', 'origin', 'referer', 'user-agent', 'content-length', 'transfer-encoding', 'connection'].includes(lower) && !lower.startsWith('sec-') && !lower.startsWith('proxy-')) {{
+      headers[k] = v;
+    }}
+  }}
+  const init = {{
+    method: cfg.method,
+    headers,
+    credentials: 'include',
+    mode: 'cors',
+    redirect: 'follow'
+  }};
+  if (cfg.bodyBase64) {{
+    const bin = atob(cfg.bodyBase64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    init.body = bytes;
+  }}
+  const resp = await fetch(cfg.url, init);
+  const buf = await resp.arrayBuffer();
+  if (buf.byteLength > 8 * 1024 * 1024) {{
+    throw new Error('too_large');
+  }}
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {{
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }}
+  const outHeaders = [];
+  resp.headers.forEach((v, k) => outHeaders.push([String(k).toLowerCase(), String(v)]));
+  return {{
+    status: resp.status,
+    url: resp.url || cfg.url,
+    headers: outHeaders,
+    bodyBase64: btoa(binary)
+  }};
+}})()"#
+    );
+
+    let isolated_ctx = if let Ok(Some(frame_id)) = page.mainframe().await {
+        page.execute(
+            chromiumoxide::cdp::browser_protocol::page::CreateIsolatedWorldParams::builder()
+                .frame_id(frame_id)
+                .world_name("hycli_isolated_fetch")
+                .grant_univeral_access(true)
+                .build()
+                .map_err(unavailable)?,
+        )
+        .await
+        .ok()
+        .map(|r| r.result.execution_context_id)
+    } else {
+        None
+    };
+
+    let mut eval_builder = chromiumoxide::cdp::js_protocol::runtime::EvaluateParams::builder()
+        .expression(script)
+        .await_promise(true)
+        .return_by_value(true);
+    if let Some(ctx_id) = isolated_ctx {
+        eval_builder = eval_builder.context_id(ctx_id);
+    }
+    let eval_params = eval_builder.build().map_err(unavailable)?;
+    let eval_res = page.evaluate_expression(eval_params).await;
+    let _ = page.close().await;
+    let val: Value = eval_res
+        .map_err(unavailable)?
+        .into_value()
+        .map_err(unavailable)?;
+    let status = val["status"].as_u64().unwrap_or(0) as u16;
+    let final_url = val["url"].as_str().unwrap_or(req.url).to_string();
+    let headers: Vec<(String, String)> = val["headers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|pair| {
+            let arr = pair.as_array()?;
+            Some((
+                arr.first()?.as_str()?.to_string(),
+                arr.get(1)?.as_str()?.to_string(),
+            ))
+        })
+        .collect();
+    let b64 = val["bodyBase64"].as_str().unwrap_or("");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(unavailable)?;
+    Ok(InPageFetchResponse {
+        url: final_url,
+        status,
+        headers,
+        bytes,
+    })
 }
 
 fn is_safe_graphql_read_post(url: &url::Url, post_data: Option<&str>) -> bool {
@@ -188,7 +571,7 @@ async fn observe(
     let origin = serde_json::to_string(&credential.origin)?;
     let storage = serde_json::to_string(&credential.local_storage)?;
     page.evaluate_on_new_document(format!(
-        "try{{Object.defineProperty(navigator,'webdriver',{{get:()=>undefined}})}}catch(_){{}}if(location.origin==={origin}){{for(const [key,value] of Object.entries({storage})){{localStorage.setItem(key,value)}}}}"
+        "{STEALTH_INIT_SCRIPT}\nif(location.origin==={origin}){{for(const [key,value] of Object.entries({storage})){{localStorage.setItem(key,value)}}}}"
     ))
     .await
     .map_err(unavailable)?;
@@ -218,6 +601,8 @@ async fn observe(
     let listener = tokio::spawn(async move {
         let mut requests = std::collections::HashMap::new();
         let mut identities = std::collections::HashMap::new();
+        let mut obs_bodies: std::collections::HashMap<network::RequestId, (String, String)> =
+            std::collections::HashMap::new();
         let mut checked_origins = BTreeMap::new();
         loop {
             tokio::select! {
@@ -255,6 +640,13 @@ async fn observe(
                         };
                         permitted &= public;
                     }
+                    let values = event.request.headers.inner().as_object();
+                    let auth_header_names: Vec<String> = values
+                        .into_iter()
+                        .flatten()
+                        .filter(|(k, _)| accounts::browser_header(k))
+                        .map(|(k, _)| k.to_ascii_lowercase())
+                        .collect();
                     if !permitted {
                         // Intercept-and-Abort: record write/mutation schema before blocking network send.
                         if same
@@ -274,6 +666,8 @@ async fn observe(
                                             body: extract_post_body_schema(post_data.as_deref()),
                                             status: 0,
                                             observed_at: util::now(),
+                                            response_pointers: Vec::new(),
+                                            auth_headers: auth_header_names,
                                         });
                                     }
                                 }
@@ -296,7 +690,8 @@ async fn observe(
                                     if capture.headers.is_empty() { capture.headers = headers.clone(); }
                                 }
                             }
-                            requests.insert(id.clone(), (parsed.unwrap(), headers, method));
+                            let body_schema = extract_post_body_schema(post_data.as_deref());
+                            requests.insert(id.clone(), (parsed.unwrap(), headers, method, body_schema));
                         }
                     } else if !same {
                         // Cross-origin resource requests must never carry the restored session.
@@ -307,29 +702,62 @@ async fn observe(
                     let _ = task_page.execute(command).await;
                 }
                 Some(event) = responses.next() => {
-                    if let Some((url, headers, req_method)) = requests.remove(&event.request_id) {
+                    if let Some((url, headers, req_method, body_schema)) = requests.remove(&event.request_id) {
                         let status = event.response.status as u16;
                         if event.r#type == network::ResourceType::Document {
                             if let Ok(mut capture) = captured.lock() { capture.status = status; }
                         }
                         if (200..300).contains(&status) && matches!(event.r#type, network::ResourceType::Xhr | network::ResourceType::Fetch) {
+                            let path_str: String = url.path().into();
+                            let auth_headers: Vec<String> = headers.keys().cloned().collect();
                             if let Ok(mut capture) = captured.lock() {
                                 if capture.observations.len() < 80 {
-                                    capture.observations.push(Observation { method: req_method, path: url.path().into(), query: url.query_pairs().map(|(k, _)| (k.into_owned(), "string".into())).collect(), body: BTreeMap::new(), status, observed_at: util::now() });
+                                    capture.observations.push(Observation {
+                                        method: req_method.clone(),
+                                        path: path_str.clone(),
+                                        query: url.query_pairs().filter(|(k, _)| !util::secret_field(k)).map(|(k, _)| (k.into_owned(), "string".into())).collect(),
+                                        body: body_schema,
+                                        status,
+                                        observed_at: util::now(),
+                                        response_pointers: Vec::new(),
+                                        auth_headers,
+                                    });
                                 }
+                            }
+                            if obs_bodies.len() < 32 {
+                                obs_bodies.insert(event.request_id.clone(), (req_method, path_str));
                             }
                             if accounts::identity_endpoint(&url) { identities.insert(event.request_id.clone(), (url, headers)); }
                         }
                     }
                 }
                 Some(event) = finished.next() => {
-                    if let Some((url, headers)) = identities.remove(&event.request_id) {
+                    let is_id = identities.remove(&event.request_id);
+                    let obs_target = obs_bodies.remove(&event.request_id);
+                    if is_id.is_some() || obs_target.is_some() {
                         if let Ok(value) = identity_body(&task_page, event.request_id.clone()).await {
-                            if let Some(identity) = accounts::extract_identity(&value) {
-                                if let Ok(mut capture) = captured.lock() {
-                                    capture.identity = Some(identity);
-                                    capture.identity_url = url.to_string();
-                                    capture.headers = headers;
+                            if let Some((url, headers)) = is_id {
+                                if let Some(identity) = accounts::extract_identity(&value) {
+                                    if let Ok(mut capture) = captured.lock() {
+                                        capture.identity = Some(identity);
+                                        capture.identity_url = url.to_string();
+                                        capture.headers = headers;
+                                    }
+                                }
+                            }
+                            if let Some((req_method, path_str)) = obs_target {
+                                let pointers = extract_json_pointers(&value);
+                                if !pointers.is_empty() {
+                                    if let Ok(mut capture) = captured.lock() {
+                                        if let Some(obs) = capture
+                                            .observations
+                                            .iter_mut()
+                                            .rev()
+                                            .find(|o| o.method == req_method && o.path == path_str)
+                                        {
+                                            obs.response_pointers = pointers;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -374,6 +802,43 @@ async fn observe(
     result.html = html;
     result.final_url = final_url;
     Ok(std::mem::take(&mut *result))
+}
+
+fn extract_json_pointers(value: &Value) -> Vec<String> {
+    let mut pointers = Vec::new();
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter().take(6) {
+                if !util::secret_field(k) && !k.contains('/') && !k.contains('~') {
+                    pointers.push(format!("/{k}"));
+                    if let Value::Array(arr) = v {
+                        if let Some(Value::Object(first)) = arr.first() {
+                            for sub_k in first.keys().take(2) {
+                                if !util::secret_field(sub_k)
+                                    && !sub_k.contains('/')
+                                    && !sub_k.contains('~')
+                                {
+                                    pointers.push(format!("/{k}/0/{sub_k}"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Value::Array(arr) => {
+            if let Some(Value::Object(first)) = arr.first() {
+                for k in first.keys().take(4) {
+                    if !util::secret_field(k) && !k.contains('/') && !k.contains('~') {
+                        pointers.push(format!("/0/{k}"));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    pointers.truncate(6);
+    pointers
 }
 
 async fn identity_body(page: &Page, id: network::RequestId) -> AppResult<Value> {

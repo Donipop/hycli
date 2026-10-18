@@ -29,19 +29,19 @@ impl Class {
     pub fn remedy(self) -> &'static str {
         match self {
             Class::Cloudflare => {
-                "Pause requests to this website. Open it in your browser and check access."
+                "Direct HTTP was challenged by Cloudflare; escalate transport to browser-fetch or attach a live browser session (HYCLI_CDP) instead of repeating direct HTTP."
             }
             Class::BotManager => {
-                "Pause requests to this website. Check your account and the website's access requirements."
+                "Direct HTTP was blocked by bot management; escalate transport to browser-fetch or use a connected browser profile instead of repeating the same request."
             }
             Class::RateLimit => {
                 "Wait for Retry-After or the reset time before a bounded read retry."
             }
             Class::Captcha => {
-                "Open the website and complete its check yourself. Continue other available work."
+                "Direct request triggered an interactive challenge; switch to browser-fetch with a warm browser session or complete the check once in the connected browser."
             }
             Class::Unknown => {
-                "Pause this request. Use existing documentation and observations to choose the next step."
+                "Endpoint rejected this transport strategy; pivot to browser-fetch, SSR extraction, or an alternative API route instead of repeating the same request."
             }
             Class::None => "",
         }

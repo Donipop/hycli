@@ -155,13 +155,37 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
                 text.contains("--q <string>")
                     && text.contains("required;")
                     && text.contains("default: 1")
+                    && text.contains("Example:\n  hycli sample search --q \"search-term\"")
             );
+        } else {
+            assert!(text.contains("What you can do:") && text.contains("Examples:"));
         }
     }
     assert_eq!(
         reads.load(Ordering::SeqCst),
         0,
         "help must not send a website request"
+    );
+    let site_desc = ok(cli(&root, &["describe", "sample"]).await);
+    assert!(
+        site_desc["user_guide"]["headline"]
+            .as_str()
+            .unwrap()
+            .contains("Sample library")
+    );
+    assert_eq!(
+        site_desc["user_guide"]["read_capabilities"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+    assert_eq!(
+        site_desc["user_guide"]["write_capabilities"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     let metadata = ok(cli(&root, &["describe", "sample", "search"]).await);
     assert!(
@@ -171,6 +195,12 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
             .iter()
             .any(|i| i["id"] == "q" && i["required"] == true)
     );
+    let typo_flag = cli(&root, &["sample", "search", "--sort-ordr", "desc"]).await;
+    assert!(!typo_flag.status.success());
+    assert!(String::from_utf8_lossy(&typo_flag.stderr).contains("Did you mean --sort-order?"));
+    let typo_action = cli(&root, &["sample", "serch"]).await;
+    assert!(!typo_action.status.success());
+    assert!(String::from_utf8_lossy(&typo_action.stderr).contains("Did you mean 'search'?"));
     for invalid in [
         vec!["sample", "search", "--q"],
         vec!["sample", "search", "--q", "--page", "2"],
@@ -302,7 +332,12 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
     );
     let validated = ok(cli(
         &root,
-        &["--allow-local", "spec", "validate", draft_path.to_str().unwrap()],
+        &[
+            "--allow-local",
+            "spec",
+            "validate",
+            draft_path.to_str().unwrap(),
+        ],
     )
     .await);
     assert_eq!(validated["status"], "ok");

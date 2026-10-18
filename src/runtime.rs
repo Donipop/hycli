@@ -135,10 +135,7 @@ impl Runtime {
             state: StateStore::open_with_recovery(&root.join("dashboard.json"), recover)?,
             vault: Mutex::new(Store::open_with_keyring(&root.join("store.json"), keyring)?),
             policy: policy.clone(),
-            network: Network {
-                policy,
-                allow_local,
-            },
+            network: Network::new(policy, allow_local),
             ai: ai::Client::new(codex),
             kb: Arc::new(Kb::open(&kb_path.unwrap_or_else(|| root.join("kb.db")))?),
             events,
@@ -313,11 +310,8 @@ impl Runtime {
                     let d = chosen.and_then(|s| s.actions.get(&op.name));
                     ActionView {
                         id: op.name.clone(),
-                        accepts_account: same_site_url(
-                            sp.operation_base(op),
-                            sp.site.source_url(),
-                        )
-                        .unwrap_or(false)
+                        accepts_account: same_site_url(sp.operation_base(op), sp.site.source_url())
+                            .unwrap_or(false)
                             && !sp
                                 .find_auth(&op.auth)
                                 .is_some_and(|auth| auth.kind == "header"),
@@ -623,10 +617,59 @@ impl Runtime {
                 }
             }
         }
+        let req_origin = origin(&url)?;
+        let is_local_url =
+            url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
+        let load_credential = || -> AppResult<crate::accounts::Credential> {
+            if request.account_id.is_empty() {
+                Ok(crate::accounts::Credential {
+                    origin: req_origin.clone(),
+                    ..Default::default()
+                })
+            } else {
+                Ok(self.credential(&request.account_id).unwrap_or_else(|_| {
+                    crate::accounts::Credential {
+                        origin: req_origin.clone(),
+                        ..Default::default()
+                    }
+                }))
+            }
+        };
+        let req_input = Request {
+            url: url.clone(),
+            method: op.method.clone(),
+            headers,
+            body,
+            account_id: request.account_id.clone(),
+            limit: 8 * 1024 * 1024,
+            timeout: Duration::from_secs(45),
+            read_only: effect == Effect::Read,
+            follow_redirects: effect == Effect::Read,
+            tls_profile: sp.defaults.tls_profile.clone(),
+        };
+        let direct_key =
+            policy::Policy::strategy_key(&op.method, &url, "http", &request.account_id);
+        let prefer_browser_fetch = op.transport == "browser-fetch"
+            || (!is_local_url
+                && effect == Effect::Read
+                && op.transport.is_empty()
+                && (self
+                    .policy
+                    .is_strategy_blocked(&direct_key)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                    || self
+                        .policy
+                        .preferred_transport(&req_origin)
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some("browser-fetch")));
         let response = if op.transport == "browser" {
             let credential = if request.account_id.is_empty() {
                 crate::accounts::Credential {
-                    origin: origin(&url)?,
+                    origin: req_origin,
                     ..Default::default()
                 }
             } else {
@@ -635,58 +678,82 @@ impl Runtime {
             self.network
                 .fetch_rendered(&credential, &url, &request.account_id)
                 .await
+        } else if prefer_browser_fetch {
+            let credential = load_credential()?;
+            match self
+                .network
+                .fetch_browser_in_page(&credential, &req_input)
+                .await
+            {
+                Ok(r) => Ok(r),
+                Err(_) if op.transport != "browser-fetch" => self.network.fetch(req_input).await,
+                Err(e) => Err(e),
+            }
         } else {
             let fetched = self
                 .network
                 .fetch(Request {
-                    url: url.clone(),
-                    method: op.method.clone(),
-                    headers,
-                    body,
-                    account_id: request.account_id.clone(),
-                    limit: 8 * 1024 * 1024,
-                    timeout: Duration::from_secs(45),
-                    read_only: effect == Effect::Read,
-                    follow_redirects: effect == Effect::Read,
-                    tls_profile: sp.defaults.tls_profile.clone(),
+                    url: req_input.url.clone(),
+                    method: req_input.method.clone(),
+                    headers: req_input.headers.clone(),
+                    body: req_input.body.clone(),
+                    account_id: req_input.account_id.clone(),
+                    limit: req_input.limit,
+                    timeout: req_input.timeout,
+                    read_only: req_input.read_only,
+                    follow_redirects: req_input.follow_redirects,
+                    tls_profile: req_input.tls_profile.clone(),
                 })
                 .await;
             match fetched {
                 Ok(r)
                     if effect == Effect::Read
-                        && op.method == "GET"
                         && matches!(
                             r.defense.as_str(),
-                            "cloudflare" | "bot-manager" | "captcha"
+                            "cloudflare" | "bot-manager" | "captcha" | "unknown"
                         )
                         && !op.matches_response(&r)
-                        && !url.starts_with("http://127.0.0.1")
-                        && !url.starts_with("http://localhost") =>
+                        && !is_local_url =>
                 {
-                    let req_origin = origin(&url)?;
                     let _ = self
                         .policy
                         .resume_auth(&format!("{req_origin}|{}", request.account_id));
-                    let credential = if request.account_id.is_empty() {
-                        crate::accounts::Credential {
-                            origin: req_origin,
-                            ..Default::default()
-                        }
-                    } else {
-                        self.credential(&request.account_id).unwrap_or_else(|_| {
-                            crate::accounts::Credential {
-                                origin: req_origin,
-                                ..Default::default()
-                            }
-                        })
-                    };
-                    if let Ok(rendered) = self
+                    let credential = load_credential()?;
+                    if let Ok(in_page) = self
                         .network
-                        .fetch_rendered(&credential, &url, &request.account_id)
+                        .fetch_browser_in_page(&credential, &req_input)
                         .await
                     {
-                        if rendered.successful() {
-                            Ok(rendered)
+                        if in_page.successful() && op.matches_response(&in_page) {
+                            Ok(in_page)
+                        } else if op.method == "GET" {
+                            if let Ok(rendered) = self
+                                .network
+                                .fetch_rendered(&credential, &url, &request.account_id)
+                                .await
+                            {
+                                if rendered.successful() {
+                                    Ok(rendered)
+                                } else {
+                                    Ok(in_page)
+                                }
+                            } else {
+                                Ok(in_page)
+                            }
+                        } else {
+                            Ok(in_page)
+                        }
+                    } else if op.method == "GET" {
+                        if let Ok(rendered) = self
+                            .network
+                            .fetch_rendered(&credential, &url, &request.account_id)
+                            .await
+                        {
+                            if rendered.successful() {
+                                Ok(rendered)
+                            } else {
+                                Ok(r)
+                            }
                         } else {
                             Ok(r)
                         }
@@ -1157,39 +1224,91 @@ impl Runtime {
         if !account.is_empty() {
             headers.extend(self.credential(account)?.request_headers(url)?);
         }
-        let r = self
-            .network
-            .fetch(Request {
-                url: url.into(),
-                method: "GET".into(),
-                headers,
-                body: None,
-                account_id: account.into(),
-                limit: 2 * 1024 * 1024,
-                timeout: Duration::from_secs(30),
-                read_only: true,
-                follow_redirects: true,
-                tls_profile: tls_profile.into(),
-            })
-            .await?;
-        if matches!(r.defense.as_str(), "cloudflare" | "bot-manager" | "captcha")
-            && !url.starts_with("http://127.0.0.1")
-            && !url.starts_with("http://localhost")
-        {
-            let req_origin = parsed.origin().ascii_serialization();
-            let _ = self.policy.resume_auth(&format!("{req_origin}|{account}"));
-            let credential = if account.is_empty() {
+        let req_origin = parsed.origin().ascii_serialization();
+        let is_local_url =
+            url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
+        let req_input = Request {
+            url: url.into(),
+            method: "GET".into(),
+            headers,
+            body: None,
+            account_id: account.into(),
+            limit: 2 * 1024 * 1024,
+            timeout: Duration::from_secs(30),
+            read_only: true,
+            follow_redirects: true,
+            tls_profile: tls_profile.into(),
+        };
+        let load_credential = || {
+            if account.is_empty() {
                 crate::accounts::Credential {
-                    origin: req_origin,
+                    origin: req_origin.clone(),
                     ..Default::default()
                 }
             } else {
                 self.credential(account)
                     .unwrap_or_else(|_| crate::accounts::Credential {
-                        origin: req_origin,
+                        origin: req_origin.clone(),
                         ..Default::default()
                     })
-            };
+            }
+        };
+        let direct_key = policy::Policy::strategy_key("GET", url, "http", account);
+        if !is_local_url
+            && self
+                .policy
+                .is_strategy_blocked(&direct_key)
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            let credential = load_credential();
+            if let Ok(in_page) = self
+                .network
+                .fetch_browser_in_page(&credential, &req_input)
+                .await
+            {
+                if in_page.successful() {
+                    return Ok(in_page);
+                }
+            }
+            if let Ok(rendered) = self.network.fetch_rendered(&credential, url, account).await {
+                if rendered.successful() {
+                    return Ok(rendered);
+                }
+            }
+        }
+        let r = self
+            .network
+            .fetch(Request {
+                url: req_input.url.clone(),
+                method: req_input.method.clone(),
+                headers: req_input.headers.clone(),
+                body: req_input.body.clone(),
+                account_id: req_input.account_id.clone(),
+                limit: req_input.limit,
+                timeout: req_input.timeout,
+                read_only: req_input.read_only,
+                follow_redirects: req_input.follow_redirects,
+                tls_profile: req_input.tls_profile.clone(),
+            })
+            .await?;
+        if matches!(
+            r.defense.as_str(),
+            "cloudflare" | "bot-manager" | "captcha" | "unknown"
+        ) && !is_local_url
+        {
+            let _ = self.policy.resume_auth(&format!("{req_origin}|{account}"));
+            let credential = load_credential();
+            if let Ok(in_page) = self
+                .network
+                .fetch_browser_in_page(&credential, &req_input)
+                .await
+            {
+                if in_page.successful() {
+                    return Ok(in_page);
+                }
+            }
             if let Ok(rendered) = self.network.fetch_rendered(&credential, url, account).await {
                 if rendered.successful() {
                     return Ok(rendered);
@@ -1642,6 +1761,116 @@ impl Runtime {
                 ..Default::default()
             });
         }
+        let passive_observations = self
+            .state
+            .read()
+            .ok()
+            .and_then(|d| d.sites.get(&site_id).map(|m| m.observations.clone()))
+            .unwrap_or_default();
+        for obs in &passive_observations {
+            let method = obs.method.to_ascii_uppercase();
+            if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str())
+                || !obs.path.starts_with('/')
+            {
+                continue;
+            }
+            let slug = obs
+                .path
+                .trim_matches('/')
+                .split('/')
+                .filter(|seg| !seg.is_empty() && !seg.starts_with('{'))
+                .collect::<Vec<_>>()
+                .join("-")
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+                .to_ascii_lowercase();
+            let op_name = format!(
+                "{}-{}",
+                method.to_ascii_lowercase(),
+                if slug.is_empty() { "root" } else { &slug }
+            )
+            .chars()
+            .take(48)
+            .collect::<String>()
+            .trim_end_matches('-')
+            .to_string();
+            if !util::valid_id(&op_name) || !used_names.insert(op_name.clone()) {
+                continue;
+            }
+            let query: BTreeMap<String, spec::Param> = obs
+                .query
+                .iter()
+                .filter(|(k, _)| util::valid_id(k) && !util::secret_field(k))
+                .map(|(k, kind)| {
+                    let norm_kind = match kind.as_str() {
+                        "int" | "float" | "bool" | "json" => kind.as_str(),
+                        "number" => "float",
+                        _ => "string",
+                    };
+                    (
+                        k.clone(),
+                        spec::Param {
+                            kind: norm_kind.into(),
+                            required: false,
+                            default: None,
+                        },
+                    )
+                })
+                .collect();
+            let body = if !obs.body.is_empty() && method != "GET" {
+                let mut json_fields = BTreeMap::new();
+                for (k, kind) in &obs.body {
+                    if util::valid_id(k) && !util::secret_field(k) && !query.contains_key(k) {
+                        let norm_kind = match kind.as_str() {
+                            "int" | "float" | "bool" | "json" => kind.as_str(),
+                            "number" => "float",
+                            "array" | "object" => "json",
+                            _ => "string",
+                        };
+                        json_fields.insert(
+                            k.clone(),
+                            spec::Param {
+                                kind: norm_kind.into(),
+                                required: true,
+                                default: None,
+                            },
+                        );
+                    }
+                }
+                if json_fields.is_empty() {
+                    None
+                } else {
+                    Some(spec::Body {
+                        json: json_fields,
+                        ..Default::default()
+                    })
+                }
+            } else {
+                None
+            };
+            let is_read = method == "GET" && !policy::dangerous_intent(&obs.path);
+            operations.push(spec::Operation {
+                name: op_name,
+                method: method.clone(),
+                path: obs.path.clone(),
+                query,
+                body,
+                desc: format!("{method} {}", obs.path),
+                effect: if is_read { Effect::Read } else { Effect::Write },
+                evidence: format!(
+                    "Observed live browser network request ({} {})",
+                    method, obs.path
+                ),
+                response: Some(spec::ResponseExpectation {
+                    format: "json".into(),
+                    required_pointers: obs.response_pointers.clone(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            if operations.len() >= 24 {
+                break;
+            }
+        }
         for (method, path) in doc_routes.iter().chain(bundle_routes.iter()) {
             let slug = path
                 .trim_matches('/')
@@ -1707,8 +1936,8 @@ impl Runtime {
                 || path.starts_with("/_next/data/")
                 || path.ends_with(".json")
                 || doc_routes.contains(&(method.clone(), path.clone()));
-            let is_read = ["GET", "HEAD"].contains(&method.as_str())
-                && !policy::dangerous_intent(path);
+            let is_read =
+                ["GET", "HEAD"].contains(&method.as_str()) && !policy::dangerous_intent(path);
             let response = if is_api_route {
                 spec::ResponseExpectation {
                     format: "json".into(),
@@ -1789,10 +2018,8 @@ impl Runtime {
             operations,
             health: None,
         };
-        let doc_route_strs: Vec<String> = doc_routes
-            .iter()
-            .map(|(m, p)| format!("{m} {p}"))
-            .collect();
+        let doc_route_strs: Vec<String> =
+            doc_routes.iter().map(|(m, p)| format!("{m} {p}")).collect();
         let bundle_route_strs: Vec<String> = bundle_routes
             .iter()
             .map(|(m, p)| format!("{m} {p}"))

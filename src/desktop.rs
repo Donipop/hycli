@@ -66,9 +66,10 @@ fn client() -> AppResult<reqwest::Client> {
 }
 
 fn read_launch(root: &Path) -> Option<String> {
-    let value: serde_json::Value =
-        serde_json::from_slice(&util::read_bounded(&root.join("dashboard-session.json"), 4096).ok()?)
-            .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(
+        &util::read_bounded(&root.join("dashboard-session.json"), 4096).ok()?,
+    )
+    .ok()?;
     let launch = value.get("launch")?.as_str()?;
     (!launch.is_empty()).then(|| launch.to_owned())
 }
@@ -210,6 +211,24 @@ pub async fn open(
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
+                fn SetHandleInformation(
+                    hObject: *mut std::ffi::c_void,
+                    dwMask: u32,
+                    dwFlags: u32,
+                ) -> i32;
+            }
+            // Prevent CreateProcessW(bInheritHandles=TRUE) from leaking parent stdio pipes into the background daemon.
+            unsafe {
+                for std_id in [-10i32 as u32, -11i32 as u32, -12i32 as u32] {
+                    let handle = GetStdHandle(std_id);
+                    if !handle.is_null() && handle != (-1isize as *mut std::ffi::c_void) {
+                        SetHandleInformation(handle, 1, 0);
+                    }
+                }
+            }
             command.creation_flags(0x08000000 | 0x00000200);
         }
         let mut child = command.spawn()?;

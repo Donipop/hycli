@@ -160,7 +160,13 @@ pub async fn serve_with_options(
     let listener = match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await
     {
         Ok(listener) => listener,
-        Err(e) if auto_port && e.kind() == std::io::ErrorKind::AddrInUse => {
+        Err(e)
+            if auto_port
+                && matches!(
+                    e.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                ) =>
+        {
             tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?
         }
         Err(e) => return Err(e.into()),

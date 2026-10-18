@@ -187,9 +187,7 @@ impl Credential {
             return Ok(value);
         }
         if let Some(storage_spec) = value_from.strip_prefix("storage:") {
-            let (key, pointer) = storage_spec
-                .split_once('#')
-                .unwrap_or((storage_spec, ""));
+            let (key, pointer) = storage_spec.split_once('#').unwrap_or((storage_spec, ""));
             let raw = self
                 .local_storage
                 .get(key)
@@ -514,4 +512,8 @@ pub struct Observation {
     pub body: std::collections::BTreeMap<String, String>,
     pub status: u16,
     pub observed_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_pointers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auth_headers: Vec<String>,
 }

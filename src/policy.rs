@@ -295,7 +295,9 @@ impl Policy {
             CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, digest TEXT NOT NULL, request TEXT NOT NULL, review TEXT NOT NULL, state TEXT NOT NULL, expires_ms INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS request_gate(scope TEXT PRIMARY KEY, lease TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, cooldown INTEGER NOT NULL DEFAULT 0, paused TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS request_event(scope TEXT NOT NULL, at INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS request_event_scope_time ON request_event(scope,at);")?;
+            CREATE INDEX IF NOT EXISTS request_event_scope_time ON request_event(scope,at);
+            CREATE TABLE IF NOT EXISTS strategy_gate(strategy_key TEXT PRIMARY KEY, reason TEXT NOT NULL DEFAULT '', until_ms INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS origin_transport(origin TEXT PRIMARY KEY, preferred_transport TEXT NOT NULL DEFAULT '', updated_ms INTEGER NOT NULL DEFAULT 0);")?;
         Ok(Self {
             conn: Mutex::new(conn),
             interval_ms: interval_ms.max(0),
@@ -420,7 +422,7 @@ impl Policy {
                 )?;
                 let (lease_until, next_at, mut cooldown, mut paused): (i64, i64, i64, String) = tx.query_row("SELECT lease_until,next_at,cooldown,paused FROM request_gate WHERE scope=?1", [scope], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
                 let now = util::unix_ms();
-                if paused == "blocked_by_site" && (cooldown == 0 || now >= cooldown) {
+                if !paused.is_empty() && (cooldown == 0 || now >= cooldown) {
                     tx.execute(
                         "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
                         [scope],
@@ -481,51 +483,152 @@ impl Policy {
         token: &str,
         status: u16,
         retry_after: Option<Duration>,
-        challenge: bool,
+        _challenge: bool,
     ) -> AppResult<()> {
         let conn = self
             .conn
             .lock()
             .map_err(|_| AppError::api("internal", 500))?;
-        let pause = if status == 401 {
-            "auth_required"
-        } else if challenge {
-            "blocked_by_site"
-        } else {
-            ""
-        };
         let cooldown = if status == 429 || retry_after.is_some() {
             util::unix_ms()
                 + retry_after
                     .unwrap_or(Duration::from_secs(60))
                     .as_millis()
                     .min(i64::MAX as u128) as i64
-        } else if challenge {
-            util::unix_ms() + 30_000
         } else {
             0
         };
-        conn.execute("UPDATE request_gate SET lease='',lease_until=0,cooldown=MAX(cooldown,?3),paused=?4 WHERE scope=?1 AND lease=?2", params![scope,token,cooldown,pause])?;
+        conn.execute("UPDATE request_gate SET lease='',lease_until=0,cooldown=MAX(cooldown,?3),paused='' WHERE scope=?1 AND lease=?2", params![scope,token,cooldown])?;
         Ok(())
     }
-    pub fn resume_auth(&self, scope: &str) -> AppResult<()> {
-        self.conn
+    pub fn strategy_key(method: &str, raw_url: &str, transport: &str, account: &str) -> String {
+        let norm_url = url::Url::parse(raw_url)
+            .map(|u| format!("{}{}", u.origin().ascii_serialization(), u.path()))
+            .unwrap_or_else(|_| raw_url.to_string());
+        let norm_transport = if transport.is_empty() || transport == "direct" {
+            "http"
+        } else {
+            transport
+        };
+        format!(
+            "{}|{}|{}|{}",
+            method.to_ascii_uppercase(),
+            norm_url,
+            norm_transport,
+            account
+        )
+    }
+    pub fn is_strategy_blocked(&self, key: &str) -> AppResult<Option<String>> {
+        let conn = self
+            .conn
             .lock()
-            .map_err(|_| AppError::api("internal", 500))?
-            .execute(
-                "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1 AND paused IN ('auth_required','blocked_by_site')",
-                [scope],
-            )?;
+            .map_err(|_| AppError::api("internal", 500))?;
+        let now = util::unix_ms();
+        let row: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT reason, until_ms FROM strategy_gate WHERE strategy_key=?1",
+                [key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match row {
+            Some((reason, until_ms)) if until_ms > now && !reason.is_empty() => Ok(Some(reason)),
+            Some(_) => {
+                let _ = conn.execute("DELETE FROM strategy_gate WHERE strategy_key=?1", [key]);
+                Ok(None)
+            }
+            None => Ok(None),
+        }
+    }
+    pub fn record_blocked_strategy(&self, key: &str, reason: &str, ttl_ms: i64) -> AppResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        let until_ms = util::unix_ms() + ttl_ms.max(1_000);
+        conn.execute(
+            "INSERT INTO strategy_gate(strategy_key, reason, until_ms, failures) VALUES(?1, ?2, ?3, 1)
+             ON CONFLICT(strategy_key) DO UPDATE SET reason=excluded.reason, until_ms=excluded.until_ms, failures=strategy_gate.failures+1",
+            params![key, reason, until_ms],
+        )?;
+        Ok(())
+    }
+    pub fn clear_strategy(&self, key: &str) -> AppResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        conn.execute("DELETE FROM strategy_gate WHERE strategy_key=?1", [key])?;
+        Ok(())
+    }
+    pub fn record_preferred_transport(&self, origin: &str, transport: &str) -> AppResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        conn.execute(
+            "INSERT INTO origin_transport(origin, preferred_transport, updated_ms) VALUES(?1, ?2, ?3)
+             ON CONFLICT(origin) DO UPDATE SET preferred_transport=excluded.preferred_transport, updated_ms=excluded.updated_ms",
+            params![origin, transport, util::unix_ms()],
+        )?;
+        Ok(())
+    }
+    pub fn preferred_transport(&self, origin: &str) -> AppResult<Option<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        let now = util::unix_ms();
+        let row: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT preferred_transport, updated_ms FROM origin_transport WHERE origin=?1",
+                [origin],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match row {
+            Some((transport, updated_ms))
+                if !transport.is_empty() && now - updated_ms <= 3_600_000 =>
+            {
+                Ok(Some(transport))
+            }
+            _ => Ok(None),
+        }
+    }
+    pub fn resume_auth(&self, scope: &str) -> AppResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        conn.execute(
+            "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1 AND paused IN ('auth_required','blocked_by_site')",
+            [scope],
+        )?;
+        if let Some((origin, _)) = scope.split_once('|') {
+            let pattern = format!("%|{}%", origin);
+            let _ = conn.execute(
+                "DELETE FROM strategy_gate WHERE strategy_key LIKE ?1",
+                [pattern],
+            );
+        }
         Ok(())
     }
     pub fn resume(&self, scope: &str) -> AppResult<()> {
-        self.conn
+        let conn = self
+            .conn
             .lock()
-            .map_err(|_| AppError::api("internal", 500))?
-            .execute(
-                "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
-                [scope],
-            )?;
+            .map_err(|_| AppError::api("internal", 500))?;
+        conn.execute(
+            "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
+            [scope],
+        )?;
+        if let Some((origin, _)) = scope.split_once('|') {
+            let pattern = format!("%|{}%", origin);
+            let _ = conn.execute(
+                "DELETE FROM strategy_gate WHERE strategy_key LIKE ?1",
+                [pattern],
+            );
+        }
         Ok(())
     }
 }
@@ -549,7 +652,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
     }
     let mut names = std::collections::HashSet::new();
     for op in &sp.operations {
-        if !["", "http", "browser"].contains(&op.transport.as_str())
+        if !["", "http", "browser-fetch", "browser"].contains(&op.transport.as_str())
             || (op.transport == "browser"
                 && (op.method != "GET"
                     || op.body.is_some()

@@ -265,6 +265,14 @@ pub async fn observe(
                 && key.len() < 100
                 && ["string", "int", "float", "bool", "json"].contains(&kind.as_str())
         });
+        observation
+            .response_pointers
+            .retain(|p| p.starts_with('/') && p.len() <= 128 && !util::secret_field(p));
+        observation.response_pointers.truncate(8);
+        observation
+            .auth_headers
+            .retain(|h| h.len() <= 64 && crate::session_recipe::allowed_header(h));
+        observation.auth_headers.truncate(8);
         if util::redact_text(&observation.path) != observation.path
             || credential
                 .redaction_values()

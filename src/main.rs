@@ -462,14 +462,39 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
                     .find(|s| s.id == id)
                     .ok_or_else(|| AppError::api("not_found", 404))?;
                 if let Some(id) = action {
-                    let action = site
-                        .actions
-                        .into_iter()
-                        .find(|a| a.id == id)
-                        .ok_or_else(|| AppError::api("not_found", 404))?;
+                    let names: Vec<String> = site.actions.iter().map(|a| a.id.clone()).collect();
+                    let action =
+                        site.actions
+                            .into_iter()
+                            .find(|a| a.id == id)
+                            .ok_or_else(|| {
+                                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                                let suggestion = hycli::cli_actions::closest_match(&id, refs)
+                                    .map(|best| format!("Did you mean '{best}'? "))
+                                    .unwrap_or_default();
+                                apperr::usage(
+                                    format!("Unknown action: {id}"),
+                                    format!("{suggestion}Available actions: {}.", names.join(", ")),
+                                )
+                            })?;
                     emit.data(&action);
                 } else {
-                    emit.data(&site);
+                    let latest_understanding = core.state.read().ok().and_then(|d| {
+                        d.jobs
+                            .iter()
+                            .find(|j| j.site_id == site.id && j.understanding.is_some())
+                            .and_then(|j| j.understanding.clone())
+                    });
+                    let guide =
+                        hycli::cli_actions::build_user_guide(&site, latest_understanding.as_ref());
+                    let mut val = serde_json::to_value(&site).unwrap_or(serde_json::Value::Null);
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert(
+                            "user_guide".into(),
+                            serde_json::to_value(&guide).unwrap_or(serde_json::Value::Null),
+                        );
+                    }
+                    emit.data(&val);
                 }
                 return Ok(());
             }
@@ -535,6 +560,19 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             account,
         } => {
             let sp = find_spec(&site)?;
+            if sp.op(&action).is_err() {
+                let names: Vec<&str> = sp.operations.iter().map(|o| o.name.as_str()).collect();
+                let suggestion = hycli::cli_actions::closest_match(&action, names.iter().copied())
+                    .map(|best| format!("Did you mean '{best}'? "))
+                    .unwrap_or_default();
+                return Err(apperr::usage(
+                    format!("Unknown action: {action}"),
+                    format!(
+                        "{suggestion}Available actions: {}. Run `hycli {site} --help`.",
+                        names.join(", ")
+                    ),
+                ));
+            }
             let args = hycli::cli_actions::pairs(&args)?;
             let (result, _) = runner(&deps)?
                 .run_op_for_account(&sp, &action, &args, account.as_deref())
@@ -626,12 +664,40 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
         } => {
             let core = runner(&deps)?;
             let (mut report, spec) = core.recon(&deps.site, &url, max_bundles.min(24)).await?;
+            if let Some(obj) = report.as_object_mut() {
+                let actions: Vec<serde_json::Value> = spec
+                    .operations
+                    .iter()
+                    .map(|op| {
+                        serde_json::json!({
+                            "id": op.name,
+                            "method": op.method,
+                            "path": op.path,
+                            "effect": op.effect,
+                            "example": format!("hycli {} {}", spec.site.name, op.name),
+                        })
+                    })
+                    .collect();
+                obj.insert("discovered_actions".into(), serde_json::json!(actions));
+                let next = if let Some(ref out_path) = draft {
+                    vec![
+                        format!("hycli spec validate {out_path}"),
+                        format!("hycli spec install {out_path}"),
+                        format!("hycli {} --help", spec.site.name),
+                    ]
+                } else {
+                    vec![
+                        format!("hycli recon {url} --draft {}-draft.yaml", spec.site.name),
+                        format!("hycli prepare {url}"),
+                    ]
+                };
+                obj.insert("next_steps".into(), serde_json::json!(next));
+            }
             if let Some(out_path) = draft {
                 let yaml = serde_yaml::to_string(&spec)
                     .map_err(|e| apperr::spec(format!("Failed to serialize YAML ({e})"), ""))?;
-                std::fs::write(&out_path, yaml).map_err(|e| {
-                    apperr::runtime(e, "Failed to write file", &out_path)
-                })?;
+                std::fs::write(&out_path, yaml)
+                    .map_err(|e| apperr::runtime(e, "Failed to write file", &out_path))?;
                 if let Some(obj) = report.as_object_mut() {
                     obj.insert("draft_file".into(), serde_json::Value::String(out_path));
                 }
@@ -768,7 +834,10 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"status": format!("{} issues", issues.len()), "issues": issues}));
-                return Err(apperr::spec("Spec validation failed", "Fix the reported issues."));
+                return Err(apperr::spec(
+                    "Spec validation failed",
+                    "Fix the reported issues.",
+                ));
             }
             hycli::policy::validate_spec(&sp)?;
             emit.data(&serde_json::json!({"status": "ok", "site": sp.site.name, "ops": sp.operations.len()}));
@@ -779,20 +848,64 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"issues": issues}));
-                return Err(apperr::spec("Validation failed; installation aborted", "Fix the reported issues."));
+                return Err(apperr::spec(
+                    "Validation failed; installation aborted",
+                    "Fix the reported issues.",
+                ));
             }
             hycli::policy::validate_spec(&sp)?;
             let dst = hycli::platform::specs_dir().join(format!("{}.yaml", sp.site.name));
-            runner(&deps)?.install(&sp)?;
-            emit.data(&serde_json::json!({"installed": dst, "site": sp.site.name, "ops": sp.operations.len()}));
+            let core = runner(&deps)?;
+            core.install(&sp)?;
+            let locale = core.state.read()?.settings.locale;
+            let user_guide = core
+                .sites(&locale)
+                .ok()
+                .and_then(|sites| sites.into_iter().find(|s| s.id == sp.site.name))
+                .map(|site| hycli::cli_actions::build_user_guide(&site, None));
+            if let Some(guide) = &user_guide {
+                eprint!("{}", hycli::cli_actions::format_user_briefing(guide));
+            }
+            emit.data(&serde_json::json!({
+                "installed": dst,
+                "site": sp.site.name,
+                "ops": sp.operations.len(),
+                "user_guide": user_guide,
+            }));
             Ok(())
         }
         SpecCmd::Ls => {
             let rows: Vec<serde_json::Value> = hycli_sites()
                 .iter()
                 .map(|(n, sp)| {
+                    let read_ops = sp
+                        .operations
+                        .iter()
+                        .filter(|o| {
+                            hycli::policy::operation_effect(o, &std::collections::BTreeMap::new())
+                                == hycli::policy::Effect::Read
+                        })
+                        .count();
+                    let write_ops = sp.operations.len().saturating_sub(read_ops);
+                    let sample_actions: Vec<&str> = sp
+                        .operations
+                        .iter()
+                        .take(5)
+                        .map(|o| o.name.as_str())
+                        .collect();
+                    let example_command = sp
+                        .operations
+                        .first()
+                        .map(|o| format!("hycli {n} {}", o.name))
+                        .unwrap_or_else(|| format!("hycli {n} --help"));
                     serde_json::json!({
-                        "site": n, "title": sp.site.title, "ops": sp.operations.len()
+                        "site": n,
+                        "title": sp.site.title,
+                        "ops": sp.operations.len(),
+                        "read_ops": read_ops,
+                        "write_ops": write_ops,
+                        "sample_actions": sample_actions,
+                        "example_command": example_command,
                     })
                 })
                 .collect();
@@ -822,9 +935,9 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
     let mut st = hycli::store::Store::open(&hycli::platform::store_path())?;
     match cmd {
         AuthCmd::Set { r#ref, value } => {
-            let (site, key) = r#ref
-                .split_once('/')
-                .ok_or_else(|| apperr::usage("Format must be <site>/<key>", "Example: httpbin/token"))?;
+            let (site, key) = r#ref.split_once('/').ok_or_else(|| {
+                apperr::usage("Format must be <site>/<key>", "Example: httpbin/token")
+            })?;
             let v = match value {
                 Some(v) => v,
                 None => {
@@ -835,7 +948,10 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
                 }
             };
             if v.is_empty() {
-                return Err(apperr::usage("Empty credential value", "Provide via stdin or --value."));
+                return Err(apperr::usage(
+                    "Empty credential value",
+                    "Provide via stdin or --value.",
+                ));
             }
             st.set(site, key, &v)?;
             emit.data(&serde_json::json!({"stored": r#ref}));
@@ -846,9 +962,9 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
             Ok(())
         }
         AuthCmd::Rm { r#ref } => {
-            let (site, key) = r#ref
-                .split_once('/')
-                .ok_or_else(|| apperr::usage("Format must be <site>/<key>", "Example: httpbin/token"))?;
+            let (site, key) = r#ref.split_once('/').ok_or_else(|| {
+                apperr::usage("Format must be <site>/<key>", "Example: httpbin/token")
+            })?;
             if site == "accounts" || site == "providers" {
                 let core = hycli::runtime::Runtime::open(
                     &hycli::platform::data_dir(),
@@ -883,8 +999,12 @@ async fn capture_run(
     emit: &Emitter,
 ) -> Result<(), AppError> {
     let kb = open_kb(&deps)?;
-    let raw = std::fs::read(&from)
-        .map_err(|e| apperr::spec(format!("Failed to read HAR file ({e})"), "Check the file path."))?;
+    let raw = std::fs::read(&from).map_err(|e| {
+        apperr::spec(
+            format!("Failed to read HAR file ({e})"),
+            "Check the file path.",
+        )
+    })?;
     let f = hycli::har::parse(&raw)?;
     let clusters = hycli::capture::from_har(&f);
     if clusters.is_empty() {
@@ -896,8 +1016,8 @@ async fn capture_run(
     let draft = hycli::capture::draft_spec(&site, &site, &base, &clusters, limit)
         .map_err(|e| apperr::spec(format!("{e}"), "Edit draft.yaml manually."))?;
     let out_path = out.unwrap_or_else(|| format!("{site}-draft.yaml"));
-    let yb =
-        serde_yaml::to_string(&draft).map_err(|e| apperr::runtime(e, "Failed to serialize YAML", ""))?;
+    let yb = serde_yaml::to_string(&draft)
+        .map_err(|e| apperr::runtime(e, "Failed to serialize YAML", ""))?;
     std::fs::write(&out_path, yb).map_err(|e| apperr::runtime(e, "Failed to write draft", ""))?;
 
     let (aid, sha) = kb.register_artifact(&site, "har", &from)?;
@@ -955,7 +1075,9 @@ async fn try_run(
     {
         let sp = load_file_spec(&site)?;
         sp.op(&op)?;
-        runner.verify_candidate_with_inputs(&sp, &op, "", args).await?
+        runner
+            .verify_candidate_with_inputs(&sp, &op, "", args)
+            .await?
     } else {
         let sp = find_spec(&site)?;
         sp.op(&op)?;
@@ -1037,7 +1159,20 @@ async fn site_run(mut deps: Deps, rest: Vec<String>, emit: &Emitter) -> Result<(
         return Ok(());
     }
     let op = &rest[1];
-    let args = hycli::cli_actions::parse(sp.op(op)?, &rest[2..])?;
+    let operation = sp.op(op).map_err(|_| {
+        let names: Vec<&str> = sp.operations.iter().map(|o| o.name.as_str()).collect();
+        let suggestion = hycli::cli_actions::closest_match(op, names.iter().copied())
+            .map(|best| format!("Did you mean '{best}'? "))
+            .unwrap_or_default();
+        apperr::usage(
+            format!("Unknown action: {op}"),
+            format!(
+                "{suggestion}Available actions: {}. Run `hycli {site} --help`.",
+                names.join(", ")
+            ),
+        )
+    })?;
+    let args = hycli::cli_actions::parse(operation, &rest[2..])?;
     deps.allow_local |= args.allow_local;
     let (result, _) = runner(&deps)?
         .run_op_for_account(&sp, op, &args.inputs, args.account.as_deref())
@@ -1062,6 +1197,18 @@ async fn wait_preparation(
                 latest = job.updated_at.clone();
             }
             if !["running", "queued"].contains(&job.status.as_str()) {
+                if job.status == "completed" {
+                    if let Some(guide) = job
+                        .result
+                        .as_ref()
+                        .and_then(|r| r.get("user_guide"))
+                        .and_then(|v| {
+                            serde_json::from_value::<hycli::cli_actions::UserGuide>(v.clone()).ok()
+                        })
+                    {
+                        eprint!("{}", hycli::cli_actions::format_user_briefing(&guide));
+                    }
+                }
                 job.url.clear();
                 emit.data(&job);
                 return job_outcome(&job);

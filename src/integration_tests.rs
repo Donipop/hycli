@@ -1879,7 +1879,11 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
         .unwrap();
     assert_eq!(ssr_res[0]["id"], "clip-1");
 
-    let host_str = url::Url::parse(&base).unwrap().host_str().unwrap().to_string();
+    let host_str = url::Url::parse(&base)
+        .unwrap()
+        .host_str()
+        .unwrap()
+        .to_string();
     let account = core
         .connect_account(
             "studio",
@@ -1904,7 +1908,12 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
         .unwrap();
 
     let feed_res = core
-        .run_op_for_account(&v2_spec, "protected-feed", &BTreeMap::new(), Some(&account.id))
+        .run_op_for_account(
+            &v2_spec,
+            "protected-feed",
+            &BTreeMap::new(),
+            Some(&account.id),
+        )
         .await
         .unwrap()
         .0
@@ -1918,7 +1927,10 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
     let (encoded_url, _) = v2_spec
         .build_request(
             v2_spec.op("protected-feed").unwrap(),
-            &BTreeMap::from([("step.csrf.build_id".into(), "../../evil@attacker.com".into())]),
+            &BTreeMap::from([(
+                "step.csrf.build_id".into(),
+                "../../evil@attacker.com".into(),
+            )]),
         )
         .unwrap();
     assert_eq!(
@@ -2000,9 +2012,8 @@ async fn resilience_against_false_403_lockout_multi_cookie_preflight_and_embedde
         "free"
     );
 
-    let routes = crate::discovery::bundle_routes(
-        r#"fetch("/_api/blogEntries;blogId=123&limit=20");"#,
-    );
+    let routes =
+        crate::discovery::bundle_routes(r#"fetch("/_api/blogEntries;blogId=123&limit=20");"#);
     assert!(routes.contains(&("GET".into(), "/_api/blogEntries".into())));
 
     let (base, server) = host(
@@ -2144,4 +2155,211 @@ async fn resilience_against_false_403_lockout_multi_cookie_preflight_and_embedde
         .unwrap();
     assert_eq!(second_res.status, 200);
     server.abort();
+}
+
+#[tokio::test]
+async fn strategy_circuit_breaker_isolates_challenged_transport_without_origin_lockout() {
+    let (base, server) = host(
+        Router::new()
+            .route(
+                "/api/challenged",
+                get(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        [
+                            ("server", "cloudflare"),
+                            ("content-type", "text/html; charset=utf-8"),
+                        ],
+                        "<html><title>Just a moment...</title><script src=\"/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1\"></script></html>",
+                    )
+                }),
+            )
+            .route(
+                "/api/healthy",
+                get(|| async { Json(json!({"ok": true, "rows": [{"id": 1}]})) }),
+            ),
+    )
+    .await;
+
+    let core = runtime();
+    let sp = spec::parse(
+        json!({
+            "spec_version": 2,
+            "site": { "name": "adaptive-site", "base_url": base },
+            "operations": [
+                {
+                    "name": "challenged-read",
+                    "method": "GET",
+                    "path": "/api/challenged",
+                    "effect": "read",
+                    "evidence": "Challenged endpoint"
+                },
+                {
+                    "name": "browser-fetch-op",
+                    "method": "GET",
+                    "path": "/api/healthy",
+                    "transport": "browser-fetch",
+                    "effect": "read",
+                    "evidence": "In-page browser fetch endpoint"
+                },
+                {
+                    "name": "healthy-read",
+                    "method": "GET",
+                    "path": "/api/healthy",
+                    "effect": "read",
+                    "evidence": "Healthy endpoint on same origin",
+                    "response": {
+                        "format": "json",
+                        "required_pointers": ["/rows/0/id"]
+                    }
+                }
+            ]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    assert!(sp.validate().is_empty());
+    policy::validate_spec(&sp).unwrap();
+    core.install(&sp).unwrap();
+
+    // 1. Hitting a Cloudflare challenge on /api/challenged records the blocked direct strategy.
+    let err = core
+        .run_op_for_account(&sp, "challenged-read", &BTreeMap::new(), None)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(err.public_code, "blocked_by_site");
+
+    let challenged_url = format!("{}/api/challenged", base.trim_end_matches('/'));
+    let blocked_key = policy::Policy::strategy_key("GET", &challenged_url, "direct", "");
+    assert_eq!(
+        core.policy
+            .is_strategy_blocked(&blocked_key)
+            .unwrap()
+            .as_deref(),
+        Some("cloudflare")
+    );
+
+    // 2. Origin-wide gate is NOT paused: another operation on the same host succeeds immediately.
+    let (res, _) = core
+        .run_op_for_account(&sp, "healthy-read", &BTreeMap::new(), None)
+        .await
+        .unwrap();
+    assert_eq!(res.status, 200);
+    server.abort();
+}
+
+#[test]
+fn har_capture_synthesizes_rich_v2_spec_with_query_body_auth_and_pointers() {
+    let raw_har = json!({
+        "log": {
+            "entries": [
+                {
+                    "request": {
+                        "method": "GET",
+                        "url": "https://api.example.com/v1/projects/42/issues?page=1&open=true&api_key=secret-ignore",
+                        "headers": [
+                            { "name": "Cookie", "value": "session=abc" }
+                        ],
+                        "queryString": [
+                            { "name": "page", "value": "1" },
+                            { "name": "open", "value": "true" },
+                            { "name": "api_key", "value": "secret-ignore" }
+                        ]
+                    },
+                    "response": {
+                        "status": 200,
+                        "content": {
+                            "mimeType": "application/json",
+                            "text": "{\"items\":[{\"id\":\"iss-1\"}],\"total\":1}"
+                        }
+                    }
+                },
+                {
+                    "request": {
+                        "method": "POST",
+                        "url": "https://api.example.com/v1/projects/42/issues",
+                        "headers": [
+                            { "name": "X-CSRF-Token", "value": "csrf-123" }
+                        ],
+                        "postData": {
+                            "mimeType": "application/json",
+                            "text": "{\"title\":\"Fix bug\",\"priority\":2,\"password\":\"redact\"}"
+                        }
+                    },
+                    "response": {
+                        "status": 201,
+                        "content": {
+                            "mimeType": "application/json",
+                            "text": "{\"id\":\"iss-2\",\"ok\":true}"
+                        }
+                    }
+                }
+            ]
+        }
+    });
+    let parsed = crate::har::parse(raw_har.to_string().as_bytes()).unwrap();
+    let clusters = crate::capture::from_har(&parsed);
+    assert_eq!(clusters.len(), 2);
+
+    let draft = crate::capture::draft_spec(
+        "example",
+        "Example Tracker",
+        "https://api.example.com",
+        &clusters,
+        20,
+    )
+    .unwrap();
+    assert_eq!(draft.spec_version, 2);
+    assert!(draft.validate().is_empty());
+    policy::validate_spec(&draft).unwrap();
+    assert!(
+        draft
+            .auth
+            .iter()
+            .any(|a| a.name == "browser" && a.kind == "browser")
+    );
+
+    let get_op = draft
+        .operations
+        .iter()
+        .find(|o| o.method == "GET")
+        .expect("GET operation");
+    assert_eq!(get_op.effect, policy::Effect::Read);
+    assert_eq!(get_op.auth, "browser");
+    assert!(get_op.params.contains_key("id0"));
+    assert_eq!(
+        get_op.query.get("page").map(|p| p.kind.as_str()),
+        Some("int")
+    );
+    assert_eq!(
+        get_op.query.get("open").map(|p| p.kind.as_str()),
+        Some("bool")
+    );
+    assert!(!get_op.query.contains_key("api_key"));
+    assert!(
+        get_op
+            .response
+            .as_ref()
+            .is_some_and(|r| r.required_pointers.contains(&"/items".to_string()))
+    );
+
+    let post_op = draft
+        .operations
+        .iter()
+        .find(|o| o.method == "POST")
+        .expect("POST operation");
+    assert_eq!(post_op.effect, policy::Effect::Write);
+    assert_eq!(post_op.auth, "browser");
+    let body = post_op.body.as_ref().expect("POST body");
+    assert_eq!(
+        body.json.get("title").map(|p| p.kind.as_str()),
+        Some("string")
+    );
+    assert_eq!(
+        body.json.get("priority").map(|p| p.kind.as_str()),
+        Some("int")
+    );
+    assert!(!body.json.contains_key("password"));
 }

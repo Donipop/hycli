@@ -651,11 +651,12 @@ impl Runtime {
                     if round == 0 && raw == job.url {
                         icon_candidates = crate::site_images::candidates(&base, &text);
                         let chosen_scripts: Vec<_> = script_links.iter().take(2).cloned().collect();
-                        let published: Vec<_> = crate::discovery::ranked(links.iter().chain(found.iter()))
-                            .into_iter()
-                            .filter(|u| !chosen_scripts.contains(u))
-                            .take(3)
-                            .collect();
+                        let published: Vec<_> =
+                            crate::discovery::ranked(links.iter().chain(found.iter()))
+                                .into_iter()
+                                .filter(|u| !chosen_scripts.contains(u))
+                                .take(3)
+                                .collect();
                         reads.extend(published);
                         reads.extend(chosen_scripts);
                     }
@@ -666,7 +667,8 @@ impl Runtime {
                     let mut content = if is_js {
                         json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"api_bases":crate::discovery::bundle_api_bases(&base, &text)})
                     } else {
-                        let ssr_keys: Vec<_> = crate::html::extract_ssr_map(&text).into_keys().collect();
+                        let ssr_keys: Vec<_> =
+                            crate::html::extract_ssr_map(&text).into_keys().collect();
                         json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"ssr_keys":ssr_keys,"ssr_payloads":crate::html::ssr_payloads(&text),"forms":crate::html::forms(&text),"html_structure":crate::html::structure(&text),"observed_paths":paths.into_iter().take(120).collect::<Vec<_>>()})
                     };
                     let secrets = if account_id.is_empty() {
@@ -693,14 +695,13 @@ impl Runtime {
                 self.job_progress(&job.id, "connect", 1)?;
                 // Promote newly discovered high-priority documentation links without evicting Round 0 JS bundles.
                 if round == 0 && round_reads > 1 && round_reads < round_limit {
-                    let doc_candidates: Vec<_> = crate::discovery::ranked(
-                        links
-                            .iter()
-                            .filter(|url| !seen.contains(*url) && crate::discovery::documentation_url(url)),
-                    )
-                    .into_iter()
-                    .take(2)
-                    .collect();
+                    let doc_candidates: Vec<_> =
+                        crate::discovery::ranked(links.iter().filter(|url| {
+                            !seen.contains(*url) && crate::discovery::documentation_url(url)
+                        }))
+                        .into_iter()
+                        .take(2)
+                        .collect();
                     for doc_url in doc_candidates.into_iter().rev() {
                         if !reads.contains(&doc_url) {
                             reads.push_front(doc_url);
@@ -1361,16 +1362,14 @@ impl Runtime {
                         if read_attempts.contains(&attempt_key) {
                             continue;
                         }
-                        let account = if runtime::same_site_url(
-                            proposed.operation_base(operation),
-                            &job.url,
-                        )
-                        .unwrap_or(false)
-                        {
-                            account_id.as_str()
-                        } else {
-                            ""
-                        };
+                        let account =
+                            if runtime::same_site_url(proposed.operation_base(operation), &job.url)
+                                .unwrap_or(false)
+                            {
+                                account_id.as_str()
+                            } else {
+                                ""
+                            };
                         // Missing credentials are an access requirement, not a failed test request.
                         if self
                             .request(proposed, &operation.name, inputs.clone(), Some(account))
@@ -1420,19 +1419,38 @@ impl Runtime {
                         if code == "auth_required" && account.is_empty() {
                             continue;
                         }
-                        if [
-                            "auth_required",
-                            "blocked_by_site",
-                            "site_rate_limited",
-                            "rate_limited",
-                            "browser_unavailable",
-                        ]
-                        .contains(&code.as_str())
-                        {
+                        let strategy_remedy = match code.as_str() {
+                            "blocked_by_site" => {
+                                "Direct HTTP was challenged on this endpoint. Do NOT repeat the exact same direct HTTP operation; set `transport: \"browser-fetch\"` (in-page fetch) or `transport: \"browser\"` (rendered HTML), or pivot to an SSR JSON / alternative API route."
+                            }
+                            "auth_required" => {
+                                "Endpoint returned 401; verify derived auth header/cookie mapping or preflight token extraction, or set `transport: \"browser-fetch\"`."
+                            }
+                            "browser_unavailable" => {
+                                "Browser engine unavailable for rendered transport; use `transport: \"http\"` with SSR JSON extraction or derived headers."
+                            }
+                            "site_rate_limited" | "rate_limited" => {
+                                "Origin rate-limited (429); avoid repeating this endpoint in the current burst."
+                            }
+                            _ => {
+                                "Inspect the response shape and status, adjust path/query/headers/response selectors, and do not repeat the exact same failing definition."
+                            }
+                        };
+                        failures.push(json!({
+                            "action": operation.name,
+                            "method": operation.method,
+                            "path": operation.path,
+                            "transport": if operation.transport.is_empty() { "http" } else { &operation.transport },
+                            "error": code,
+                            "status": status,
+                            "strategy_remedy": strategy_remedy,
+                            "expected_response": operation.response,
+                            "response": result.as_ref().ok().and_then(|(response, _)| response.body.clone())
+                        }));
+                        failed_names.insert(operation.name.clone());
+                        if ["site_rate_limited", "rate_limited"].contains(&code.as_str()) {
                             break;
                         }
-                        failures.push(json!({"action":operation.name,"method":operation.method,"path":operation.path,"error":code,"status":status,"expected_response":operation.response,"response":result.as_ref().ok().and_then(|(response, _)| response.body.clone())}));
-                        failed_names.insert(operation.name.clone());
                     }
                     if !failures.is_empty() && repair_rounds < 2 && attempted < 24 {
                         repair_rounds += 1;
@@ -1451,7 +1469,7 @@ impl Runtime {
                             content: json!({"failures":failures}),
                         });
                         for (role, _) in WORKERS {
-                            feedback.insert(role.into(), "A proposed read failed its actual pre-installation check. Inspect the verification evidence, correct the request or observed response selectors, and return the repaired supported operation. Use available tools if more evidence is needed. Do not repeat the same definition or invent a successful result. Mutations must never be tested.".into());
+                            feedback.insert(role.into(), "A proposed read failed its actual pre-installation check. Inspect `strategy_remedy` and the verification evidence: if direct HTTP was challenged (`blocked_by_site`), pivot strategy by setting `transport: \"browser-fetch\"` or `transport: \"browser\"` or switching to SSR JSON extraction. Never repeat the exact same failing operation definition or invent a successful result. Mutations must never be tested.".into());
                         }
                         self.job_note(&job.id, "agent_retry", "", repair_rounds, "")?;
                         continue;
@@ -1725,7 +1743,12 @@ impl Runtime {
                 .preparation = Some(report.clone());
             Ok(())
         })?;
-        self.state.update_job(&job.id, |work| work.result = Some(json!({"understanding":understanding,"workflow_review":workflow_review,"self_qa":self_interrogation,"verification":report,"status":if !all_workflows_complete {"needs_review"} else if installed.is_some() && added_actions.is_empty() {"unchanged"} else if verified > 0 {"verified"} else {"needs_review"},"coverage":{"documented_operations":api_routes.len(),"uncovered":uncovered_routes(&api_routes, Some(&sp), &api_prefixes)},"added_actions":added_actions,"available_actions":sp.operations.iter().map(|op| &op.name).collect::<Vec<_>>(),"capability_gaps":capability_gaps.values().flatten().collect::<BTreeSet<_>>()})))?;
+        let user_guide = self
+            .sites(&job.locale)
+            .ok()
+            .and_then(|sites| sites.into_iter().find(|s| s.id == job.site_id))
+            .map(|site| crate::cli_actions::build_user_guide(&site, understanding.as_ref()));
+        self.state.update_job(&job.id, |work| work.result = Some(json!({"understanding":understanding,"workflow_review":workflow_review,"self_qa":self_interrogation,"verification":report,"status":if !all_workflows_complete {"needs_review"} else if installed.is_some() && added_actions.is_empty() {"unchanged"} else if verified > 0 {"verified"} else {"needs_review"},"coverage":{"documented_operations":api_routes.len(),"uncovered":uncovered_routes(&api_routes, Some(&sp), &api_prefixes)},"added_actions":added_actions,"available_actions":sp.operations.iter().map(|op| &op.name).collect::<Vec<_>>(),"capability_gaps":capability_gaps.values().flatten().collect::<BTreeSet<_>>(),"user_guide":user_guide})))?;
         self.job_progress(&job.id, "verify", 4)?;
         let icon_found = self
             .fetch_site_image(&job.site_id, &initial, icon_candidates)
@@ -2497,7 +2520,11 @@ mod merge_tests {
         .unwrap();
         assert_eq!(plan.self_qa.len(), 1);
         redact_self_qa(&mut plan.self_qa);
-        assert!(!plan.self_qa[0].answer.contains("sk-secrettoken1234567890abcdef"));
+        assert!(
+            !plan.self_qa[0]
+                .answer
+                .contains("sk-secrettoken1234567890abcdef")
+        );
         assert_eq!(plan.self_qa[0].action_taken, "Set ssr_json to auto");
         let review = plan.workflow_review.unwrap();
         assert_eq!(review.self_qa.len(), 1);

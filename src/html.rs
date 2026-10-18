@@ -421,7 +421,7 @@ pub fn resolve_pointer<'a>(value: &'a Value, pointer: &str) -> Option<&'a Value>
                 resolve_pointer(elem, &format!("/{after}"))
             }
         }
-        _ => None
+        _ => None,
     }
 }
 
@@ -431,8 +431,7 @@ pub fn extract_ssr_map(html: &str) -> std::collections::BTreeMap<String, Value> 
     let document = Html::parse_document(html);
     let mut payloads = std::collections::BTreeMap::new();
     let mut next_f_stream = String::new();
-    let window_assign_re =
-        regex::Regex::new(r"window\.([A-Za-z0-9_]+)\s*=\s*").expect("constant");
+    let window_assign_re = regex::Regex::new(r"window\.([A-Za-z0-9_]+)\s*=\s*").expect("constant");
 
     if let Ok(sel) = Selector::parse("script") {
         for script in document.select(&sel).take(250) {
@@ -691,11 +690,7 @@ pub fn infer_html_extraction(raw: &str, base: &str) -> Option<Extraction> {
                 let target = if let Some(ref s) = parsed_sel {
                     let mut m = rec.select(s);
                     let first = m.next();
-                    if m.next().is_some() {
-                        None
-                    } else {
-                        first
-                    }
+                    if m.next().is_some() { None } else { first }
                 } else {
                     Some(*rec)
                 };
@@ -804,8 +799,11 @@ pub fn infer_html_extraction(raw: &str, base: &str) -> Option<Extraction> {
         ) {
             fields.insert("meta".into(), f);
         }
-        if let Some(f) = pick_field(&records, &[("time[datetime]", "datetime"), ("time", "")], false)
-        {
+        if let Some(f) = pick_field(
+            &records,
+            &[("time[datetime]", "datetime"), ("time", "")],
+            false,
+        ) {
             fields.insert("published_at".into(), f);
         }
         let extraction = Extraction {
@@ -945,10 +943,10 @@ pub fn forms(html: &str) -> Value {
                 continue;
             };
             let tag = ctrl.value().name();
-            let kind = ctrl
-                .value()
-                .attr("type")
-                .unwrap_or(if tag == "input" { "text" } else { tag });
+            let kind =
+                ctrl.value()
+                    .attr("type")
+                    .unwrap_or(if tag == "input" { "text" } else { tag });
             let required = ctrl.value().attr("required").is_some();
             inputs.push(json!({
                 "name": name,
@@ -1109,7 +1107,9 @@ mod tests {
         "#;
         let ext = infer_html_extraction(html, "https://news.hada.io/").expect("inferred");
         assert_eq!(ext.items, "div.topic_row");
-        let extracted = ext.extract(html, "https://news.hada.io/").expect("extracted");
+        let extracted = ext
+            .extract(html, "https://news.hada.io/")
+            .expect("extracted");
         assert_eq!(extracted["items"][0]["id"], "101");
         assert_eq!(extracted["items"][0]["title"], "First Topic");
         assert_eq!(extracted["items"][0]["url"], "https://example.org/a");
