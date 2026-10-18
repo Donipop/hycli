@@ -20,12 +20,36 @@ pub struct Entry {
     pub response: Resp,
 }
 
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct NameValue {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct PostData {
+    #[serde(default, rename = "mimeType")]
+    pub mime_type: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub params: Vec<NameValue>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Req {
     #[serde(default)]
     pub method: String,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub headers: Vec<NameValue>,
+    #[serde(default, rename = "queryString")]
+    pub query_string: Vec<NameValue>,
+    #[serde(default, rename = "postData")]
+    pub post_data: Option<PostData>,
 }
 
 #[derive(Debug, Deserialize)]

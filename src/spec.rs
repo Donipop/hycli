@@ -467,6 +467,14 @@ impl Spec {
                         "",
                     );
                 }
+                if !["", "http", "browser-fetch", "browser"].contains(&op.transport.as_str()) {
+                    add(
+                        &mut out,
+                        &format!("{id}.transport"),
+                        format!("unsupported transport: {}", op.transport),
+                        "http|browser-fetch|browser",
+                    );
+                }
                 if !op.auth.is_empty() && !auths.contains(&op.auth) {
                     add(
                         &mut out,

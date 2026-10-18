@@ -1419,19 +1419,38 @@ impl Runtime {
                         if code == "auth_required" && account.is_empty() {
                             continue;
                         }
-                        if [
-                            "auth_required",
-                            "blocked_by_site",
-                            "site_rate_limited",
-                            "rate_limited",
-                            "browser_unavailable",
-                        ]
-                        .contains(&code.as_str())
-                        {
+                        let strategy_remedy = match code.as_str() {
+                            "blocked_by_site" => {
+                                "Direct HTTP was challenged on this endpoint. Do NOT repeat the exact same direct HTTP operation; set `transport: \"browser-fetch\"` (in-page fetch) or `transport: \"browser\"` (rendered HTML), or pivot to an SSR JSON / alternative API route."
+                            }
+                            "auth_required" => {
+                                "Endpoint returned 401; verify derived auth header/cookie mapping or preflight token extraction, or set `transport: \"browser-fetch\"`."
+                            }
+                            "browser_unavailable" => {
+                                "Browser engine unavailable for rendered transport; use `transport: \"http\"` with SSR JSON extraction or derived headers."
+                            }
+                            "site_rate_limited" | "rate_limited" => {
+                                "Origin rate-limited (429); avoid repeating this endpoint in the current burst."
+                            }
+                            _ => {
+                                "Inspect the response shape and status, adjust path/query/headers/response selectors, and do not repeat the exact same failing definition."
+                            }
+                        };
+                        failures.push(json!({
+                            "action": operation.name,
+                            "method": operation.method,
+                            "path": operation.path,
+                            "transport": if operation.transport.is_empty() { "http" } else { &operation.transport },
+                            "error": code,
+                            "status": status,
+                            "strategy_remedy": strategy_remedy,
+                            "expected_response": operation.response,
+                            "response": result.as_ref().ok().and_then(|(response, _)| response.body.clone())
+                        }));
+                        failed_names.insert(operation.name.clone());
+                        if ["site_rate_limited", "rate_limited"].contains(&code.as_str()) {
                             break;
                         }
-                        failures.push(json!({"action":operation.name,"method":operation.method,"path":operation.path,"error":code,"status":status,"expected_response":operation.response,"response":result.as_ref().ok().and_then(|(response, _)| response.body.clone())}));
-                        failed_names.insert(operation.name.clone());
                     }
                     if !failures.is_empty() && repair_rounds < 2 && attempted < 24 {
                         repair_rounds += 1;
@@ -1450,7 +1469,7 @@ impl Runtime {
                             content: json!({"failures":failures}),
                         });
                         for (role, _) in WORKERS {
-                            feedback.insert(role.into(), "A proposed read failed its actual pre-installation check. Inspect the verification evidence, correct the request or observed response selectors, and return the repaired supported operation. Use available tools if more evidence is needed. Do not repeat the same definition or invent a successful result. Mutations must never be tested.".into());
+                            feedback.insert(role.into(), "A proposed read failed its actual pre-installation check. Inspect `strategy_remedy` and the verification evidence: if direct HTTP was challenged (`blocked_by_site`), pivot strategy by setting `transport: \"browser-fetch\"` or `transport: \"browser\"` or switching to SSR JSON extraction. Never repeat the exact same failing operation definition or invent a successful result. Mutations must never be tested.".into());
                         }
                         self.job_note(&job.id, "agent_retry", "", repair_rounds, "")?;
                         continue;
@@ -1724,7 +1743,12 @@ impl Runtime {
                 .preparation = Some(report.clone());
             Ok(())
         })?;
-        self.state.update_job(&job.id, |work| work.result = Some(json!({"understanding":understanding,"workflow_review":workflow_review,"self_qa":self_interrogation,"verification":report,"status":if !all_workflows_complete {"needs_review"} else if installed.is_some() && added_actions.is_empty() {"unchanged"} else if verified > 0 {"verified"} else {"needs_review"},"coverage":{"documented_operations":api_routes.len(),"uncovered":uncovered_routes(&api_routes, Some(&sp), &api_prefixes)},"added_actions":added_actions,"available_actions":sp.operations.iter().map(|op| &op.name).collect::<Vec<_>>(),"capability_gaps":capability_gaps.values().flatten().collect::<BTreeSet<_>>()})))?;
+        let user_guide = self
+            .sites(&job.locale)
+            .ok()
+            .and_then(|sites| sites.into_iter().find(|s| s.id == job.site_id))
+            .map(|site| crate::cli_actions::build_user_guide(&site, understanding.as_ref()));
+        self.state.update_job(&job.id, |work| work.result = Some(json!({"understanding":understanding,"workflow_review":workflow_review,"self_qa":self_interrogation,"verification":report,"status":if !all_workflows_complete {"needs_review"} else if installed.is_some() && added_actions.is_empty() {"unchanged"} else if verified > 0 {"verified"} else {"needs_review"},"coverage":{"documented_operations":api_routes.len(),"uncovered":uncovered_routes(&api_routes, Some(&sp), &api_prefixes)},"added_actions":added_actions,"available_actions":sp.operations.iter().map(|op| &op.name).collect::<Vec<_>>(),"capability_gaps":capability_gaps.values().flatten().collect::<BTreeSet<_>>(),"user_guide":user_guide})))?;
         self.job_progress(&job.id, "verify", 4)?;
         let icon_found = self
             .fetch_site_image(&job.site_id, &initial, icon_candidates)

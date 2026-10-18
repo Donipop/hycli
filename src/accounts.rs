@@ -512,4 +512,8 @@ pub struct Observation {
     pub body: std::collections::BTreeMap<String, String>,
     pub status: u16,
     pub observed_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_pointers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auth_headers: Vec<String>,
 }

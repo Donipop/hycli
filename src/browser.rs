@@ -28,7 +28,10 @@ pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
     let config = BrowserConfig::builder()
         .chrome_executable(&engine.executable)
         .window_size(1280, 800)
+        .arg("--headless=new")
         .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .arg("--disable-dev-shm-usage")
         .arg("--disable-blink-features=AutomationControlled")
         .build()
         .map_err(|e| {
@@ -57,6 +60,9 @@ async fn observe(browser: &Browser, url: &str) -> Result<Observation, AppError> 
         .new_page("about:blank")
         .await
         .map_err(|e| apperr::runtime(e, "Failed to open browser page", ""))?;
+    let _ = page
+        .evaluate_on_new_document(crate::browser_session::STEALTH_INIT_SCRIPT)
+        .await;
 
     let start = std::time::Instant::now();
     let handle = page

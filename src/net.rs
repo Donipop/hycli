@@ -20,6 +20,7 @@ use std::{
 pub struct Network {
     pub policy: Arc<Policy>,
     pub allow_local: bool,
+    pub clients: std::sync::Mutex<std::collections::BTreeMap<String, reqwest::Client>>,
 }
 pub struct Request {
     pub url: String,
@@ -70,6 +71,146 @@ impl Response {
     }
 }
 impl Network {
+    pub fn new(policy: Arc<Policy>, allow_local: bool) -> Self {
+        Self {
+            policy,
+            allow_local,
+            clients: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+        }
+    }
+
+    fn pooled_client(
+        &self,
+        host: &str,
+        ua: &str,
+        addresses: &[SocketAddr],
+        timeout: Duration,
+    ) -> AppResult<reqwest::Client> {
+        let mut addr_keys: Vec<String> = addresses.iter().map(ToString::to_string).collect();
+        addr_keys.sort();
+        let pool_key = format!(
+            "{}|{}|{}|{}",
+            host,
+            ua,
+            timeout.as_secs(),
+            addr_keys.join(",")
+        );
+        if let Ok(guard) = self.clients.lock() {
+            if let Some(existing) = guard.get(&pool_key) {
+                return Ok(existing.clone());
+            }
+        }
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .timeout(timeout.min(Duration::from_secs(90)))
+            .connect_timeout(Duration::from_secs(10))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(6)
+            .tcp_keepalive(Duration::from_secs(30))
+            .user_agent(ua)
+            .resolve_to_addrs(host, addresses)
+            .build()
+            .map_err(|_| AppError::api("internal", 500))?;
+        if let Ok(mut guard) = self.clients.lock() {
+            if guard.len() >= 64 {
+                guard.clear();
+            }
+            guard.insert(pool_key, client.clone());
+        }
+        Ok(client)
+    }
+
+    /// Execute an in-page `window.fetch()` inside an isolated world on the origin's browser tab.
+    pub async fn fetch_browser_in_page(
+        &self,
+        credential: &crate::accounts::Credential,
+        input: &Request,
+    ) -> AppResult<Response> {
+        let initial = validate_url(&input.url)?;
+        let origin_str = initial.origin().ascii_serialization();
+        let strategy_key = Policy::strategy_key(
+            &input.method,
+            &input.url,
+            "browser-fetch",
+            &input.account_id,
+        );
+        let host_scope = format!("{origin_str}|*");
+        let host_token = self.policy.acquire(&host_scope).await?;
+        let mut host_lease = Lease {
+            policy: &self.policy,
+            scope: &host_scope,
+            token: &host_token,
+            released: false,
+        };
+        let scope = format!("{origin_str}|{}", input.account_id);
+        if input.account_id.is_empty() {
+            self.policy.resume_auth(&scope)?;
+        }
+        let token = self.policy.acquire(&scope).await?;
+        let mut lease = Lease {
+            policy: &self.policy,
+            scope: &scope,
+            token: &token,
+            released: false,
+        };
+        let started = Instant::now();
+        let fetched =
+            crate::browser_session::fetch_in_page(crate::browser_session::InPageFetchRequest {
+                credential,
+                method: &input.method,
+                url: &input.url,
+                headers: &input.headers,
+                body: input.body.as_deref(),
+                allow_local: self.allow_local,
+            })
+            .await?;
+        if !same_site_origin(&validate_url(&fetched.url)?, &initial)
+            || fetched.bytes.len() > input.limit
+        {
+            return Err(AppError::api("response_mismatch", 502));
+        }
+        let (defense, _) = defend::classify(&defend::Observation {
+            status_code: fetched.status,
+            headers: fetched.headers.clone(),
+            body_snippet: String::from_utf8_lossy(
+                &fetched.bytes[..fetched.bytes.len().min(16_384)],
+            )
+            .into_owned(),
+        });
+        let challenged = defense != defend::Class::None && defense != defend::Class::RateLimit;
+        if challenged {
+            let _ = self
+                .policy
+                .record_blocked_strategy(&strategy_key, defense.as_str(), 180_000);
+        } else if (200..300).contains(&fetched.status) {
+            let _ = self.policy.clear_strategy(&strategy_key);
+            let _ = self
+                .policy
+                .record_preferred_transport(&origin_str, "browser-fetch");
+        }
+        let retry_after = retry_after(&fetched.headers);
+        self.policy
+            .release(&scope, &token, fetched.status, retry_after, challenged)?;
+        lease.released = true;
+        self.policy.release(
+            &host_scope,
+            &host_token,
+            if fetched.status == 429 { 429 } else { 0 },
+            retry_after,
+            false,
+        )?;
+        host_lease.released = true;
+        Ok(Response {
+            url: fetched.url,
+            status: fetched.status,
+            headers: fetched.headers,
+            bytes: fetched.bytes,
+            duration_ms: started.elapsed().as_millis() as i64,
+            defense: defense.as_str().into(),
+        })
+    }
+
     /// Rendered reads share HTTP pacing and account gates with ordinary operations.
     pub async fn fetch_rendered(
         &self,
@@ -78,7 +219,9 @@ impl Network {
         account: &str,
     ) -> AppResult<Response> {
         let initial = validate_url(entry)?;
-        let host_scope = format!("{}|*", initial.origin().ascii_serialization());
+        let origin_str = initial.origin().ascii_serialization();
+        let strategy_key = Policy::strategy_key("GET", entry, "browser", account);
+        let host_scope = format!("{origin_str}|*");
         let host_token = self.policy.acquire(&host_scope).await?;
         let mut host_lease = Lease {
             policy: &self.policy,
@@ -86,7 +229,7 @@ impl Network {
             token: &host_token,
             released: false,
         };
-        let scope = format!("{}|{}", initial.origin().ascii_serialization(), account);
+        let scope = format!("{origin_str}|{account}");
         if account.is_empty() {
             self.policy.resume_auth(&scope)?;
         }
@@ -110,13 +253,16 @@ impl Network {
             headers: headers.clone(),
             body_snippet: capture.html.chars().take(16_384).collect(),
         });
-        self.policy.release(
-            &scope,
-            &token,
-            capture.status,
-            None,
-            defense != defend::Class::None && defense != defend::Class::RateLimit,
-        )?;
+        let challenged = defense != defend::Class::None && defense != defend::Class::RateLimit;
+        if challenged {
+            let _ = self
+                .policy
+                .record_blocked_strategy(&strategy_key, defense.as_str(), 180_000);
+        } else if (200..300).contains(&capture.status) {
+            let _ = self.policy.clear_strategy(&strategy_key);
+        }
+        self.policy
+            .release(&scope, &token, capture.status, None, challenged)?;
         lease.released = true;
         self.policy.release(
             &host_scope,
@@ -174,15 +320,12 @@ impl Network {
             } else {
                 CHROME_UA
             };
-            let client = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .retry(reqwest::retry::never())
-                .timeout(input.timeout.min(Duration::from_secs(90)))
-                .connect_timeout(Duration::from_secs(10))
-                .user_agent(ua)
-                .resolve_to_addrs(target.host_str().expect("validated host"), &addresses)
-                .build()
-                .map_err(|_| AppError::api("internal", 500))?;
+            let client = self.pooled_client(
+                target.host_str().expect("validated host"),
+                ua,
+                &addresses,
+                input.timeout,
+            )?;
             let mut headers = HeaderMap::new();
             if matches!(
                 input.tls_profile.as_str(),
@@ -370,13 +513,18 @@ impl Network {
                 body_snippet: String::from_utf8_lossy(&bytes[..bytes.len().min(16_384)])
                     .into_owned(),
             });
-            self.policy.release(
-                &scope,
-                &token,
-                gate_status,
-                retry_after,
-                defense != defend::Class::None && defense != defend::Class::RateLimit,
-            )?;
+            let challenged = defense != defend::Class::None && defense != defend::Class::RateLimit;
+            let strategy_key =
+                Policy::strategy_key(&input.method, target.as_str(), "http", &input.account_id);
+            if challenged {
+                let _ =
+                    self.policy
+                        .record_blocked_strategy(&strategy_key, defense.as_str(), 300_000);
+            } else if (200..300).contains(&status) {
+                let _ = self.policy.clear_strategy(&strategy_key);
+            }
+            self.policy
+                .release(&scope, &token, gate_status, retry_after, challenged)?;
             lease.released = true;
             self.policy.release(
                 &host_scope,

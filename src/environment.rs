@@ -39,6 +39,15 @@ struct Inventory {
 
 fn family(name: &str) -> Option<&'static str> {
     let name = name.to_ascii_lowercase();
+    if name.contains("headless")
+        || name.contains("driver")
+        || name.contains("crash")
+        || name.contains("agent")
+        || name.starts_with("scoped_dir")
+        || name.contains("-backup")
+    {
+        return None;
+    }
     if name.contains("firefox") || name.contains("librewolf") {
         Some("Firefox")
     } else if name.contains("msedge")
@@ -60,12 +69,11 @@ fn family(name: &str) -> Option<&'static str> {
     }
 }
 
-fn family_for_path(path: &Path) -> String {
+fn family_for_path(path: &Path) -> Option<String> {
     path.ancestors()
         .take(5)
         .find_map(|p| p.file_name().and_then(|n| family(&n.to_string_lossy())))
-        .unwrap_or("Chromium")
-        .into()
+        .map(str::to_owned)
 }
 
 fn argument(args: &[std::ffi::OsString], name: &str) -> Option<PathBuf> {
@@ -369,7 +377,6 @@ impl Inventory {
         let mut visited = BTreeSet::new();
         let mut inspected = 0;
         while let Some((hint, root, depth)) = queue.pop_front() {
-            publish(self);
             if inspected >= 12_000 {
                 break;
             }
@@ -381,6 +388,7 @@ impl Inventory {
                 continue;
             }
             inspected += 1;
+            let before_profiles = self.profiles.len();
             if root.join(".hycli-session").is_file() {
                 continue;
             }
@@ -390,31 +398,42 @@ impl Inventory {
                         self.profile(path, "Firefox", None);
                     }
                 }
+                if self.profiles.len() != before_profiles {
+                    publish(self);
+                }
                 continue;
             }
             if root.join("Local State").is_file() {
                 let browser = if hint.is_empty() {
                     family_for_path(&root)
                 } else {
-                    hint.clone()
+                    Some(hint.clone())
                 };
-                if let Ok(bytes) = util::read_bounded(&root.join("Local State"), 16 * 1024 * 1024) {
-                    if let Ok(data) = serde_json::from_slice::<Value>(&bytes) {
-                        if let Some(profiles) = data
-                            .pointer("/profile/info_cache")
-                            .and_then(Value::as_object)
-                        {
-                            for (relative, value) in profiles {
-                                let path = Path::new(relative);
-                                if path.components().count() == 1 && !relative.starts_with('.') {
-                                    self.profile(
-                                        root.join(path),
-                                        &browser,
-                                        value.get("name").and_then(Value::as_str),
-                                    );
+                if let Some(browser) = browser {
+                    if let Ok(bytes) =
+                        util::read_bounded(&root.join("Local State"), 16 * 1024 * 1024)
+                    {
+                        if let Ok(data) = serde_json::from_slice::<Value>(&bytes) {
+                            if let Some(profiles) = data
+                                .pointer("/profile/info_cache")
+                                .and_then(Value::as_object)
+                            {
+                                for (relative, value) in profiles {
+                                    let path = Path::new(relative);
+                                    if path.components().count() == 1 && !relative.starts_with('.')
+                                    {
+                                        self.profile(
+                                            root.join(path),
+                                            &browser,
+                                            value.get("name").and_then(Value::as_str),
+                                        );
+                                    }
                                 }
                             }
                         }
+                    }
+                    if self.profiles.len() != before_profiles {
+                        publish(self);
                     }
                 }
             }
@@ -422,6 +441,9 @@ impl Inventory {
                 && (root.join("cookies.sqlite").is_file() || root.join("storage").is_dir())
             {
                 self.profile(root, "Firefox", None);
+                if self.profiles.len() != before_profiles {
+                    publish(self);
+                }
                 continue;
             }
             if root.join("Preferences").is_file()
@@ -432,9 +454,14 @@ impl Inventory {
                 let browser = if hint.is_empty() {
                     family_for_path(&root)
                 } else {
-                    hint.clone()
+                    Some(hint.clone())
                 };
-                self.profile(root, &browser, None);
+                if let Some(browser) = browser {
+                    self.profile(root, &browser, None);
+                    if self.profiles.len() != before_profiles {
+                        publish(self);
+                    }
+                }
                 continue;
             }
             let Ok(entries) = std::fs::read_dir(&root) else {
@@ -456,13 +483,35 @@ impl Inventory {
                     "crash reports",
                     "backup",
                     "backups",
+                    "partitions",
+                    "headless",
+                    "puppeteer",
+                    "playwright",
+                    "cypress",
                 ]
                 .contains(&name.as_str())
                     || name.contains("-backup")
+                    || name.contains("headless")
+                    || name.starts_with("scoped_dir")
+                    || name.starts_with("launch-preview")
                 {
                     continue;
                 }
-                queue.push_back((hint.clone(), entry.path(), depth + 1));
+                let next_hint = if hint.is_empty() {
+                    family(&name).unwrap_or("").to_owned()
+                } else {
+                    hint.clone()
+                };
+                let is_browser_dir = !next_hint.is_empty()
+                    || ["mozilla", "bravesoftware", "google", "microsoft", "default"]
+                        .iter()
+                        .any(|k| name.contains(k))
+                    || name.starts_with("profile ");
+                if is_browser_dir {
+                    queue.push_front((next_hint, entry.path(), depth + 1));
+                } else {
+                    queue.push_back((next_hint, entry.path(), depth + 1));
+                }
             }
         }
     }
@@ -664,5 +713,32 @@ mod tests {
             Some(PathBuf::from("D:\\Portable Apps\\Browser\\chrome.exe"))
         );
         assert_eq!(family("microsoft-edge-stable"), Some("Edge"));
+        assert_eq!(family("chromium-headless"), None);
+    }
+    #[test]
+    fn ignores_electron_and_headless_ephemeral_directories_during_broad_scan() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/tests")
+            .join(util::id());
+        let real_chromium = root.join("chromium/Default");
+        std::fs::create_dir_all(real_chromium.join("Local Storage")).unwrap();
+        std::fs::write(real_chromium.join("Preferences"), "{}").unwrap();
+
+        let electron_cursor = root.join("Cursor");
+        std::fs::create_dir_all(electron_cursor.join("Local Storage")).unwrap();
+        std::fs::write(electron_cursor.join("Preferences"), "{}").unwrap();
+
+        let headless_ephemeral = root.join("chromium-headless/scoped_dir123/Default");
+        std::fs::create_dir_all(headless_ephemeral.join("Local Storage")).unwrap();
+        std::fs::write(headless_ephemeral.join("Preferences"), "{}").unwrap();
+
+        let mut inventory = Inventory::default();
+        inventory.roots.push((String::new(), root.clone()));
+        inventory.scan_profiles();
+        assert_eq!(inventory.profiles.len(), 1);
+        let profile = inventory.profiles.into_values().next().unwrap();
+        assert_eq!(profile.browser, "Chromium");
+        assert_eq!(profile.profile, "Default");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
