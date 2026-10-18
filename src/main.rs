@@ -629,9 +629,8 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             if let Some(out_path) = draft {
                 let yaml = serde_yaml::to_string(&spec)
                     .map_err(|e| apperr::spec(format!("Failed to serialize YAML ({e})"), ""))?;
-                std::fs::write(&out_path, yaml).map_err(|e| {
-                    apperr::runtime(e, "Failed to write file", &out_path)
-                })?;
+                std::fs::write(&out_path, yaml)
+                    .map_err(|e| apperr::runtime(e, "Failed to write file", &out_path))?;
                 if let Some(obj) = report.as_object_mut() {
                     obj.insert("draft_file".into(), serde_json::Value::String(out_path));
                 }
@@ -768,7 +767,10 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"status": format!("{} issues", issues.len()), "issues": issues}));
-                return Err(apperr::spec("Spec validation failed", "Fix the reported issues."));
+                return Err(apperr::spec(
+                    "Spec validation failed",
+                    "Fix the reported issues.",
+                ));
             }
             hycli::policy::validate_spec(&sp)?;
             emit.data(&serde_json::json!({"status": "ok", "site": sp.site.name, "ops": sp.operations.len()}));
@@ -779,7 +781,10 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let issues = sp.validate();
             if !issues.is_empty() {
                 emit.data(&serde_json::json!({"issues": issues}));
-                return Err(apperr::spec("Validation failed; installation aborted", "Fix the reported issues."));
+                return Err(apperr::spec(
+                    "Validation failed; installation aborted",
+                    "Fix the reported issues.",
+                ));
             }
             hycli::policy::validate_spec(&sp)?;
             let dst = hycli::platform::specs_dir().join(format!("{}.yaml", sp.site.name));
@@ -822,9 +827,9 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
     let mut st = hycli::store::Store::open(&hycli::platform::store_path())?;
     match cmd {
         AuthCmd::Set { r#ref, value } => {
-            let (site, key) = r#ref
-                .split_once('/')
-                .ok_or_else(|| apperr::usage("Format must be <site>/<key>", "Example: httpbin/token"))?;
+            let (site, key) = r#ref.split_once('/').ok_or_else(|| {
+                apperr::usage("Format must be <site>/<key>", "Example: httpbin/token")
+            })?;
             let v = match value {
                 Some(v) => v,
                 None => {
@@ -835,7 +840,10 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
                 }
             };
             if v.is_empty() {
-                return Err(apperr::usage("Empty credential value", "Provide via stdin or --value."));
+                return Err(apperr::usage(
+                    "Empty credential value",
+                    "Provide via stdin or --value.",
+                ));
             }
             st.set(site, key, &v)?;
             emit.data(&serde_json::json!({"stored": r#ref}));
@@ -846,9 +854,9 @@ fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
             Ok(())
         }
         AuthCmd::Rm { r#ref } => {
-            let (site, key) = r#ref
-                .split_once('/')
-                .ok_or_else(|| apperr::usage("Format must be <site>/<key>", "Example: httpbin/token"))?;
+            let (site, key) = r#ref.split_once('/').ok_or_else(|| {
+                apperr::usage("Format must be <site>/<key>", "Example: httpbin/token")
+            })?;
             if site == "accounts" || site == "providers" {
                 let core = hycli::runtime::Runtime::open(
                     &hycli::platform::data_dir(),
@@ -883,8 +891,12 @@ async fn capture_run(
     emit: &Emitter,
 ) -> Result<(), AppError> {
     let kb = open_kb(&deps)?;
-    let raw = std::fs::read(&from)
-        .map_err(|e| apperr::spec(format!("Failed to read HAR file ({e})"), "Check the file path."))?;
+    let raw = std::fs::read(&from).map_err(|e| {
+        apperr::spec(
+            format!("Failed to read HAR file ({e})"),
+            "Check the file path.",
+        )
+    })?;
     let f = hycli::har::parse(&raw)?;
     let clusters = hycli::capture::from_har(&f);
     if clusters.is_empty() {
@@ -896,8 +908,8 @@ async fn capture_run(
     let draft = hycli::capture::draft_spec(&site, &site, &base, &clusters, limit)
         .map_err(|e| apperr::spec(format!("{e}"), "Edit draft.yaml manually."))?;
     let out_path = out.unwrap_or_else(|| format!("{site}-draft.yaml"));
-    let yb =
-        serde_yaml::to_string(&draft).map_err(|e| apperr::runtime(e, "Failed to serialize YAML", ""))?;
+    let yb = serde_yaml::to_string(&draft)
+        .map_err(|e| apperr::runtime(e, "Failed to serialize YAML", ""))?;
     std::fs::write(&out_path, yb).map_err(|e| apperr::runtime(e, "Failed to write draft", ""))?;
 
     let (aid, sha) = kb.register_artifact(&site, "har", &from)?;
@@ -955,7 +967,9 @@ async fn try_run(
     {
         let sp = load_file_spec(&site)?;
         sp.op(&op)?;
-        runner.verify_candidate_with_inputs(&sp, &op, "", args).await?
+        runner
+            .verify_candidate_with_inputs(&sp, &op, "", args)
+            .await?
     } else {
         let sp = find_spec(&site)?;
         sp.op(&op)?;

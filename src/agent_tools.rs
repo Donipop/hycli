@@ -80,9 +80,7 @@ impl Context<'_> {
             .ok_or_else(|| AppError::api("not_found", 404))?;
         let job_url = crate::net::validate_url(&self.job.url)?;
         let acct_url = crate::net::validate_url(&view.site_url)?;
-        if view.site_id != self.job.site_id
-            || !crate::net::same_site_origin(&acct_url, &job_url)
-        {
+        if view.site_id != self.job.site_id || !crate::net::same_site_origin(&acct_url, &job_url) {
             return Err(AppError::api("unsafe_target", 400));
         }
         Ok(())

@@ -313,11 +313,8 @@ impl Runtime {
                     let d = chosen.and_then(|s| s.actions.get(&op.name));
                     ActionView {
                         id: op.name.clone(),
-                        accepts_account: same_site_url(
-                            sp.operation_base(op),
-                            sp.site.source_url(),
-                        )
-                        .unwrap_or(false)
+                        accepts_account: same_site_url(sp.operation_base(op), sp.site.source_url())
+                            .unwrap_or(false)
                             && !sp
                                 .find_auth(&op.auth)
                                 .is_some_and(|auth| auth.kind == "header"),
@@ -1707,8 +1704,8 @@ impl Runtime {
                 || path.starts_with("/_next/data/")
                 || path.ends_with(".json")
                 || doc_routes.contains(&(method.clone(), path.clone()));
-            let is_read = ["GET", "HEAD"].contains(&method.as_str())
-                && !policy::dangerous_intent(path);
+            let is_read =
+                ["GET", "HEAD"].contains(&method.as_str()) && !policy::dangerous_intent(path);
             let response = if is_api_route {
                 spec::ResponseExpectation {
                     format: "json".into(),
@@ -1789,10 +1786,8 @@ impl Runtime {
             operations,
             health: None,
         };
-        let doc_route_strs: Vec<String> = doc_routes
-            .iter()
-            .map(|(m, p)| format!("{m} {p}"))
-            .collect();
+        let doc_route_strs: Vec<String> =
+            doc_routes.iter().map(|(m, p)| format!("{m} {p}")).collect();
         let bundle_route_strs: Vec<String> = bundle_routes
             .iter()
             .map(|(m, p)| format!("{m} {p}"))

@@ -67,7 +67,12 @@ async fn observe(browser: &Browser, url: &str) -> Result<Observation, AppError> 
         .wait_for_navigation_response()
         .await
         .map_err(|e| apperr::runtime(e, "Failed waiting for navigation response", ""))?
-        .ok_or_else(|| apperr::runtime_msg("No navigation response received", "Check network connectivity and the URL."))?;
+        .ok_or_else(|| {
+            apperr::runtime_msg(
+                "No navigation response received",
+                "Check network connectivity and the URL.",
+            )
+        })?;
     let latency = start.elapsed().as_millis() as i64;
     let html = page.content().await.unwrap_or_default();
 

@@ -1879,7 +1879,11 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
         .unwrap();
     assert_eq!(ssr_res[0]["id"], "clip-1");
 
-    let host_str = url::Url::parse(&base).unwrap().host_str().unwrap().to_string();
+    let host_str = url::Url::parse(&base)
+        .unwrap()
+        .host_str()
+        .unwrap()
+        .to_string();
     let account = core
         .connect_account(
             "studio",
@@ -1904,7 +1908,12 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
         .unwrap();
 
     let feed_res = core
-        .run_op_for_account(&v2_spec, "protected-feed", &BTreeMap::new(), Some(&account.id))
+        .run_op_for_account(
+            &v2_spec,
+            "protected-feed",
+            &BTreeMap::new(),
+            Some(&account.id),
+        )
         .await
         .unwrap()
         .0
@@ -1918,7 +1927,10 @@ async fn recon_mines_ssr_and_js_bundles_and_v2_pipeline_executes_preflight_and_d
     let (encoded_url, _) = v2_spec
         .build_request(
             v2_spec.op("protected-feed").unwrap(),
-            &BTreeMap::from([("step.csrf.build_id".into(), "../../evil@attacker.com".into())]),
+            &BTreeMap::from([(
+                "step.csrf.build_id".into(),
+                "../../evil@attacker.com".into(),
+            )]),
         )
         .unwrap();
     assert_eq!(
@@ -2000,9 +2012,8 @@ async fn resilience_against_false_403_lockout_multi_cookie_preflight_and_embedde
         "free"
     );
 
-    let routes = crate::discovery::bundle_routes(
-        r#"fetch("/_api/blogEntries;blogId=123&limit=20");"#,
-    );
+    let routes =
+        crate::discovery::bundle_routes(r#"fetch("/_api/blogEntries;blogId=123&limit=20");"#);
     assert!(routes.contains(&("GET".into(), "/_api/blogEntries".into())));
 
     let (base, server) = host(

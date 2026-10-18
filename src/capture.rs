@@ -149,7 +149,10 @@ pub fn draft_spec(
         let mut op = spec::Operation {
             transport: String::new(),
             name,
-            desc: format!("capture draft ({} observations, last status {})", c.count, c.last),
+            desc: format!(
+                "capture draft ({} observations, last status {})",
+                c.count, c.last
+            ),
             method: c.method.clone(),
             path: c.template.clone(),
             base_url: String::new(),

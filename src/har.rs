@@ -45,6 +45,10 @@ pub struct Content {
 }
 
 pub fn parse(data: &[u8]) -> AppResult<File> {
-    serde_json::from_slice(data)
-        .map_err(|e| apperr::spec(format!("Failed to parse HAR ({e})"), "Verify HAR 1.2 JSON format."))
+    serde_json::from_slice(data).map_err(|e| {
+        apperr::spec(
+            format!("Failed to parse HAR ({e})"),
+            "Verify HAR 1.2 JSON format.",
+        )
+    })
 }

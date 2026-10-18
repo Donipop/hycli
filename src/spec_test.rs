@@ -69,7 +69,10 @@ operations:
         .collect::<String>();
     assert!(joined.contains("params"), "missing params issue: {joined}");
     assert!(joined.contains("ghost"), "missing auth issue: {joined}");
-    assert!(joined.contains("conflict"), "missing conflict issue: {joined}");
+    assert!(
+        joined.contains("conflict"),
+        "missing conflict issue: {joined}"
+    );
 }
 
 #[test]
@@ -102,7 +105,10 @@ fn apply_model() {
     let out = sp.apply_model("item_view", raw).unwrap();
     assert_eq!(out["id"], 7);
     assert_eq!(out["name"], "abc");
-    assert!(out.get("extra").is_none(), "unexpected extra field in model output");
+    assert!(
+        out.get("extra").is_none(),
+        "unexpected extra field in model output"
+    );
 }
 
 #[test]
@@ -163,7 +169,11 @@ operations:
       extract_pointer: /data/post
 "##;
     let sp = parse(raw_spec);
-    assert!(sp.validate().is_empty(), "v2 validate issues: {:?}", sp.validate());
+    assert!(
+        sp.validate().is_empty(),
+        "v2 validate issues: {:?}",
+        sp.validate()
+    );
 
     let create_op = sp.op("create-post").unwrap();
     let mut args = BTreeMap::new();
@@ -205,4 +215,3 @@ operations:
         "clip-7"
     );
 }
-

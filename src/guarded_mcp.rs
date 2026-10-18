@@ -139,7 +139,9 @@ impl Server {
                             .read_only(true)
                             .destructive(false)
                             .idempotent(!["hycli_prepare", "hycli_request"].contains(&name))
-                            .open_world(["hycli_prepare", "hycli_request", "hycli_recon"].contains(&name)),
+                            .open_world(
+                                ["hycli_prepare", "hycli_request", "hycli_recon"].contains(&name),
+                            ),
                     ),
                 );
             }
@@ -229,10 +231,8 @@ impl Server {
                     if self.only_site.is_some() {
                         return Err(AppError::api("bad_request", 400));
                     }
-                    let max_bundles = args
-                        .get("max_bundles")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(8) as usize;
+                    let max_bundles =
+                        args.get("max_bundles").and_then(Value::as_u64).unwrap_or(8) as usize;
                     let (report, _) = self
                         .core
                         .recon(get("site"), get("url"), max_bundles.min(24))

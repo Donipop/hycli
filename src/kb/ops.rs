@@ -87,8 +87,13 @@ pub struct AttemptInput {
 
 impl Kb {
     pub fn open(path: &Path) -> AppResult<Self> {
-        let conn = Connection::open(path)
-            .map_err(|e| apperr::runtime(e, "Failed to open knowledge base", "Check path and permissions."))?;
+        let conn = Connection::open(path).map_err(|e| {
+            apperr::runtime(
+                e,
+                "Failed to open knowledge base",
+                "Check path and permissions.",
+            )
+        })?;
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "foreign_keys", "ON").ok();
         conn.busy_timeout(std::time::Duration::from_millis(5000))
@@ -487,8 +492,13 @@ impl Kb {
         kind: &str,
         path: &str,
     ) -> AppResult<(i64, String)> {
-        let bytes = std::fs::read(path)
-            .map_err(|e| apperr::runtime(e, format!("Artifact file not found: {path}"), "Check the file path."))?;
+        let bytes = std::fs::read(path).map_err(|e| {
+            apperr::runtime(
+                e,
+                format!("Artifact file not found: {path}"),
+                "Check the file path.",
+            )
+        })?;
         let mut h = Sha256::new();
         h.update(&bytes);
         let sum = h

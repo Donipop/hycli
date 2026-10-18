@@ -91,8 +91,10 @@ fn fsck_catches() {
             ..Default::default()
         })
         .unwrap();
-    kb.add_finding("s", "finding without evidence", 0.8, &[]).unwrap();
-    kb.add_finding("s", "finding with evidence", 0.9, &[aid]).unwrap();
+    kb.add_finding("s", "finding without evidence", 0.8, &[])
+        .unwrap();
+    kb.add_finding("s", "finding with evidence", 0.9, &[aid])
+        .unwrap();
     let issues = kb.fsck("s").unwrap();
     let kinds: Vec<&str> = issues.iter().map(|i| i.kind.as_str()).collect();
     assert!(kinds.contains(&"attempt-less-target"));

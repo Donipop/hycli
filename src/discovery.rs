@@ -493,15 +493,16 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
     let normalized = concat_re
         .replace_all(text, |caps: &regex::Captures<'_>| {
             let raw_ident = caps[1].rsplit('.').next().unwrap_or("id");
-            let ident = if matches!(raw_ident, "String" | "Number" | "encodeURIComponent" | "this")
-            {
+            let ident = if matches!(
+                raw_ident,
+                "String" | "Number" | "encodeURIComponent" | "this"
+            ) {
                 "id".to_string()
             } else {
                 raw_ident.to_ascii_lowercase()
             };
-            let has_trailing_quote = caps[0].ends_with('"')
-                || caps[0].ends_with('\'')
-                || caps[0].ends_with('`');
+            let has_trailing_quote =
+                caps[0].ends_with('"') || caps[0].ends_with('\'') || caps[0].ends_with('`');
             if has_trailing_quote {
                 format!("{{{ident}}}")
             } else {
@@ -698,8 +699,8 @@ fn bundle_priority(url: &str) -> usize {
 pub fn bundle_urls(base: &Url, html: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
-    let script_re =
-        regex::Regex::new(r#"(?is)<script\b[^>]*\bsrc\s*=\s*["']([^"'<>\s]+)["']"#).expect("constant");
+    let script_re = regex::Regex::new(r#"(?is)<script\b[^>]*\bsrc\s*=\s*["']([^"'<>\s]+)["']"#)
+        .expect("constant");
     let link_re = regex::Regex::new(
         r#"(?is)<link\b[^>]*\b(?:rel\s*=\s*["']modulepreload["']|as\s*=\s*["']script["'])[^>]*\bhref\s*=\s*["']([^"'<>\s]+)["']|<link\b[^>]*\bhref\s*=\s*["']([^"'<>\s]+)["'][^>]*\b(?:rel\s*=\s*["']modulepreload["']|as\s*=\s*["']script["'])"#,
     )
@@ -804,14 +805,7 @@ pub fn bundle_api_bases(base: &Url, text: &str) -> BTreeSet<String> {
             }
             let host = url.host_str().unwrap_or("").to_ascii_lowercase();
             if [
-                "images.",
-                "img.",
-                "cdn.",
-                "assets.",
-                "static.",
-                "media.",
-                "cache.",
-                "fonts.",
+                "images.", "img.", "cdn.", "assets.", "static.", "media.", "cache.", "fonts.",
             ]
             .iter()
             .any(|p| host.starts_with(p))

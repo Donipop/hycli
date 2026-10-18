@@ -302,7 +302,12 @@ async fn installed_cli_help_inputs_accounts_and_failures_are_real_command_contra
     );
     let validated = ok(cli(
         &root,
-        &["--allow-local", "spec", "validate", draft_path.to_str().unwrap()],
+        &[
+            "--allow-local",
+            "spec",
+            "validate",
+            draft_path.to_str().unwrap(),
+        ],
     )
     .await);
     assert_eq!(validated["status"], "ok");

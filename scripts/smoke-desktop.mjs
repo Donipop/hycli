@@ -14,10 +14,11 @@ const data=path.join(directory,'data with spaces'),cwd=path.join(directory,'outs
 const env={...process.env,HYCLI_DATA_DIR:data,HYCLI_KB:path.join(data,'kb.db'),HYCLI_SPECS:path.join(data,'specs')};
 // Do not use a real browser or user profiles for lifecycle checks.
 function run(args,options={}){return new Promise((resolve,reject)=>{
- const child=spawn(options.executable||executable,args,{cwd,env,stdio:['ignore','pipe','pipe'],...options});let stdout='',stderr='';
+ const child=spawn(options.executable||executable,args,{cwd,env,stdio:['ignore','pipe','pipe'],...options});let stdout='',stderr='',settled=false;
+ const finish=code=>{if(settled)return;settled=true;clearTimeout(timer);child.stdout.destroy();child.stderr.destroy();code===0?resolve(stdout):reject(Error(`${args.join(' ')} (${code}): ${stderr}${stdout}`));};
  child.stdout.on('data',chunk=>stdout+=chunk);child.stderr.on('data',chunk=>stderr+=chunk);child.on('error',reject);
  const timer=setTimeout(()=>{child.kill();reject(Error('Command timed out: '+args.join(' ')));},90000);
- child.once('close',code=>{clearTimeout(timer);code===0?resolve(stdout):reject(Error(`${args.join(' ')} (${code}): ${stderr}${stdout}`));});
+ child.once('close',finish);child.once('exit',code=>setTimeout(()=>finish(code),250));
 });}
 const json=async args=>JSON.parse(await run(args));
 const blocker=net.createServer(socket=>socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',()=>socket.destroy()));

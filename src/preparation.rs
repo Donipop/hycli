@@ -651,11 +651,12 @@ impl Runtime {
                     if round == 0 && raw == job.url {
                         icon_candidates = crate::site_images::candidates(&base, &text);
                         let chosen_scripts: Vec<_> = script_links.iter().take(2).cloned().collect();
-                        let published: Vec<_> = crate::discovery::ranked(links.iter().chain(found.iter()))
-                            .into_iter()
-                            .filter(|u| !chosen_scripts.contains(u))
-                            .take(3)
-                            .collect();
+                        let published: Vec<_> =
+                            crate::discovery::ranked(links.iter().chain(found.iter()))
+                                .into_iter()
+                                .filter(|u| !chosen_scripts.contains(u))
+                                .take(3)
+                                .collect();
                         reads.extend(published);
                         reads.extend(chosen_scripts);
                     }
@@ -666,7 +667,8 @@ impl Runtime {
                     let mut content = if is_js {
                         json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"api_bases":crate::discovery::bundle_api_bases(&base, &text)})
                     } else {
-                        let ssr_keys: Vec<_> = crate::html::extract_ssr_map(&text).into_keys().collect();
+                        let ssr_keys: Vec<_> =
+                            crate::html::extract_ssr_map(&text).into_keys().collect();
                         json!({"text":vis_text.chars().take(32_000).collect::<String>(),"documented_routes":doc_routes,"ssr_keys":ssr_keys,"ssr_payloads":crate::html::ssr_payloads(&text),"forms":crate::html::forms(&text),"html_structure":crate::html::structure(&text),"observed_paths":paths.into_iter().take(120).collect::<Vec<_>>()})
                     };
                     let secrets = if account_id.is_empty() {
@@ -693,14 +695,13 @@ impl Runtime {
                 self.job_progress(&job.id, "connect", 1)?;
                 // Promote newly discovered high-priority documentation links without evicting Round 0 JS bundles.
                 if round == 0 && round_reads > 1 && round_reads < round_limit {
-                    let doc_candidates: Vec<_> = crate::discovery::ranked(
-                        links
-                            .iter()
-                            .filter(|url| !seen.contains(*url) && crate::discovery::documentation_url(url)),
-                    )
-                    .into_iter()
-                    .take(2)
-                    .collect();
+                    let doc_candidates: Vec<_> =
+                        crate::discovery::ranked(links.iter().filter(|url| {
+                            !seen.contains(*url) && crate::discovery::documentation_url(url)
+                        }))
+                        .into_iter()
+                        .take(2)
+                        .collect();
                     for doc_url in doc_candidates.into_iter().rev() {
                         if !reads.contains(&doc_url) {
                             reads.push_front(doc_url);
@@ -1361,16 +1362,14 @@ impl Runtime {
                         if read_attempts.contains(&attempt_key) {
                             continue;
                         }
-                        let account = if runtime::same_site_url(
-                            proposed.operation_base(operation),
-                            &job.url,
-                        )
-                        .unwrap_or(false)
-                        {
-                            account_id.as_str()
-                        } else {
-                            ""
-                        };
+                        let account =
+                            if runtime::same_site_url(proposed.operation_base(operation), &job.url)
+                                .unwrap_or(false)
+                            {
+                                account_id.as_str()
+                            } else {
+                                ""
+                            };
                         // Missing credentials are an access requirement, not a failed test request.
                         if self
                             .request(proposed, &operation.name, inputs.clone(), Some(account))
@@ -2497,7 +2496,11 @@ mod merge_tests {
         .unwrap();
         assert_eq!(plan.self_qa.len(), 1);
         redact_self_qa(&mut plan.self_qa);
-        assert!(!plan.self_qa[0].answer.contains("sk-secrettoken1234567890abcdef"));
+        assert!(
+            !plan.self_qa[0]
+                .answer
+                .contains("sk-secrettoken1234567890abcdef")
+        );
         assert_eq!(plan.self_qa[0].action_taken, "Set ssr_json to auto");
         let review = plan.workflow_review.unwrap();
         assert_eq!(review.self_qa.len(), 1);

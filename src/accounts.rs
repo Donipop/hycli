@@ -187,9 +187,7 @@ impl Credential {
             return Ok(value);
         }
         if let Some(storage_spec) = value_from.strip_prefix("storage:") {
-            let (key, pointer) = storage_spec
-                .split_once('#')
-                .unwrap_or((storage_spec, ""));
+            let (key, pointer) = storage_spec.split_once('#').unwrap_or((storage_spec, ""));
             let raw = self
                 .local_storage
                 .get(key)
