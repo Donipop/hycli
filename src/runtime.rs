@@ -636,9 +636,10 @@ impl Runtime {
                 .fetch_rendered(&credential, &url, &request.account_id)
                 .await
         } else {
-            self.network
+            let fetched = self
+                .network
                 .fetch(Request {
-                    url,
+                    url: url.clone(),
                     method: op.method.clone(),
                     headers,
                     body,
@@ -649,7 +650,52 @@ impl Runtime {
                     follow_redirects: effect == Effect::Read,
                     tls_profile: sp.defaults.tls_profile.clone(),
                 })
-                .await
+                .await;
+            match fetched {
+                Ok(r)
+                    if effect == Effect::Read
+                        && op.method == "GET"
+                        && matches!(
+                            r.defense.as_str(),
+                            "cloudflare" | "bot-manager" | "captcha"
+                        )
+                        && !op.matches_response(&r)
+                        && !url.starts_with("http://127.0.0.1")
+                        && !url.starts_with("http://localhost") =>
+                {
+                    let req_origin = origin(&url)?;
+                    let _ = self
+                        .policy
+                        .resume_auth(&format!("{req_origin}|{}", request.account_id));
+                    let credential = if request.account_id.is_empty() {
+                        crate::accounts::Credential {
+                            origin: req_origin,
+                            ..Default::default()
+                        }
+                    } else {
+                        self.credential(&request.account_id).unwrap_or_else(|_| {
+                            crate::accounts::Credential {
+                                origin: req_origin,
+                                ..Default::default()
+                            }
+                        })
+                    };
+                    if let Ok(rendered) = self
+                        .network
+                        .fetch_rendered(&credential, &url, &request.account_id)
+                        .await
+                    {
+                        if rendered.successful() {
+                            Ok(rendered)
+                        } else {
+                            Ok(r)
+                        }
+                    } else {
+                        Ok(r)
+                    }
+                }
+                other => other,
+            }
         };
         let response = match response {
             Ok(r) => r,
@@ -718,7 +764,7 @@ impl Runtime {
             }
             if let Some(a) = d.accounts.get_mut(&request.account_id) {
                 a.checked_at = util::now();
-                if response.status == 401 || response.status == 403 {
+                if response.status == 401 {
                     a.status = "expired".into();
                 } else if response.successful()
                     && accounts::identity_endpoint(
@@ -827,12 +873,7 @@ impl Runtime {
                         Some(h.to_string())
                     }
                 } else if let Some(cookie_name) = expr.strip_prefix("cookie:") {
-                    let from_set_cookie = r
-                        .header("set-cookie")
-                        .split(';')
-                        .next()
-                        .and_then(|pair| pair.trim().strip_prefix(&format!("{cookie_name}=")))
-                        .map(|v| v.to_string());
+                    let from_set_cookie = r.cookie_value(cookie_name);
                     from_set_cookie.or_else(|| {
                         if account_id.is_empty() {
                             None
@@ -1116,7 +1157,8 @@ impl Runtime {
         if !account.is_empty() {
             headers.extend(self.credential(account)?.request_headers(url)?);
         }
-        self.network
+        let r = self
+            .network
             .fetch(Request {
                 url: url.into(),
                 method: "GET".into(),
@@ -1129,7 +1171,32 @@ impl Runtime {
                 follow_redirects: true,
                 tls_profile: tls_profile.into(),
             })
-            .await
+            .await?;
+        if matches!(r.defense.as_str(), "cloudflare" | "bot-manager" | "captcha")
+            && !url.starts_with("http://127.0.0.1")
+            && !url.starts_with("http://localhost")
+        {
+            let req_origin = parsed.origin().ascii_serialization();
+            let _ = self.policy.resume_auth(&format!("{req_origin}|{account}"));
+            let credential = if account.is_empty() {
+                crate::accounts::Credential {
+                    origin: req_origin,
+                    ..Default::default()
+                }
+            } else {
+                self.credential(account)
+                    .unwrap_or_else(|_| crate::accounts::Credential {
+                        origin: req_origin,
+                        ..Default::default()
+                    })
+            };
+            if let Ok(rendered) = self.network.fetch_rendered(&credential, url, account).await {
+                if rendered.successful() {
+                    return Ok(rendered);
+                }
+            }
+        }
+        Ok(r)
     }
     pub async fn probe(&self, site: &str, url: &str, profile: &str) -> AppResult<(Value, i64)> {
         let r = self.read_page_profile(url, "", profile).await?;

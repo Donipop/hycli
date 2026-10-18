@@ -1989,3 +1989,159 @@ async fn desktop_shutdown_preserves_active_work_and_rejects_later_requests() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn resilience_against_false_403_lockout_multi_cookie_preflight_and_embedded_data() {
+    let html_map = crate::html::extract_ssr_map(
+        r#"<html><body><script type="application/json" data-target="react-app.embeddedData">{"payload":{"plan":"free","limit":2000}}</script></body></html>"#,
+    );
+    assert_eq!(
+        html_map["react-app.embeddedData"]["payload"]["plan"],
+        "free"
+    );
+
+    let routes = crate::discovery::bundle_routes(
+        r#"fetch("/_api/blogEntries;blogId=123&limit=20");"#,
+    );
+    assert!(routes.contains(&("GET".into(), "/_api/blogEntries".into())));
+
+    let (base, server) = host(
+        Router::new()
+            .route(
+                "/api/forbidden-subresource",
+                get(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        [
+                            ("server", "cloudflare"),
+                            ("cf-ray", "synthetic-ray"),
+                            ("content-type", "application/json"),
+                        ],
+                        Json(json!({"error":"insufficient_scope"})),
+                    )
+                }),
+            )
+            .route(
+                "/boot",
+                get(|| async {
+                    let mut headers = HeaderMap::new();
+                    headers.append(
+                        axum::http::header::SET_COOKIE,
+                        "theme=dark; Path=/".parse().unwrap(),
+                    );
+                    headers.append(
+                        axum::http::header::SET_COOKIE,
+                        "xsrf_rot=rotated-second-cookie; Path=/".parse().unwrap(),
+                    );
+                    (headers, axum::response::Html("<html>ok</html>"))
+                }),
+            )
+            .route(
+                "/api/items",
+                get(|headers: HeaderMap| async move {
+                    assert_eq!(
+                        headers.get("sec-fetch-mode").and_then(|v| v.to_str().ok()),
+                        Some("cors")
+                    );
+                    assert!(headers.get("referer").is_some());
+                    assert_eq!(
+                        headers.get("x-xsrf-token").and_then(|v| v.to_str().ok()),
+                        Some("rotated-second-cookie")
+                    );
+                    assert_eq!(
+                        headers.get("authorization").and_then(|v| v.to_str().ok()),
+                        Some("Bearer nested-jwt-value")
+                    );
+                    Json(json!({"items":[{"id":"ok"}]}))
+                }),
+            ),
+    )
+    .await;
+
+    let core = runtime();
+    let sp = spec::parse(
+        json!({
+            "spec_version": 2,
+            "site": { "name": "resilience", "base_url": base },
+            "auth": [
+                {
+                    "name": "nested-jwt",
+                    "kind": "derived",
+                    "header": "Authorization",
+                    "prefix": "Bearer ",
+                    "value_from": "storage:persist:auth#/state/token"
+                }
+            ],
+            "operations": [
+                {
+                    "name": "forbidden-check",
+                    "method": "GET",
+                    "path": "/api/forbidden-subresource",
+                    "auth": "nested-jwt",
+                    "effect": "read",
+                    "evidence": "Synthetic forbidden endpoint"
+                },
+                {
+                    "name": "list-items",
+                    "method": "GET",
+                    "path": "/api/items",
+                    "auth": "nested-jwt",
+                    "effect": "read",
+                    "evidence": "Synthetic protected items",
+                    "preflight": [
+                        {
+                            "name": "boot",
+                            "path": "/boot",
+                            "extract": {
+                                "xsrf": "cookie:xsrf_rot"
+                            }
+                        }
+                    ],
+                    "headers": {
+                        "x-xsrf-token": "{{step.boot.xsrf}}"
+                    },
+                    "response": {
+                        "format": "json",
+                        "required_pointers": ["/items/0/id"]
+                    }
+                }
+            ]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    core.install(&sp).unwrap();
+
+    let cred = crate::accounts::Credential {
+        origin: base.clone(),
+        local_storage: BTreeMap::from([(
+            "persist:auth".into(),
+            serde_json::to_string(&"{\"state\":{\"token\":\"nested-jwt-value\"}}").unwrap(),
+        )]),
+        ..Default::default()
+    };
+    let acct = core
+        .register_browser_credential("resilience", cred, "Chromium", "Default")
+        .unwrap();
+
+    // 1. Hitting an application 403 behind Cloudflare headers must not brick the gate or expire the account.
+    let first_err = core
+        .run_op_for_account(&sp, "forbidden-check", &BTreeMap::new(), Some(&acct.id))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(first_err.http_status, 403);
+    assert_eq!(
+        core.state.read().unwrap().accounts[&acct.id].status,
+        "connected"
+    );
+
+    // 2. Subsequent operation with multi-Set-Cookie preflight and double-encoded storage token succeeds.
+    let (second_res, _) = core
+        .run_op_for_account(&sp, "list-items", &BTreeMap::new(), Some(&acct.id))
+        .await
+        .unwrap();
+    assert_eq!(second_res.status, 200);
+    server.abort();
+}

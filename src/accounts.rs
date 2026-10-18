@@ -202,10 +202,14 @@ impl Credential {
                     _ => raw,
                 }
             } else {
-                let decoded: Value =
+                let mut decoded: Value =
                     serde_json::from_str(&raw).map_err(|_| AppError::api("data_invalid", 400))?;
-                decoded
-                    .pointer(pointer)
+                if let Value::String(inner) = &decoded {
+                    if let Ok(nested) = serde_json::from_str::<Value>(inner) {
+                        decoded = nested;
+                    }
+                }
+                crate::html::resolve_pointer(&decoded, pointer)
                     .and_then(|v| match v {
                         Value::String(s) => Some(s.clone()),
                         Value::Number(n) => Some(n.to_string()),
@@ -327,11 +331,17 @@ pub fn normalize(cookies: Vec<Cookie>, url: &url::Url) -> AppResult<Vec<Cookie>>
     let host = url
         .host_str()
         .ok_or_else(|| AppError::api("bad_url", 400))?;
+    let host_reg = net::registrable_domain(host);
     let mut valid = Vec::new();
     for mut cookie in cookies {
         let domain = cookie.domain.trim_start_matches('.').to_ascii_lowercase();
+        let same_reg = host_reg
+            .as_ref()
+            .zip(net::registrable_domain(&domain))
+            .is_some_and(|(a, b)| *a == b);
         if domain.is_empty()
             || !(host == domain
+                || same_reg
                 || (!cookie.host_only
                     && domain.contains('.')
                     && host.ends_with(&format!(".{domain}"))))

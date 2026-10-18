@@ -50,6 +50,18 @@ impl Response {
             .map(|(_, v)| v.as_str())
             .unwrap_or("")
     }
+    pub fn cookie_value(&self, name: &str) -> Option<String> {
+        let prefix = format!("{name}=");
+        self.headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
+            .find_map(|(_, v)| {
+                v.split(';')
+                    .next()
+                    .and_then(|pair| pair.trim().strip_prefix(&prefix))
+                    .map(str::to_owned)
+            })
+    }
     pub fn json(&self) -> Option<Value> {
         serde_json::from_slice(&self.bytes).ok()
     }
@@ -176,6 +188,28 @@ impl Network {
                 input.tls_profile.as_str(),
                 "go" | "chrome" | "browser" | "stealth" | "default" | "standard" | ""
             ) {
+                let path_lower = target.path().to_ascii_lowercase();
+                let is_mutation = !matches!(input.method.as_str(), "GET" | "HEAD" | "OPTIONS");
+                let has_json_hint = input.body.is_some()
+                    || path_lower.contains("/api/")
+                    || path_lower.starts_with("/v1/")
+                    || path_lower.starts_with("/v2/")
+                    || path_lower.starts_with("/v3/")
+                    || path_lower.contains("graphql")
+                    || path_lower.ends_with(".json")
+                    || input.headers.iter().any(|(k, _)| {
+                        k.eq_ignore_ascii_case("content-type")
+                            || k.eq_ignore_ascii_case("x-requested-with")
+                            || k.eq_ignore_ascii_case("authorization")
+                    });
+                headers.insert(
+                    HeaderName::from_static("accept"),
+                    HeaderValue::from_static(if has_json_hint {
+                        "application/json, text/plain, */*"
+                    } else {
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                    }),
+                );
                 headers.insert(
                     HeaderName::from_static("accept-language"),
                     HeaderValue::from_static("en-US,en;q=0.9,ko;q=0.8"),
@@ -194,6 +228,50 @@ impl Network {
                     HeaderName::from_static("sec-ch-ua-platform"),
                     HeaderValue::from_static("\"Linux\""),
                 );
+                if has_json_hint || is_mutation {
+                    headers.insert(
+                        HeaderName::from_static("sec-fetch-site"),
+                        HeaderValue::from_static("same-origin"),
+                    );
+                    headers.insert(
+                        HeaderName::from_static("sec-fetch-mode"),
+                        HeaderValue::from_static("cors"),
+                    );
+                    headers.insert(
+                        HeaderName::from_static("sec-fetch-dest"),
+                        HeaderValue::from_static("empty"),
+                    );
+                } else {
+                    headers.insert(
+                        HeaderName::from_static("sec-fetch-site"),
+                        HeaderValue::from_static(if redirects > 0 {
+                            "same-origin"
+                        } else {
+                            "none"
+                        }),
+                    );
+                    headers.insert(
+                        HeaderName::from_static("sec-fetch-mode"),
+                        HeaderValue::from_static("navigate"),
+                    );
+                    headers.insert(
+                        HeaderName::from_static("sec-fetch-dest"),
+                        HeaderValue::from_static("document"),
+                    );
+                    headers.insert(
+                        HeaderName::from_static("upgrade-insecure-requests"),
+                        HeaderValue::from_static("1"),
+                    );
+                }
+                let origin_str = target.origin().ascii_serialization();
+                if (has_json_hint || is_mutation || !input.account_id.is_empty())
+                    && let Ok(ref_val) = HeaderValue::from_str(&format!("{origin_str}/"))
+                {
+                    headers.insert(HeaderName::from_static("referer"), ref_val);
+                }
+                if is_mutation && let Ok(orig_val) = HeaderValue::from_str(&origin_str) {
+                    headers.insert(HeaderName::from_static("origin"), orig_val);
+                }
             }
             for (key, value) in &input.headers {
                 let name = HeaderName::from_bytes(key.as_bytes())
@@ -254,7 +332,7 @@ impl Network {
                 .is_some_and(|length| length > input.limit as u64)
             {
                 self.policy
-                    .release(&scope, &token, gate_status, retry_after, status == 403)?;
+                    .release(&scope, &token, gate_status, retry_after, false)?;
                 lease.released = true;
                 self.policy.release(
                     &host_scope,
@@ -272,7 +350,7 @@ impl Network {
                 let chunk = chunk.map_err(|_| AppError::api("request_failed", 502))?;
                 if bytes.len() + chunk.len() > input.limit {
                     self.policy
-                        .release(&scope, &token, gate_status, retry_after, status == 403)?;
+                        .release(&scope, &token, gate_status, retry_after, false)?;
                     lease.released = true;
                     self.policy.release(
                         &host_scope,

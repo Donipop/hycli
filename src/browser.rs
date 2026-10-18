@@ -29,6 +29,7 @@ pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
         .chrome_executable(&engine.executable)
         .window_size(1280, 800)
         .arg("--no-first-run")
+        .arg("--disable-blink-features=AutomationControlled")
         .build()
         .map_err(|e| {
             apperr::runtime_msg(

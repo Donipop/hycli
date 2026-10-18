@@ -63,6 +63,15 @@ impl Observation {
             .map(|(_, v)| v.as_str())
             .unwrap_or("")
     }
+
+    fn is_json_payload(&self) -> bool {
+        let ct = self.header("content-type").to_ascii_lowercase();
+        let trimmed = self.body_snippet.trim_start();
+        ct.contains("application/json")
+            || ct.contains("+json")
+            || trimmed.starts_with('{')
+            || trimmed.starts_with('[')
+    }
 }
 
 pub fn classify(o: &Observation) -> (Class, &'static str) {
@@ -70,11 +79,32 @@ pub fn classify(o: &Observation) -> (Class, &'static str) {
         return (Class::RateLimit, "status-429/retry-after");
     }
     if o.status_code < 400 {
-        if body_hit(
-            o,
-            &["hcaptcha.com", "recaptcha/api", "geetest", "arkoselabs"],
-        ) {
-            return (Class::Captcha, "captcha-vendor-body-2xx");
+        if !o.is_json_payload()
+            && o.body_snippet.len() < 32_768
+            && body_hit(
+                o,
+                &[
+                    "class=\"g-recaptcha\"",
+                    "class=\"h-captcha\"",
+                    "class=\"cf-turnstile\"",
+                    "data-sitekey=",
+                    "captcha-delivery.com",
+                    "arkoselabs.com",
+                ],
+            )
+            && body_hit(
+                o,
+                &[
+                    "<title>just a moment",
+                    "verify you are human",
+                    "security check",
+                    "complete the security check",
+                    "pardon our interruption",
+                    "attention required",
+                ],
+            )
+        {
+            return (Class::Captcha, "captcha-interstitial-2xx");
         }
         return (Class::None, "");
     }
@@ -88,11 +118,29 @@ pub fn classify(o: &Observation) -> (Class, &'static str) {
             "cf-chl",
             "challenge-platform",
             "/turnstile/",
+            "attention required! | cloudflare",
         ],
     ) {
         return (Class::Cloudflare, "challenge-body");
     }
-    if matches!(o.status_code, 401 | 404 | 405 | 410 | 422) {
+    if body_hit(
+        o,
+        &[
+            "hcaptcha.com",
+            "recaptcha/api",
+            "geetest",
+            "arkoselabs",
+            "\"captcha_key\"",
+            "\"captcha_sitekey\"",
+            "captcha-delivery.com",
+        ],
+    ) {
+        return (Class::Captcha, "captcha-vendor-body");
+    }
+    if matches!(o.status_code, 400 | 401 | 404 | 405 | 409 | 410 | 422) {
+        return (Class::None, "");
+    }
+    if o.is_json_payload() {
         return (Class::None, "");
     }
     if !o.header("cf-ray").is_empty() || o.header("server") == "cloudflare" {
@@ -103,12 +151,6 @@ pub fn classify(o: &Observation) -> (Class, &'static str) {
         || !o.header("akamai-ref").is_empty()
     {
         return (Class::BotManager, "akamai-headers");
-    }
-    if body_hit(
-        o,
-        &["hcaptcha.com", "recaptcha/api", "geetest", "arkoselabs"],
-    ) {
-        return (Class::Captcha, "captcha-vendor-body");
     }
     if o.status_code == 403 || o.status_code == 503 {
         return (Class::Unknown, "403/503-no-signal");
@@ -126,23 +168,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cdn_presence_on_200_is_not_blocking() {
+    fn cdn_presence_on_200_and_json_403_is_not_blocking() {
         let (cls, _) = classify(&Observation {
             status_code: 200,
             headers: vec![
                 ("server".into(), "cloudflare".into()),
                 ("cf-ray".into(), "x".into()),
             ],
-            body_snippet: String::new(),
+            body_snippet: "Article discussing hcaptcha.com and recaptcha/api in prose".into(),
         });
         assert_eq!(cls, Class::None);
-        for status in [401, 404, 405, 410, 422] {
+        for status in [401, 403, 404, 405, 410, 422] {
             assert_eq!(
                 classify(&Observation {
                     status_code: status,
                     headers: vec![
                         ("server".into(), "cloudflare".into()),
-                        ("cf-ray".into(), "synthetic".into())
+                        ("cf-ray".into(), "synthetic".into()),
+                        ("content-type".into(), "application/json".into()),
                     ],
                     body_snippet: "{\"error\":\"not available\"}".into()
                 })
@@ -153,13 +196,20 @@ mod tests {
     }
 
     #[test]
-    fn challenge_body_is_cloudflare() {
+    fn challenge_body_and_json_captcha_key_are_detected() {
         let (cls, _) = classify(&Observation {
             status_code: 403,
             headers: vec![("server".into(), "cloudflare".into())],
             body_snippet: "Just a moment...".into(),
         });
         assert_eq!(cls, Class::Cloudflare);
+
+        let (cls, _) = classify(&Observation {
+            status_code: 400,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body_snippet: "{\"captcha_key\":[\"You need to update your app\"],\"captcha_sitekey\":\"a9b5fb07\"}".into(),
+        });
+        assert_eq!(cls, Class::Captcha);
     }
 
     #[test]

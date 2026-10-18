@@ -111,10 +111,14 @@ impl ConnectionRecipe {
                     _ => raw,
                 }
             } else {
-                let decoded: Value =
+                let mut decoded: Value =
                     serde_json::from_str(&raw).map_err(|_| AppError::api("data_invalid", 400))?;
-                decoded
-                    .pointer(&rule.json_pointer)
+                if let Value::String(inner) = &decoded {
+                    if let Ok(nested) = serde_json::from_str::<Value>(inner) {
+                        decoded = nested;
+                    }
+                }
+                crate::html::resolve_pointer(&decoded, &rule.json_pointer)
                     .and_then(scalar)
                     .ok_or_else(|| AppError::api("auth_required", 401))?
             };

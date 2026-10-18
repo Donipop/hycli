@@ -398,6 +398,9 @@ fn normalize_bundle_path(raw: &str) -> Option<String> {
     if let Some((before_q, _)) = cleaned.split_once('?') {
         cleaned = before_q.to_owned();
     }
+    if let Some((before_semi, _)) = cleaned.split_once(';') {
+        cleaned = before_semi.to_owned();
+    }
     if let Some((before_hash, _)) = cleaned.split_once('#') {
         cleaned = before_hash.to_owned();
     }
@@ -564,9 +567,9 @@ pub fn bundle_routes(text: &str) -> BTreeSet<(String, String)> {
         }
     }
 
-    // 4. Match explicit API path string literals: `/api/...`, `/v1/...`, `/v2/...`, `/v3/...`, `/graphql`, `/gql`, `/_next/data/...`
+    // 4. Match explicit API path string literals: `/api/...`, `/_api/...`, `/v1/...`, `/v2/...`, `/v3/...`, `/graphql`, `/gql`, `/_next/data/...`
     let api_lit_re = regex::Regex::new(
-        r#"["'`](/(?:api(?:/v[0-9]+)?|v[1-9][0-9]*|graphql|gql|rest|_next/data)(?:/[A-Za-z0-9_@.{}:$-]+)*)["'`]"#,
+        r#"["'`](/(?:_?api(?:/v[0-9]+)?|v[1-9][0-9]*|graphql|gql|rest|_next/data)(?:/[A-Za-z0-9_@.{}:$;=-]+)*)["'`]"#,
     )
     .expect("constant");
     for m in api_lit_re.captures_iter(&normalized).take(1500) {

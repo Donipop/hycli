@@ -78,7 +78,8 @@ pub async fn capture_with_engine(
         .user_data_dir(&snapshot.0)
         .arg("--no-first-run")
         .arg("--disable-background-networking")
-        .arg("--disable-dev-shm-usage");
+        .arg("--disable-dev-shm-usage")
+        .arg("--disable-blink-features=AutomationControlled");
     let config = builder.build().map_err(unavailable)?;
     let (mut browser, mut handler) =
         tokio::time::timeout(Duration::from_secs(35), Browser::launch(config))
@@ -186,7 +187,11 @@ async fn observe(
     }
     let origin = serde_json::to_string(&credential.origin)?;
     let storage = serde_json::to_string(&credential.local_storage)?;
-    page.evaluate_on_new_document(format!("if(location.origin==={origin}){{for(const [key,value] of Object.entries({storage})){{localStorage.setItem(key,value)}}}}")).await.map_err(unavailable)?;
+    page.evaluate_on_new_document(format!(
+        "try{{Object.defineProperty(navigator,'webdriver',{{get:()=>undefined}})}}catch(_){{}}if(location.origin==={origin}){{for(const [key,value] of Object.entries({storage})){{localStorage.setItem(key,value)}}}}"
+    ))
+    .await
+    .map_err(unavailable)?;
     page.execute(network::EnableParams::default())
         .await
         .map_err(unavailable)?;
@@ -336,9 +341,22 @@ async fn observe(
     });
     // Navigation only: never click a control or submit a form to discover a session.
     let _ = tokio::time::timeout(Duration::from_secs(18), page.goto(entry)).await;
-    for _ in 0..24 {
+    let anonymous = credential.cookies.is_empty() && credential.local_storage.is_empty();
+    for tick in 0..24 {
         if result.lock().is_ok_and(|c| c.identity.is_some()) {
             break;
+        }
+        if anonymous && tick >= 2 && result.lock().is_ok_and(|c| (200..400).contains(&c.status)) {
+            if let Ok(dom) = page.content().await {
+                let lower = dom.to_ascii_lowercase();
+                if dom.len() > 256
+                    && !lower.contains("just a moment")
+                    && !lower.contains("cf-chl")
+                    && !lower.contains("challenge-platform")
+                {
+                    break;
+                }
+            }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
