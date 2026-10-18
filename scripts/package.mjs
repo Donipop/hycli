@@ -58,6 +58,8 @@ try{
    await copy('dist/'+filename,filename);await fs.chmod(path.join(content,filename),0o755);
   }
   if(build.platform==='linux'){await copy('packaging/install-linux.sh','install.sh');await fs.chmod(path.join(content,'install.sh'),0o755);await copy('packaging/icons/hycli.png','hycli.png');}
+  else if(build.platform==='darwin'){await copy('packaging/install-macos.sh','install.sh');await fs.chmod(path.join(content,'install.sh'),0o755);await copy('packaging/icons/hycli.png','hycli.png');}
+  else if(build.platform==='win32'){await copy('packaging/install-windows.ps1','install.ps1');await copy('packaging/icons/hycli.ico','hycli.ico');}
   for(const file of ['LICENSE','agent/AGENTS.md','agent/CLAUDE.md','docs/SITESPEC.md','docs/BUILD.md','docs/RELEASING.md'])await copy(file);
   await copy('skills');await copy('dist/README.md','README.md');
  }

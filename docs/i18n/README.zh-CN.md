@@ -3,13 +3,16 @@
 </p>
 
 <p align="center">
-  <strong>自动化任何网站。</strong>
+  <strong>将任何网站转化为可供 AI 智能体和终端直接使用的带类型 CLI 与 MCP 工具。</strong><br/>
+  <sub>直接复用真实浏览器登录态，无需担心向大模型泄露 Cookie 或触发反爬拦截，轻松实现读取、搜索、创建、编辑与自动化。</sub>
 </p>
 
 <p align="center">
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">下载 (Windows · macOS · Linux)</a> ·
+  <a href="#try-it-in-30-seconds">30 秒快速体验</a> ·
   <a href="#get-started">开始使用</a> ·
   <a href="#what-your-ai-can-do">AI 能做什么</a> ·
-  <a href="#ai-connections">AI 连接</a> ·
+  <a href="#common-concerns">常见顾虑与解决方式</a> ·
   <a href="#use-hycli-with-your-ai">与 AI 配合使用</a>
 </p>
 
@@ -20,187 +23,205 @@
 
 </details>
 
-添加一个网站，Hycli 就会准备好 AI 可用的操作，并解释每项操作的用途。通过本地仪表盘，集中管理网站、登录信息和执行结果。
-
-| 连接 | 准备 | 使用 |
-| --- | --- | --- |
-| 添加网站并选择 AI。 | 查看进度和可用操作。 | 执行操作或将其交给 AI 助手。 |
+只需提供任意网站地址和你的目标。三个 AI 工作单元会分析文档、前端 JS 包和真实浏览器网络流量，构建包含读取与写入操作的带类型 CLI 和 MCP 工具集——且在准备过程中绝不会向你的真实账号发送任何写入请求。
 
 <p align="center">
   <img src="../../docs/images/dashboard.png" alt="Hycli 仪表盘，显示网站卡片、可用操作和任务进度。" width="100%" />
 </p>
-<p align="center"><sub>包含示例工具和账号的工作区示例。</sub></p>
+<p align="center"><sub>在一个本地仪表盘和 CLI 中集中管理你的网站、账号、写入权限与执行结果。</sub></p>
+
+<a id="try-it-in-30-seconds"></a>
+## 30 秒快速体验
+
+```sh
+# 1. 指定任意网站并描述你的目标（同时发掘读取与写入操作，准备期间零真实写入）
+hycli prepare https://your-website.example --intent "搜索帖子、保存草稿并发布新文章"
+
+# 2. 一览所有已准备好的读取、写入命令及推荐的多步工作流
+hycli describe your-website
+
+# 3. 立即执行读取或搜索操作
+hycli your-website search-posts --query "发布说明"
+
+# 4. 需要创建、编辑或删除时，为该 CLI 一次性开启写入权限即可直接运行
+hycli writes your-website allow
+hycli your-website create-draft --title "来自 Hycli 的问候" --body "直接从终端自动创建。"
+```
+
+或者在 **Claude Code、Cursor、Codex、Windsurf** 中一次性添加 `"command": "hycli", "args": ["mcp"]`，然后用自然语言对智能体说：
+> *“用 Hycli 准备 `https://...` 的 CLI，告诉我有哪些可用操作，然后帮我写一篇新草稿。”*
 
 <a id="get-started"></a>
-输入域名，并可在旁边选填使用目的。AI 会先了解网站并选择有用的完整流程，再检查前置步骤、输入和最终结果。如果仍有步骤缺失，网站会保持待检查状态。
-
 ## 开始使用
 
-新的桌面安装包支持 Windows（`*-setup.exe`）、macOS（`.dmg`）和 Linux（`.deb`，或解压后运行 `./install.sh`）。安装后点击 Hycli 图标即可自动启动引擎并打开浏览器，无需保持终端运行。再次点击会打开现有实例；在设置中退出 Hycli。也可使用 `hycli open`、`hycli status`、`hycli stop`。这些开发中的安装包与下方 v0.1.0 下载不同；请查看[构建说明](../BUILD.md)和 [CI](https://github.com/Hybirdss/Hycli/actions/workflows/verify.yml)中的平台验证及签名状态。
+Hycli 将网站引擎与本地仪表盘（`http://127.0.0.1:4318`）打包在单个原生可执行文件中。运行发行包无需安装 Rust 或 Node.js。
 
-**[下载 v0.1.0 · Linux x64](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** · glibc ≥ 2.39 · [SHA-256](https://github.com/Hybirdss/Hycli/releases/download/v0.1.0/hycli-0.1.0-linux-x64.tar.gz.sha256)
+### 下载与运行 (Windows, macOS, Linux)
 
-Hycli 是一个带有本地网页仪表盘的 Rust 应用。在当前检出的源码中构建仪表盘和可执行文件：
+前往 **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** 下载适合你操作系统的原生安装包或便携压缩包：
+
+| 操作系统 | 架构 | 原生安装包 | 便携压缩包 | 启动方式 |
+| --- | --- | --- | --- | --- |
+| **Windows 10/11** | x64 及 ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | 运行 `*-setup.exe`（无需管理员权限，自动添加至用户 `PATH` 和开始菜单），然后点击 **Hycli** 图标或在 PowerShell 中运行 `hycli open` |
+| **macOS 13+** | Apple Silicon (`arm64`) 及 Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | 打开 `.dmg`，将 **Hycli.app** 拖入 **Applications** 后运行（自动链接 `~/.local/bin/hycli`） |
+| **Linux** | x64 及 ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | 安装 `.deb`（`sudo apt install ./hycli-*.deb`）或解压 `.tar.gz` 后运行 `./install.sh`，随后执行 `hycli open` |
+
+<details>
+<summary><strong>终端便携包安装与从源码构建</strong></summary>
+
+**Linux / macOS 便携包安装：**
+
+```sh
+sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS 请使用 shasum -a 256 -c
+tar -xzf hycli-0.1.0-*.tar.gz
+cd hycli-0.1.0-*
+./install.sh
+hycli open
+```
+
+**Windows PowerShell 便携包安装：**
+
+```powershell
+tar -xzf hycli-0.1.0-win32-x64.tar.gz
+cd hycli-0.1.0-win32-x64
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+hycli open
+```
+
+**从源码构建 (Linux, macOS, Windows)：**
+
+安装[构建前置依赖](../BUILD.md)后执行以下命令：
 
 ```sh
 node scripts/build.mjs
 ./dist/hycli open
 ```
 
-仪表盘会在 `http://127.0.0.1:4318` 打开。使用 `hycli dashboard --no-open` 可仅输出地址而不打开浏览器，使用 `--port 4320` 可指定其他端口。网站引擎与仪表盘包含在同一个可执行文件中。
+如需生成当前操作系统的原生安装包（`.exe`、`.dmg`、`.deb`），请运行 `node scripts/package-desktop.mjs`。详见[构建与打包说明](../BUILD.md)和[发布验证](../RELEASING.md)。
 
-1. 打开 **AI 连接**并连接服务提供商。
-2. 添加网站地址，选择负责准备该网站的 AI。
-3. 查看可用操作。在仪表盘中执行操作，或打开**编程代理**，一次性复制 MCP 配置。
+</details>
 
-对于需要登录的网站，请从**账号**连接账号。同一网站可以保存多个账号，由你选择工具使用哪一个。
+### 连接第一个网站
+
+1. 运行 `hycli open`（或点击 **Hycli** 应用图标）打开本地仪表盘（`http://127.0.0.1:4318`）。
+2. 在 **AI 连接**中连接 OpenAI、Anthropic Claude、xAI、Z.ai 或本地 ChatGPT (Codex) 登录。
+3. 对于需要登录的网站，点击 **账号 → 查找我的登录状态** 将浏览器会话导入本地加密保险库。
+4. 输入网站地址和目标以生成工具，或从 **编程代理** 复制 MCP 配置并粘贴到你的 AI 助手中。
 
 <a id="what-your-ai-can-do"></a>
 ## AI 能做什么
 
-Hycli 将支持的网站操作转换为具名、带类型的工具。AI 编写的说明会介绍每项操作的用途、所需信息和返回结果。
+Hycli 将网站的各类真实接口转换为自描述的 CLI 子命令与 MCP 工具：
 
-三个独立的 AI 工作单元分别负责读取和搜索、实用工作流程以及账号验证资料。仪表盘会显示已完成的阶段、每个工作单元的状态、已用时间和通俗易懂的工作记录。CLI 和 MCP 中的操作也会出现在同一活动历史中。
+| 网站接口 | 准备好的能力 |
+| --- | --- |
+| REST 与 OpenAPI | 基于 JSON/YAML 模式和 API 文档的带类型读取与写入请求 |
+| GraphQL | 解析后的查询与变更（mutation）文档及带类型的 JSON 变量 |
+| HTML 与 JS 渲染页面 | 基于所观察选择器的列表、链接、分页提取，以及通过本地 Chromium 引擎读取渲染后的 GET 页面 |
+| JSON 与 URL 编码表单 | 带文档说明的输入项、默认值及绑定账号的表单请求（`POST`、`PUT`、`PATCH`、`DELETE`） |
 
 <p align="center">
   <img src="../../docs/images/preparation.gif" alt="三位工作者。一只忙得团团转的小鸟。" width="100%" />
 </p>
 <p align="center"><sub>三位工作者。一只忙得团团转的小鸟。</sub></p>
 
-准备过程依据网站实际提供的信息：链接的文档、API 模式、公开的 JavaScript，以及浏览器辅助扩展观察到的请求结构。完成规划的工作流后，工作者会继续处理每个尚无操作的已文档化 API 操作，直到每一项都已实现或附上原因报告；任务的 `coverage` 会列出剩余内容。它可以在限定范围内执行读取，以验证操作；不会创建测试记录、编辑内容、删除对象、猜测大量端点，也不会对在线服务器进行模糊测试。
-
-| 操作 | 行为 |
+| 操作类型 | 执行行为 |
 | --- | --- |
-| 读取或搜索 | 操作有证据支持且被归类为读取时，可自主执行。 |
-| 创建、发送、编辑或删除 | 在你为该网站允许更改之前保持关闭。之后会显示网站、账号、操作和已确定的输入，供你批准。 |
-| 效果不明确 | 发送请求前需要审核。 |
-| 身份验证、验证挑战或请求限制 | 暂停受影响的请求，让你重新连接或等待。 |
+| **读取或搜索** | 只要有证据支持且被归类为安全读取，即可立即执行。 |
+| **创建、发送、编辑或删除** | 在准备过程中会被发掘并合成到 CLI 规范中，但在准备和检查期间绝不会执行。每个网站 CLI 默认关闭写入（`writes: false`）。AI 智能体会**按每个 CLI 仅询问你一次**是否允许写入（`hycli writes SITE allow` 或 MCP `hycli_writes`），开启后即可按你的指令直接执行写入操作。 |
+| **影响不明确的操作** | 在发送请求前暂缓并交由审核。 |
+| **身份验证挑战或速率限制** | 立即切换传输策略（HTTP → 页面内 `window.fetch` → 隐身 Chromium）或安全暂停。 |
 
-每个网站默认只读。在你于该网站详情中开启**允许更改**之前，其更改类操作不会向 MCP 开放，CLI 也会拒绝；再次关闭会取消待处理的批准。该开关和批准按钮只存在于仪表盘中，且仪表盘只向 `hycli dashboard` 打开的地址授予会话，因此调用 Hycli 的智能体无法开启更改，也无法批准自己的请求。能以你的用户身份运行任意命令的智能体同样可以读取你的文件；请让这类智能体保持在它们各自的权限提示之下。
+支持的请求形式与提取规则请参阅[操作规范](../SITESPEC.md)。
 
-批准仅适用于一条完全确定的请求，五分钟后过期，且只能使用一次。更改输入、账号、保存的登录信息或已安装的工具定义会使批准失效。CLI、MCP 和仪表盘执行遵守同一边界。写入操作绝不会自动重试。
+<a id="common-concerns"></a>
+## 常见顾虑与 Hycli 的解决方式
 
-支持程度取决于网站。如果页面没有可用文档或已观察到的操作，可能需要已登录的浏览器、提供的 SiteSpec 或进一步准备。Hycli 会说明实际支持范围，而不会声称每个网站都有现成的 API。
+将 AI 智能体连接到真实网站和已登录账号时，人们最常担心的几个问题以及 Hycli 在架构上的应对方式：
 
-### 支持范围
+### 1. “AI 会不会在我的账号里误发帖、乱修改或误删数据？”
+- **创建与检查 CLI 期间零真实写入：** 在执行 `hycli prepare`、`hycli request`、`hycli recon`、`hycli check` 准备或检查网站时，Hycli 会发掘并编译读取和写入操作，但**绝不会向服务器发送任何真实写入请求**。即使是伪装成读取的变更请求（如包含 `/delete` 等变更路径的 `GET`、GraphQL `mutation`、HTML `<form method="post">` 提交），在验证阶段也会被严格拦截。
+- **每个 CLI 首次写入前的一次性用户确认：** 每个新生成的网站 CLI 默认都处于关闭写入状态（`writes: false`）。当智能体首次需要在某个 CLI 上执行发帖、编辑或删除等写入操作时，会**针对该 CLI 询问你一次**：*“是否允许 `<site>` 执行写入操作？”* 只有你确认并开启 `hycli writes <site> allow`（或 MCP `hycli_writes`）后，写入操作才会直接执行；你随时可以通过 `hycli writes <site> deny` 或仪表盘中的 **允许更改** 开关收回权限。
+- **写入失败绝不自动重试：** 失败或中断的写入请求绝不会自动重试。如果在发送变更请求后连接中断，Hycli 会返回 `action_outcome_unknown`，让你先检查网站实际状态，避免重复下单或重复发帖。
 
-支持 JSON 或 YAML OpenAPI、REST、GraphQL，以及 JSON 和 URL 编码表单请求。HTML 操作可通过观察到的选择器提取记录、链接及下一页信息；必要时可用本地 Chromium 读取渲染后的 GET 页面。准备期间若读取失败，AI 会根据证据修正规则并再次验证。
+### 2. “Hycli 会把我的登录 Cookie、令牌或 API 密钥发给 AI 模型（LLM）吗？”
+- **秘密信息零进入 AI 提示词：** 浏览器 Cookie、`localStorage` / `sessionStorage` 令牌和 API 密钥严格保存在本地加密保险库中（通过 Windows 凭据管理器、macOS 钥匙串、Linux Secret Service 加密，或限制为 `0600` 当前用户专享权限）。
+- **符号化连接配方（`ConnectionRecipe`）：** AI 模型只能看到账号标签、存储键名称和脱敏后的响应结构。模型只构建引用本地键名的符号化 `ConnectionRecipe`，真正的秘密值由 Hycli 在执行时于本地注入，并自动从所有输出与日志中抹除。
+- **按站点隔离的只读会话导入：** 导入浏览器会话时仅通过临时只读快照读取目标域名的 Cookie 和存储，绝不削弱浏览器安全或导出其他网站的 Cookie。
 
-目前不支持任意浏览器点击流程、multipart 上传或二进制下载。分发包不包含账户或已有的生成 CLI。
+### 3. “抓取操作会不会触发验证码（CAPTCHA）或导致账号被封禁？”
+- **绝不模糊测试（Fuzzing）或暴力扫描：** Hycli 从不猜测端点字典或对线上服务器进行模糊测试，而是仅从链接文档、OpenAPI/GraphQL 模式、静态 JS 包和观察到的真实浏览器网络结构中学习 API。
+- **按站点与账号限流串行发送：** 请求按网站和账号串行排队并限制速率，严格遵守 `Retry-After` 响应头，并限制读取重试次数和响应体大小。
+- **策略熔断器与真实浏览器上下文执行：** 当普通 HTTP 请求遇到 403/429 或反爬验证（如 Cloudflare、Akamai Bot Manager）时，Hycli 绝不会死循环重试被拦截的请求。策略熔断器会立即切换传输方式——在已认证的真实浏览器上下文中执行 `window.fetch(..., { credentials: 'include' })` 或切换至本地隐身 Chromium 引擎——或安全暂停以保护你的账号。
 
-[操作规范](../SITESPEC.md) · [分发验证](../RELEASING.md)
+### 4. “重定向会不会泄露我的会话，或者分享规范文件会不会暴露我电脑上的路径？”
+- **严格的源站绑定（Origin Binding）：** 身份验证请求头和 Cookie 严格锁定在目标源站，发生跨源重定向时立即剥离。私有网段和本地回环地址默认拦截，除非显式传入 `--allow-local`。
+- **可移植的规范文件：** 本地浏览器可执行文件路径与配置文件路径仅保留在本机状态中，绝不会写入可移植的 `SiteSpec` 文件。
+
+### 5. “当登录过期时，AI 会不会不断重试而白白浪费 Token？”
+- **无需 AI 的确定性健康检查（`hycli check`）：** 执行 `hycli check`（及 MCP `hycli_check`）时无需调用大模型即可重放已验证的读取链，准确区分 `signed_out`（登录过期，需重连账号）、`site_changed`（网站结构变更，需修复规范）、`blocked` 和 `unreachable`。
 
 <a id="ai-connections"></a>
 ## AI 连接
 
-| 连接 | 登录方式 |
+| 服务提供商 | 认证方式 |
 | --- | --- |
-| ChatGPT · API 密钥 | 你的 OpenAI API 密钥 |
-| Claude | 你的 Anthropic API 密钥 |
-| xAI | 你的 xAI API 密钥 |
-| Z.ai | 你的 Z.ai API 密钥 |
-| Z.ai Coding Plan | 你的 Z.ai Coding Plan API 密钥 |
-| ChatGPT · 登录 | 由已安装的 Codex app-server 管理的 ChatGPT 登录 |
+| ChatGPT · API 密钥 | OpenAI API 密钥 |
+| Claude | Anthropic API 密钥 |
+| xAI | xAI API 密钥 |
+| Z.ai / Z.ai Coding Plan | Z.ai API 密钥 |
+| ChatGPT · 登录 | 通过官方 Codex app-server 协议管理的本地 ChatGPT 登录 |
 
-在仪表盘中选择模型，也可以选择仅向你的账号开放的模型。连接检查会验证服务提供商和所选模型。API 服务提供商会向你的服务账号收取使用费用。
-
-Codex 连接使用其官方 app-server 协议。Hycli 不读取或复制 Codex OAuth 令牌。推理在临时线程中运行，文件、Shell、浏览器、应用和 MCP 执行均被禁用。网站准备由 Hycli 控制的读取工具完成。
+Codex 登录连接在禁用文件、Shell、浏览器和外部 MCP 执行的临时线程中运行；Hycli 从不读取或复制 Codex OAuth 令牌。
 
 <a id="use-hycli-with-your-ai"></a>
 ## 将 Hycli 与 AI 配合使用
 
-**编程代理 → 查看连接设置**
-
-通用 MCP 连接涵盖网站准备和执行。连接一次后，智能体即可准备缺少的工具、跟踪进度并运行新操作。
-
-```sh
-hycli mcp
-```
-
-如需仅公开已安装的操作，请使用 `--sites-only`。以下连接仅限一个网站。
-
-```sh
-hycli mcp --sites-only --only-site SITE
-```
+将 Hycli 添加到你的 MCP 客户端（**编程代理 → 查看连接设置** 会显示当前操作系统的准确路径）：
 
 ```json
 {
   "mcpServers": {
     "hycli": {
       "command": "hycli",
-      "args": [
-        "mcp"
-      ]
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-如果智能体的 PATH 中没有 `hycli`，请使用仪表板显示的可执行文件路径。
+如果只想暴露已安装的网站工具，请使用 `hycli mcp --sites-only`；如需限定到单个网站，请添加 `--only-site SITE`。MCP 服务器提供 `hycli_prepare`、`hycli_writes`（按每个 CLI 首次询问你后开启写入）、`hycli_run`、`hycli_check`、`hycli_result` 和 `hycli_activity`，且绝不提供任何读取凭据的工具。
 
-CLI 也支持相同流程。请将示例网址、`SITE` 和 `ACTION` 替换为自己的网站及 `describe` 返回的名称。
+在终端中也可以使用完全相同的工作流：
 
 ```sh
 hycli prepare https://your-website.example --intent "查找已保存的参考资料"
-hycli request SITE "Add draft editing and publishing with full post content"
-hycli describe
-hycli describe SITE ACTION
+hycli request SITE "添加正文编辑、草稿保存和文章发布功能"
+hycli describe SITE
 hycli SITE ACTION --help
-hycli run SITE ACTION --arg query="design systems"
-hycli jobs show JOB_ID --watch
-```
-
-重试失败的操作之前，先不借助 AI 检查网站：
-
-```sh
-hycli check          # 所有已安装的网站
+hycli writes SITE allow
+hycli SITE ACTION --query "design systems"
 hycli check SITE
 ```
-
-准备过程会按顺序记录通过的读取，包括把前一个结果的标识符传给下一个读取的情况。`hycli check` 会重放这些读取，并先确认已保存账号的身份。结论会区分 `signed_out`（重新连接账号）与 `site_changed`（账号可用，但响应已不再匹配；请求修复），另外还有 `blocked` 和 `unreachable`。它从不执行更改，退出状态与结论一致。MCP 客户端可通过 `hycli_check` 获得同样的检查。
-
-通过 MCP，向 `hycli_prepare` 提供网址和 `intent`，再用 `hycli_job` 或 `hycli_result` 跟踪至完成。即使客户端尚未刷新工具列表，`hycli_run` 也能运行新操作。需要内部 ID 时，先通过相关列表或搜索操作查找。 `hycli_result`、`hycli_check` 和 `hycli_activity` 在两种模式下都可用，AI 因此可以跟进工作记录、进度和已批准的结果，并区分登录已过期与网站已变化。
-
-修改操作会返回供用户在仪表板审核的批准凭据。请跟踪该凭据的结果，不要重复发送请求。读取失败或响应不符合预期时，CLI 也会返回失败状态。
 
 [智能体指南](../../agent/AGENTS.md) · [Hycli 技能](../../skills/hycli/SKILL.md)
 
 <a id="browser-sign-in"></a>
 ## 浏览器登录
 
-准备网站时，首先检查当前操作系统、正在运行或已注册的浏览器，以及可用的浏览器配置文件。AI 根据这些能力读取文档、呈现页面、导入网站会话并验证连接。浏览器和配置文件路径只保留在本地计算机上；生成的网站定义不依赖开发者的安装路径。
+Hycli 会在 Windows、macOS 和 Linux 上发现本地 Chrome、Chromium、Edge、Brave、Vivaldi、Arc、Whale 和 Firefox 配置文件（以及已安装的本地隐身 Chromium 引擎），仅将所请求网站的会话导入本地加密保险库。指向同一个已验证网站账号的多个配置文件会自动合并去重。
 
-在可以访问时，可导入 Chrome、Chromium、Edge、Brave 和 Firefox 的 Cookie 与源站存储数据。只有所请求网站的会话会进入 Hycli 的本地凭据保险库。Hycli 自动选择一个已验证的身份；属于同一身份的配置文件在账号选择时只算一个选项。现有账号选择会保留；如有不同的已验证身份，则需要选择。
-
-在**账号 → 连接账号**中选择**查找我的登录状态**可重新搜索。如果找不到可用会话，选择**打开网站登录页面**，即可在默认浏览器中打开网站。对话框打开期间，Hycli 会再次检查；只有所选账号通过验证后才会继续准备。仅打开标签页不会被报告为登录成功。
-
-受操作系统保护、绑定浏览器、无痕或容器中的会话可能需要浏览器扩展。选择扩展选项卡并生成连接码，然后在已登录的浏览器配置文件中打开扩展、输入连接码并授权访问该网站。原生导入不会绕过 Windows App-Bound 保护或削弱浏览器配置文件的安全性。
-
-- **Chrome 和 Edge：**解压软件包，在浏览器扩展页面选择**加载已解压的扩展程序**。
-- **Firefox：**使用 Firefox 软件包，在 `about:debugging` 中选择**临时载入附加组件**。Firefox 重启后会移除临时扩展。此版本不包含经过签名的商店分发版本。
-- **Cookie 文件：**也可导入 JSON 或 Netscape 格式的 Cookie 文件作为备用方案。请直接在仪表盘中导入文件，不要将内容粘贴到 AI 对话中。
-
-浏览器会将会话数据直接传输到本地凭据保险库。模型只会收到账号标签、本地密钥的名称和结构，以及已移除凭据值的工具结果。模型可以创建引用这些本地值的连接方案，但不会收到值本身。系统遵守 Cookie 的作用域、路径、过期时间及支持的分区信息；身份验证请求头仅限用于其原始源站。
-
-账号身份以网站实际返回的当前账号响应为依据。浏览器配置文件名称不会被视为已验证的网站身份。如果尚未识别账号，Hycli 会明确说明。连接后，正常浏览即可提供账号响应和可用请求的结构，而不会向准备模型暴露请求值、请求头或响应正文。
-
-网站可能需要另行提供文档中说明的 API 凭据，或需要本地不可用的浏览器功能。准备过程记录实际的连接和读取结果。成功获取首页，或 API 返回登录页面，都不代表集成已经就绪。[浏览器设置指南](../../browser-companion/guide.html)介绍了扩展程序的流程和限制。
+如果会话受到 Windows App-Bound 加密、隐私容器或未导入浏览器的保护，可在 **账号 → 连接账号** 中通过浏览器登录、连接[浏览器辅助扩展](../../browser-companion/guide.html)，或在仪表盘中导入 JSON/Netscape Cookie 文件（切勿将 Cookie 内容直接粘贴到 AI 聊天窗口中）。
 
 <a id="languages"></a>
 ## 语言
 
-仪表盘支持上方链接的 20 种语言，包括从右向左书写的阿拉伯语。初始语言为英语。你的选择会保存在本设备上，AI 说明也可以使用所选语言生成。
+仪表盘和 AI 生成的操作说明支持本 README 顶部链接的 20 种语言，包括从右向左书写的阿拉伯语（RTL）。
 
 <a id="local-data"></a>
 ## 本地数据与请求限制
 
-网站定义、账号元数据和活动记录均保存在本地数据目录中。设置 `HYCLI_DATA_DIR` 可选择其他位置。通过**设置**查看当前路径和凭据保护情况。
-
-如果可用，凭据保险库会使用由操作系统密钥环保护的加密密钥。如果密钥环不可用，会明确报告当前存储仅依靠文件权限保护；私有目录和凭据文件仅允许当前操作系统用户访问。已有加密保险库无法解锁时，不会被悄悄替换。
-
-请求按网站和账号串行处理，并控制发送频率，同时还设有网站整体的请求额度。Hycli 遵守 `Retry-After`，限制响应大小和读取重试次数，并在身份验证失败或遇到网站验证挑战时暂停。网站准备过程不会通过轮换账号、伪造指纹或绕过验证挑战来规避限制。这些措施可减少不必要的压力，但无法保证网站永远不会限制账号。
-
-默认禁用私有网络和本地网站地址。对于可信的自托管网站，请在启动仪表盘或 MCP 服务器时明确指定 `--allow-local`。
+网站定义、加密凭据和活动记录保存在操作系统的本地数据目录中（Windows 为 `%LOCALAPPDATA%\hycli`，macOS 为 `~/Library/Application Support/hycli`，Linux 为 `~/.local/share/hycli`，或通过 `HYCLI_DATA_DIR` 指定）。你可以随时在 **设置** 中查看当前路径与密钥环加密状态。
 
 <a id="contributing"></a>
 ## 开发与验证
@@ -214,16 +235,18 @@ cargo build --locked --bin hycli --example dashboard_fixture
 node scripts/test-e2e.mjs --full
 ```
 
-测试使用合成的本地网站和服务提供商响应，覆盖批准与请求的绑定及防重放、秘密信息脱敏、重定向、速率限制、不重试写入、浏览器会话保护和服务提供商响应契约。绝不要仅为测试 Hycli 而使用真实账号创建、修改或删除内容。
-
-截图和 GIF 使用隔离的示例数据。请参阅[视觉素材来源](../images/README.md)。
+所有测试均使用合成的本地网站与测试夹具运行——切勿为了测试而在真实的第三方服务账号上执行写入操作。另请参阅[视觉素材来源](../images/README.md)。
 
 ## 许可证与预期用途
 
-Hycli 采用 [Apache-2.0](../../LICENSE) 许可证。
+Hycli 采用 [Apache-2.0](../../LICENSE) 许可证发布。请仅在你有权访问的网站和账号上使用。本软件按“原样”提供，不附带任何明示或暗示的保证；作者和贡献者不对因使用本软件而导致的任何损失、账号受限或封禁承担责任。
 
-Hycli 用于创建和使用让网站更易操作的命令行工具。请仅用于你有权访问的网站和账号。
+## Star History
 
-本软件按原样提供，不附带任何保证。在法律允许的范围内，作者和贡献者不对使用本软件所造成的损失或其他问题承担责任。你应对自己的使用方式负责。
-
-在法律允许的范围内，作者和贡献者不对因使用 Hycli 而导致的账号封禁、暂停或限制承担责任。请勿将 Hycli 用于入侵、未经授权的访问或攻击。
+<a href="https://www.star-history.com/#Hybirdss/Hycli&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+ </picture>
+</a>

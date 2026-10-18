@@ -3,7 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Automate any website.</strong>
+  <strong>Turn any website into a typed CLI and MCP server for your AI agent.</strong><br/>
+  <sub>Read, search, create, edit, and automate—using your real browser login, with zero cookie leaks to LLMs and built-in anti-bot resilience.</sub>
 </p>
 
 <p align="center">
@@ -14,8 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Download</a> ·
-  <a href="#get-started">Get started</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Download (Windows · macOS · Linux)</a> ·
+  <a href="#try-it-in-30-seconds">30-second quickstart</a> ·
   <a href="#what-your-ai-can-do">What your AI can do</a> ·
   <a href="#common-concerns">Common concerns</a> ·
   <a href="#use-hycli-with-your-ai">Use with your AI</a> ·
@@ -30,43 +31,72 @@
 
 </details>
 
-Give Hycli a website and an optional goal. It learns the site's interface, prepares typed CLI and MCP actions (both reads and writes), and verifies reads safely. Your AI can then use those actions with the same accounts, write permissions, and results you see in the local dashboard.
-
-| Connect | Prepare | Use |
-| --- | --- | --- |
-| Add a website, choose your AI and describe what you want to do. | Follow three workers as they inspect, connect and verify. | Use the dashboard, terminal or your connected AI assistant. |
+Give Hycli any website URL and what you want to do. Three AI workers inspect its docs, frontend bundles, and live browser network traffic to build a typed CLI and MCP toolset—covering both reads and writes—without ever mutating your account during setup.
 
 <p align="center">
   <img src="docs/images/dashboard.png" alt="Hycli example workspace with Discord, GitHub, Notion, Naver Blog, Netflix and Slack." width="100%" />
 </p>
-<p align="center"><sub>Example workspace with sample tools and accounts.</sub></p>
+<p align="center"><sub>One local dashboard and CLI for your websites, accounts, and AI agents.</sub></p>
+
+<a id="try-it-in-30-seconds"></a>
+## Try it in 30 seconds
+
+```sh
+# 1. Point Hycli at any website and describe your goal (prepares reads & writes; zero live mutations)
+hycli prepare https://your-website.example --intent "Search posts, save drafts, and publish articles"
+
+# 2. See every prepared read, write, and multi-step workflow
+hycli describe your-website
+
+# 3. Run read actions immediately
+hycli your-website search-posts --query "release notes"
+
+# 4. Enable writes once for this CLI when you're ready to create, edit, or delete
+hycli writes your-website allow
+hycli your-website create-draft --title "Hello from Hycli" --body "Automated from my terminal."
+```
+
+Or connect Hycli to **Claude Code, Cursor, Codex, or Windsurf** once with `"command": "hycli", "args": ["mcp"]` and ask your agent in plain language:
+> *"Use Hycli to prepare `https://...`, show me what actions are available, and draft a new post."*
 
 <a id="get-started"></a>
 ## Get started
 
-Hycli packs its website engine and local dashboard into a single executable. Rust and Node.js are only needed when building from source.
+Hycli ships as a single native binary containing both the website engine and the local dashboard (`http://127.0.0.1:4318`). Neither Rust nor Node.js is needed to run a release package.
 
-### Download and run
+### Download and run (Windows, macOS, Linux)
 
-Desktop packages are built for **Windows, macOS and Linux** (**x64 and ARM64**) via [native CI](https://github.com/Hybirdss/Hycli/actions/workflows/verify.yml) (see [distribution signing](docs/RELEASING.md#desktop-installers-and-signing)):
+Download the native installer or portable archive for your platform from **[Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**:
 
-| Platform | Package | Open |
-| --- | --- | --- |
-| Windows | `*-setup.exe` | Install for your account, then open Hycli from Start or the desktop. |
-| macOS 13+ | `.dmg` with `Hycli.app` | Drag Hycli to Applications, then open it. |
-| Linux | `.deb` and `.tar.gz` | Install the DEB, or extract the archive and run `./install.sh`. |
-
-For the verified **[Linux x64 v0.1.0 release](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** (requires glibc ≥ 2.39, e.g., Ubuntu 24.04):
-
-```sh
-sha256sum -c hycli-0.1.0-linux-x64.tar.gz.sha256
-tar -xzf hycli-0.1.0-linux-x64.tar.gz
-cd hycli-0.1.0-linux-x64
-./hycli dashboard
-```
+| Platform | Architecture | Native Installer | Portable Archive | How to start |
+| --- | --- | --- | --- | --- |
+| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | Run `*-setup.exe` (adds `hycli` to your user `PATH` and Start Menu), then launch **Hycli** or run `hycli open` in PowerShell. |
+| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Open the `.dmg`, drag **Hycli.app** to **Applications**, and open it (automatically links `hycli` into `~/.local/bin`). |
+| **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Install the `.deb` (`sudo apt install ./hycli-*.deb`) or extract the `.tar.gz` and run `./install.sh`, then run `hycli open`. |
 
 <details>
-<summary><strong>Build from source</strong> · Linux, macOS and Windows</summary>
+<summary><strong>Quick terminal install & build from source</strong></summary>
+
+**Linux / macOS portable archive:**
+
+```sh
+sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # or: shasum -a 256 -c on macOS
+tar -xzf hycli-0.1.0-*.tar.gz
+cd hycli-0.1.0-*
+./install.sh
+hycli open
+```
+
+**Windows PowerShell portable archive:**
+
+```powershell
+tar -xzf hycli-0.1.0-win32-x64.tar.gz
+cd hycli-0.1.0-win32-x64
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+hycli open
+```
+
+**Build from source (Linux, macOS, Windows):**
 
 Install the [build prerequisites](docs/BUILD.md) and run:
 
@@ -75,97 +105,92 @@ node scripts/build.mjs
 ./dist/hycli open
 ```
 
-`node scripts/package-desktop.mjs` creates the native installer for your OS. Add `--install-dir <directory>` to install on your PATH. See [building and packaging](docs/BUILD.md) and the [release checklist](docs/RELEASING.md).
+Run `node scripts/package-desktop.mjs` to produce the native `.exe`, `.dmg`, or `.deb` installer for your OS. See [building and packaging](docs/BUILD.md) and [release verification](docs/RELEASING.md).
 
 </details>
 
 ### Connect your first website
 
-Hycli opens at `http://127.0.0.1:4318` (or a free loopback port). Use `hycli open`, `hycli status`, and `hycli stop` to manage the background app, or `hycli open --no-open --port 4320` for headless setup.
-
-1. Open **AI connections** and connect a provider.
-2. Add a website address, choose the AI, and optionally describe your task.
-3. Review the prepared actions. Run one in the dashboard or open **Coding agents** to copy the MCP config once.
-
-For signed-in sites, connect your account under **Accounts** or save API keys under **Explore actions → Website API keys**.
+1. Run `hycli open` (or click the **Hycli** app icon) to open the local dashboard at `http://127.0.0.1:4318`.
+2. Open **AI connections** and connect OpenAI, Anthropic Claude, xAI, Z.ai, or your local ChatGPT Codex login.
+3. For logged-in sites, click **Accounts → Find my sign-in** to import your browser session into the local vault.
+4. Enter a website URL and optional goal, or copy the MCP config from **Coding agents** into your AI assistant.
 
 <a id="what-your-ai-can-do"></a>
 ## What your AI can do
 
-Hycli turns website operations into named, typed tools with clear inputs and outputs:
+Hycli turns real website interfaces into self-documented CLI subcommands and MCP tools:
 
 | Website interface | Prepared capability |
 | --- | --- |
-| REST and OpenAPI | Typed requests grounded in published JSON/YAML schemas and documentation. |
-| GraphQL | Parsed query/mutation documents and JSON variables. |
+| REST and OpenAPI | Typed read and write actions grounded in JSON/YAML schemas and API docs. |
+| GraphQL | Parsed query and mutation documents with typed JSON variables. |
 | HTML & JS-rendered pages | Structured records, links, pagination, and rendered GET reads via a local Chromium engine. |
-| JSON and URL-encoded forms | Documented inputs, defaults, and account-scoped read/write requests. |
+| JSON and URL-encoded forms | Documented inputs, defaults, and account-scoped form submissions (`POST`, `PUT`, `PATCH`, `DELETE`). |
 
 <table>
 <tr><td width="50%"><img src="docs/images/ai-connections.png" alt="Real Hycli AI connection screen using demonstration data." /></td><td width="50%"><img src="docs/images/action-result.png" alt="A completed action in the real Hycli dashboard using a synthetic local service." /></td></tr>
-<tr><td align="center">Choose the AI that prepares your websites.</td><td align="center">Review actions and keep the useful result.</td></tr>
+<tr><td align="center">Choose the AI that prepares your websites.</td><td align="center">Inspect actions and structured results locally.</td></tr>
 </table>
-
-Three independent AI workers handle reads/search, workflows, and account evidence. They inspect linked docs, API schemas, frontend JS bundles, and live browser network shapes, verifying reads before installing the CLI.
 
 <p align="center">
   <img src="docs/images/preparation.gif" alt="Three workers. One very busy little bird." width="100%" />
 </p>
 <p align="center"><sub>Three workers. One very busy little bird.</sub></p>
 
-| Action | Behavior |
+| Action type | Execution behavior |
 | --- | --- |
-| Read or search | Runs autonomously when grounded in evidence and classified as a read. |
-| Create, send, edit or delete | Prepared into the CLI without ever running during discovery. Disabled by default (`writes: false`). Your AI agent asks you **once per CLI** whether to allow writes (`hycli writes SITE allow` or MCP `hycli_writes`). Once enabled, write actions execute directly when you ask for them. |
-| Unclear effect | Held for review before sending. |
-| Auth challenge or rate limit | Pauses affected requests or pivots transport strategy so you can reconnect or wait. |
+| **Read or search** | Runs immediately when grounded in evidence and classified as a safe read. |
+| **Create, send, edit, or delete** | Discovered and synthesized into the CLI without ever running during preparation. Off by default (`writes: false`). Your AI agent asks you **once per CLI** whether to enable writes (`hycli writes SITE allow` or MCP `hycli_writes`). Once enabled, write actions execute directly when you ask for them. |
+| **Unclear effect** | Held for review before sending. |
+| **Auth challenge or rate limit** | Switches transport strategy (HTTP → in-page `window.fetch` → stealth Chromium) or pauses cleanly. |
 
 See the [operation reference](docs/SITESPEC.md) for supported request shapes and extraction rules.
 
 <a id="common-concerns"></a>
 ## Common concerns and how Hycli solves them
 
-Connecting an AI agent to real websites and logged-in accounts raises natural concerns. Hycli is designed around strict boundaries for each one:
+Connecting an AI agent to real websites and logged-in accounts raises serious questions. Here is how Hycli handles each one by design:
 
-### 1. Unauthorized writes & accidental mutations
-- **Zero live mutations during CLI creation:** While preparing or checking a website (`hycli prepare`, `hycli request`, `hycli recon`, `hycli check`), Hycli discovers and synthesizes both read and write operations into the CLI spec, but **never executes write requests**. Even disguised mutations (`GET` routes with mutating names like `/delete`, GraphQL `mutation` bodies, or HTML `<form method="post">` actions) are blocked from running during verification.
-- **One-time per-CLI write permission:** Every newly created website CLI starts with `writes: false`. Before an AI agent executes a write action on a CLI for the first time, it asks you **once for that CLI**: *"Allow write actions for `<site>`?"* Upon your confirmation, it runs `hycli writes <site> allow` (or MCP `hycli_writes`), after which requested write actions run directly. You can revoke write permission anytime with `hycli writes <site> deny` or the dashboard's **Allow changes** toggle.
-- **No automatic write retries:** Failed or interrupted write requests are never auto-retried. If a connection drops after a mutation is sent, Hycli returns `action_outcome_unknown` so you can check the website rather than duplicating a post or payment.
+### 1. "Will the AI accidentally post, edit, or delete data on my account?"
+- **Zero live mutations during CLI creation:** While preparing or checking a website (`hycli prepare`, `hycli request`, `hycli recon`, `hycli check`), Hycli discovers and compiles both read and write operations into the CLI spec, but **never executes write requests**. Even disguised mutations (`GET` routes with mutating paths like `/delete`, GraphQL `mutation` bodies, or HTML `<form method="post">` actions) are blocked from running during verification.
+- **One-time per-CLI write confirmation:** Every newly created website CLI starts with `writes: false`. When an AI agent needs to run a write action on a CLI for the first time, it asks you **once for that CLI**: *"Allow write actions for `<site>`?"* Only after you confirm does it run `hycli writes <site> allow` (or MCP `hycli_writes`), enabling direct write execution for that CLI. You can revoke write permission anytime with `hycli writes <site> deny` or the dashboard's **Allow changes** toggle.
+- **No automatic write retries:** Failed or interrupted write requests are never auto-retried. If a connection drops after a mutation is sent, Hycli reports `action_outcome_unknown` so you can check the website rather than duplicating an order or post.
 
-### 2. Login & credential privacy
-- **Secrets never enter AI prompts:** Browser cookies, `localStorage` / `sessionStorage` tokens, and API keys are stored strictly in your local vault (encrypted via the OS keyring when available, or restricted to `0600` user-only permissions).
-- **Symbolic connection recipes:** Preparation models only see account labels, storage key names, and redacted schemas. The AI constructs a symbolic `ConnectionRecipe` (referencing a cookie or token name), and Hycli injects the actual credential locally at runtime while scrubbing secrets from all responses and logs.
-- **Non-destructive browser import:** Importing a session reads only the target website's cookies/storage and verifies the account against a real profile endpoint. It never weakens browser security or exports unrelated domains.
+### 2. "Does Hycli send my cookies, login tokens, or API keys to the AI model?"
+- **Secrets never enter LLM prompts:** Browser cookies, `localStorage` / `sessionStorage` tokens, and API keys are stored strictly in your local vault (encrypted via OS keyring on Windows Credential Manager, macOS Keychain, and Linux Secret Service, or restricted to `0600` user-only permissions).
+- **Symbolic connection recipes:** AI models only see account labels, storage key names, and redacted response schemas. The model builds a symbolic `ConnectionRecipe` (referencing a cookie or token name), and Hycli injects the real secret locally at execution time while scrubbing secrets from all outputs and logs.
+- **Site-scoped read-only import:** Importing a browser session reads only the target domain's cookies and storage from a temporary read-only snapshot. It never weakens browser security or exports other websites.
 
-### 3. Scraping, CAPTCHAs & account bans
-- **No fuzzing or brute-force scanning:** Hycli never guesses wordlists or fuzzes live servers. It extracts endpoints from docs, schemas, frontend bundles, and observed browser traffic.
-- **Paced, serialized requests:** Traffic is serialized and rate-limited per website and per account, honoring `Retry-After` and bounding read retries.
-- **Strategy circuit breaker & native browser execution:** When a plain HTTP request hits a 403/429 or bot challenge, Hycli never loops the same blocked method. Its circuit breaker immediately switches strategy—executing `window.fetch` directly inside your authenticated browser session or using a local stealth Chromium engine—or pauses cleanly to protect your account.
+### 3. "Will scraping trigger CAPTCHAs or get my account banned?"
+- **No fuzzing or brute-force scanning:** Hycli never guesses endpoint wordlists or fuzzes live servers. It learns from linked documentation, OpenAPI/GraphQL schemas, static JS bundles, and observed browser network shapes.
+- **Serialized, paced traffic:** Requests are serialized and rate-limited per website and per account, honoring `Retry-After` and bounding read retries.
+- **Strategy circuit breaker & native browser execution:** When plain HTTP hits a 403/429 or bot challenge (Cloudflare, Akamai Bot Manager), Hycli never loops the same blocked request. Its circuit breaker immediately switches transport—executing `window.fetch(..., { credentials: 'include' })` inside your authenticated browser context or using a local stealth Chromium engine—or pauses cleanly to protect your account.
 
-### 4. Cross-origin leaks & machine-specific data
-- **Strict origin binding:** Auth headers and cookies are locked to the target origin and stripped immediately on cross-origin redirects. Private/loopback networks are blocked by default unless `--allow-local` is set.
-- **Portable specs:** Local browser executable and profile paths remain in machine-local state and are never embedded in shareable website specs.
+### 4. "Can a redirect leak my session, or can a shared spec expose my computer's paths?"
+- **Strict origin binding:** Auth headers and cookies are locked to the target origin and stripped immediately on cross-origin redirects. Private and loopback IP ranges are blocked by default unless `--allow-local` is explicitly passed.
+- **Portable specs:** Local browser executable and profile paths remain in machine-local state and are never written into portable `SiteSpec` files.
 
-### 5. Blind retries when sessions expire or sites change
-- **AI-free health check (`hycli check`):** Before wasting tokens or hitting login pages repeatedly, `hycli check` (and MCP `hycli_check`) replays verified read chains without an LLM and cleanly distinguishes `signed_out` (reconnect account) from `site_changed` (repair spec), `blocked`, and `unreachable`.
+### 5. "Will the AI waste tokens retrying when my login expires?"
+- **Deterministic health check without AI (`hycli check`):** `hycli check` (and MCP `hycli_check`) replays verified read chains without invoking an LLM and cleanly separates `signed_out` (reconnect your account) from `site_changed` (repair spec), `blocked`, and `unreachable`.
 
 <a id="ai-connections"></a>
 ## AI connections
 
-| Connection | Sign-in |
+| Provider | Authentication |
 | --- | --- |
-| ChatGPT · API key | Your OpenAI API key |
-| Claude | Your Anthropic API key |
-| xAI | Your xAI API key |
-| Z.ai / Z.ai Coding Plan | Your Z.ai API key |
-| ChatGPT · login | ChatGPT sign-in managed by the installed Codex app-server |
+| ChatGPT · API key | OpenAI API key |
+| Claude | Anthropic API key |
+| xAI | xAI API key |
+| Z.ai / Z.ai Coding Plan | Z.ai API key |
+| ChatGPT · login | Local ChatGPT sign-in via the official Codex app-server protocol |
 
-The Codex connection uses its official app-server protocol in an ephemeral thread with file, shell, browser, and external MCP execution disabled; Hycli never reads or copies Codex OAuth tokens.
+The Codex login connection runs in an ephemeral thread with file, shell, browser, and external MCP execution disabled; Hycli never reads or copies Codex OAuth tokens.
 
 <a id="use-hycli-with-your-ai"></a>
 ## Use Hycli with your AI
 
-Copy the MCP configuration from **Coding agents → View connection settings** once:
+Add Hycli to your MCP client (**Coding agents → View connection settings** shows the exact path for your OS):
 
 ```json
 {
@@ -178,9 +203,9 @@ Copy the MCP configuration from **Coding agents → View connection settings** o
 }
 ```
 
-Use `hycli mcp --sites-only` to expose only installed website actions, or add `--only-site SITE` to scope to a single site. The MCP server provides `hycli_prepare`, `hycli_writes` (for enabling writes once per CLI after asking you), `hycli_run`, `hycli_check`, `hycli_result`, and `hycli_activity`—and never exposes a tool for reading raw credentials.
+Use `hycli mcp --sites-only` to expose only installed website tools, or add `--only-site SITE` to scope to a single site. The MCP server provides `hycli_prepare`, `hycli_writes` (enables writes once per CLI after asking you), `hycli_run`, `hycli_check`, `hycli_result`, and `hycli_activity`—and never exposes a tool for reading credentials.
 
-From the terminal, the same workflow is available directly:
+From the terminal, every workflow works the same way:
 
 ```sh
 hycli prepare https://your-website.example --intent "Find saved references"
@@ -192,14 +217,14 @@ hycli SITE ACTION --query "design systems"
 hycli check SITE
 ```
 
-See the [Hycli skill](skills/hycli/SKILL.md) and [agent guide](agent/AGENTS.md) (`CLAUDE.md`) for how coding agents discover capabilities, present available read/write actions to you, ask once per CLI before enabling writes, and recover from failures.
+See the [Hycli skill](skills/hycli/SKILL.md) and [agent guide](agent/AGENTS.md) (`CLAUDE.md`) for how coding agents discover capabilities, summarize available read/write actions for you, ask once per CLI before enabling writes, and recover from failures.
 
 <a id="browser-sign-in"></a>
 ## Browser sign-in
 
-Hycli discovers local Chrome, Chromium, Edge, Brave, and Firefox profiles (plus local stealth Chromium binaries when installed) and imports only the requested website's session into the local vault. Profiles sharing the same verified website account are deduplicated automatically.
+Hycli discovers local Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale, and Firefox profiles (plus local stealth Chromium binaries when installed) on Windows, macOS, and Linux, importing only the requested website's session into the local vault. Profiles sharing the same verified website account are deduplicated automatically.
 
-If a session is protected by OS App-Bound encryption, private containers, or an unimported browser, use **Accounts → Connect an account** to sign in via your browser or connect the [browser companion extension](browser-companion/guide.html) (or import a JSON/Netscape cookie file in the dashboard—never paste cookies into an AI chat).
+If a session is locked by Windows App-Bound encryption, private containers, or an unimported browser, use **Accounts → Connect an account** to sign in via your browser, connect the [browser companion extension](browser-companion/guide.html), or import a JSON/Netscape cookie file in the dashboard (never paste cookies into an AI chat).
 
 <a id="languages"></a>
 ## Languages
@@ -209,7 +234,7 @@ The dashboard and AI-generated action descriptions support the 20 languages link
 <a id="local-data"></a>
 ## Local data and request limits
 
-Website definitions, encrypted credentials, and activity logs live in your local data directory (override with `HYCLI_DATA_DIR`). Inspect active vault protection anytime under **Settings**.
+Website definitions, encrypted credentials, and activity logs live in your OS data directory (`%LOCALAPPDATA%\hycli` on Windows, `~/Library/Application Support/hycli` on macOS, `~/.local/share/hycli` on Linux, or `HYCLI_DATA_DIR`). Inspect active vault protection anytime under **Settings**.
 
 <a id="contributing"></a>
 ## Development and verification

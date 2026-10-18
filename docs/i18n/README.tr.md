@@ -1,11 +1,19 @@
 <p align="center">
-<img src="../../docs/brand/concepts/hycli-shima-banner-v4.png" alt="Hycli — Web siteleri, AI için hazır." width="100%" />
+  <img src="../../docs/brand/concepts/hycli-shima-banner-v4.png" alt="Hycli — Yapay zekâ için hazır web siteleri." width="100%" />
 </p>
 
-<p align="center"><strong>Her web sitesini otomatikleştirin.</strong></p>
+<p align="center">
+  <strong>Herhangi bir web sitesini yapay zekâ ajanınız için tipli bir CLI ve MCP sunucusuna dönüştürün.</strong><br/>
+  <sub>Gerçek tarayıcı oturumunuzu kullanarak, LLM'lere sıfır çerez sızıntısı ve yerleşik bot koruması dayanıklılığıyla okuyun, arayın, oluşturun, düzenleyin ve otomatikleştirin.</sub>
+</p>
 
 <p align="center">
-<a href="#get-started">Başlangıç</a> · <a href="#what-your-ai-can-do">AI'ınız neler yapabilir?</a> · <a href="#ai-connections">AI bağlantıları</a> · <a href="#use-hycli-with-your-ai">AI ile kullanın</a>
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">İndir (Windows · macOS · Linux)</a> ·
+  <a href="#try-it-in-30-seconds">30 saniyede deneyin</a> ·
+  <a href="#get-started">Başlangıç</a> ·
+  <a href="#what-your-ai-can-do">Yapay zekânız neler yapabilir</a> ·
+  <a href="#common-concerns">Sıkça duyulan endişeler</a> ·
+  <a href="#use-hycli-with-your-ai">Yapay zekânızla kullanın</a>
 </p>
 
 <details>
@@ -15,185 +23,205 @@
 
 </details>
 
-Bir web sitesi ekleyin. Hycli, AI'ınızın kullanabileceği işlemleri hazırlar ve her birinin ne yaptığını açıklar. Web siteleriniz, giriş bilgileriniz ve sonuçlarınız yerel bir panelde bir arada durur.
+Hycli'ye herhangi bir web sitesi URL'si ve ne yapmak istediğinizi verin. Üç yapay zekâ çalışanı; dokümantasyonu, önyüz JS paketlerini ve gerçek tarayıcı ağ trafiğini inceleyerek hem okuma hem de yazma işlemlerini kapsayan tipli bir CLI ve MCP araç seti oluşturur — üstelik hazırlık sırasında hesabınızda tek bir canlı değişiklik bile yapmaz.
 
-| Bağlayın | Hazırlayın | Kullanın |
-| --- | --- | --- |
-| Web sitesi ekleyip AI'ınızı seçin. | İlerlemeyi takip edin ve kullanılabilir işlemleri görün. | İşlem çalıştırın veya AI asistanınıza verin. |
+<p align="center">
+  <img src="../../docs/images/dashboard.png" alt="Web sitesi kartlarını, kullanılabilir eylemleri ve görev ilerlemesini gösteren Hycli kontrol paneli." width="100%" />
+</p>
+<p align="center"><sub>Web siteleriniz, hesaplarınız, yazma izinleriniz ve yapay zekâ ajanlarınız için tek bir yerel kontrol paneli ve CLI.</sub></p>
 
-<p align="center"><img src="../../docs/images/dashboard.png" alt="Web sitesi kartlarını, kullanılabilir işlemleri ve görevlerin ilerlemesini gösteren Hycli paneli." width="100%" /></p>
-<p align="center"><sub>Örnek araçlar ve hesaplar içeren örnek çalışma alanı.</sub></p>
+<a id="try-it-in-30-seconds"></a>
+## 30 saniyede deneyin
+
+```sh
+# 1. Hycli'ye bir web sitesi gösterin ve amacınızı açıklayın (okuma ve yazmaları hazırlar; sıfır canlı değişiklik)
+hycli prepare https://your-website.example --intent "Gönderileri ara, taslakları kaydet ve makaleleri yayınla"
+
+# 2. Hazırlanan tüm okuma, yazma ve çok adımlı iş akışlarını görün
+hycli describe your-website
+
+# 3. Okuma işlemlerini hemen çalıştırın
+hycli your-website search-posts --query "sürüm notları"
+
+# 4. Oluşturma, düzenleme veya silme yapmaya hazır olduğunuzda bu CLI için yazma iznini bir kez etkinleştirin
+hycli writes your-website allow
+hycli your-website create-draft --title "Hycli'den Merhaba" --body "Terminalimden otomatik olarak oluşturuldu."
+```
+
+Veya Hycli'yi **Claude Code, Cursor, Codex ya da Windsurf**'e `"command": "hycli", "args": ["mcp"]` ile bir kez bağlayın ve ajanınıza doğal dilde söyleyin:
+> *"Hycli ile `https://...` sitesini hazırla, hangi işlemlerin kullanılabilir olduğunu göster ve yeni bir gönderi taslağı oluştur."*
 
 <a id="get-started"></a>
-Bir alan adı ve isterseniz yanındaki alana bir amaç girin. Yapay zekâ önce siteyi anlayıp yararlı iş akışları seçer, ardından ön koşulları, girdileri ve sonuçları kontrol eder. Eksik adımlar varsa site inceleme gerektiriyor olarak kalır.
-
 ## Başlangıç
 
-Yeni masaüstü paketleri: Windows (`*-setup.exe`), macOS (`.dmg`) ve Linux (`.deb` veya arşivi açtıktan sonra `./install.sh`). Hycli’yi simgesinden açın: motor arka planda başlar ve tarayıcıyı açar. Terminali açık tutmanız gerekmez. Ayarlardan çıkın veya `hycli open`, `hycli status` ve `hycli stop` kullanın. Bu geliştirme paketleri v0.1.0’dan ayrıdır; platform doğrulama ve imza durumunu [kılavuzda](../BUILD.md) ve [CI](https://github.com/Hybirdss/Hycli/actions/workflows/verify.yml) sayfasında kontrol edin.
+Hycli, hem web sitesi motorunu hem de yerel kontrol panelini (`http://127.0.0.1:4318`) tek bir yerel çalıştırılabilir dosyada barındırır. Dağıtım paketini çalıştırmak için Rust veya Node.js gerekmez.
 
-**[İndir v0.1.0 · Linux x64](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** · glibc ≥ 2.39 · [SHA-256](https://github.com/Hybirdss/Hycli/releases/download/v0.1.0/hycli-0.1.0-linux-x64.tar.gz.sha256)
+### İndirme ve çalıştırma (Windows, macOS, Linux)
 
-Hycli, yerel bir web paneli olan Rust uygulamasıdır. Bu depo kopyasında paneli ve çalıştırılabilir dosyayı derleyin:
+Platformunuza uygun yerel yükleyiciyi veya taşınabilir arşivi **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** sayfasından indirin:
+
+| Platform | Mimari | Yerel Yükleyici | Taşınabilir Arşiv | Nasıl başlatılır |
+| --- | --- | --- | --- | --- |
+| **Windows 10/11** | x64 ve ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | `*-setup.exe` dosyasını çalıştırın (kullanıcı `PATH` değişkenine ve Başlat Menüsü'ne `hycli` ekler), ardından **Hycli**'yi başlatın veya PowerShell'de `hycli open` komutunu çalıştırın. |
+| **macOS 13+** | Apple Silicon (`arm64`) ve Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` dosyasını açın, **Hycli.app** uygulamasını **Applications** klasörüne sürükleyin ve açın (`hycli` komutunu otomatik olarak `~/.local/bin` içine bağlar). |
+| **Linux** | x64 ve ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` paketini kurun (`sudo apt install ./hycli-*.deb`) veya `.tar.gz` arşivini çıkarıp `./install.sh` dosyasını çalıştırın, ardından `hycli open` komutunu çalıştırın. |
+
+<details>
+<summary><strong>Terminalden hızlı taşınabilir kurulum ve kaynaktan derleme</strong></summary>
+
+**Linux / macOS taşınabilir arşiv:**
+
+```sh
+sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS'ta: shasum -a 256 -c
+tar -xzf hycli-0.1.0-*.tar.gz
+cd hycli-0.1.0-*
+./install.sh
+hycli open
+```
+
+**Windows PowerShell taşınabilir arşiv:**
+
+```powershell
+tar -xzf hycli-0.1.0-win32-x64.tar.gz
+cd hycli-0.1.0-win32-x64
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+hycli open
+```
+
+**Kaynaktan derleme (Linux, macOS, Windows):**
+
+[Derleme önkoşullarını](../BUILD.md) kurun ve şu komutları çalıştırın:
 
 ```sh
 node scripts/build.mjs
 ./dist/hycli open
 ```
 
-Panel `http://127.0.0.1:4318` adresinde açılır. Tarayıcıyı açmadan adresi yazdırmak için `hycli dashboard --no-open`, başka bir port seçmek için `--port 4320` kullanın. Web sitesi motoru ve panel aynı çalıştırılabilir dosyanın içindedir.
+İşletim sisteminiz için yerel `.exe`, `.dmg` veya `.deb` yükleyicisini üretmek üzere `node scripts/package-desktop.mjs` komutunu çalıştırın. Ayrıntılar için [derleme ve paketleme](../BUILD.md) ile [sürüm doğrulama](../RELEASING.md) belgelerine bakın.
 
-1. **AI bağlantıları** bölümünü açıp bir sağlayıcı bağlayın.
-2. Web sitesi adresini ekleyin ve hazırlığı yapacak AI'ı seçin.
-3. Kullanılabilir işlemleri inceleyin. Bir işlemi panelden çalıştırın veya MCP yapılandırmasını bir kez kopyalamak için **Kodlama aracıları** bölümünü açın.
+</details>
 
-Giriş gerektiren bir site için **Hesaplar** bölümünden hesap bağlayın. Bir web sitesinde birden fazla kayıtlı hesap bulunabilir; araçların hangi hesabı kullanacağını siz seçersiniz.
+### İlk web sitenizi bağlayın
+
+1. `hycli open` komutunu çalıştırarak (veya **Hycli** uygulama simgesine tıklayarak) `http://127.0.0.1:4318` adresindeki yerel kontrol panelini açın.
+2. **Yapay zekâ bağlantıları** bölümünü açın ve OpenAI, Anthropic Claude, xAI, Z.ai veya yerel ChatGPT (Codex) oturumunuzu bağlayın.
+3. Oturum açılması gereken siteler için **Hesaplar → Oturumumu bul** seçeneğine tıklayarak tarayıcı oturumunuzu yerel şifreli kasaya aktarın.
+4. Bir web sitesi URL'si ve isteğe bağlı amacınızı girin ya da **Kodlama ajanları** bölümündeki MCP yapılandırmasını kopyalayıp yapay zekâ asistanınıza yapıştırın.
 
 <a id="what-your-ai-can-do"></a>
-## AI'ınız neler yapabilir?
+## Yapay zekânız neler yapabilir
 
-Hycli, desteklenen web sitesi işlemlerini adı ve veri türleri tanımlanmış araçlara dönüştürür. AI'ın yazdığı açıklamalar, her işlemin ne yaptığını, hangi bilgilere ihtiyaç duyduğunu ve ne döndürdüğünü anlatır.
+Hycli, gerçek web sitesi arayüzlerini kendi kendini belgeleyen CLI alt komutlarına ve MCP araçlarına dönüştürür:
 
-Üç bağımsız AI aracısı okuma ve arama, yararlı iş akışları ve hesap kanıtları üzerinde çalışır. Panel, tamamlanan aşamaları, her aracının durumunu, geçen süreyi ve anlaşılır iş notlarını gösterir. CLI ve MCP çalışmaları aynı etkinlik geçmişinde görünür.
+| Web sitesi arayüzü | Hazırlanan yetenek |
+| --- | --- |
+| REST ve OpenAPI | JSON/YAML şemalarına ve API belgelerine dayalı tipli okuma ve yazma işlemleri. |
+| GraphQL | Tipli JSON değişkenlerine sahip ayrıştırılmış sorgu (`query`) ve mutasyon (`mutation`) belgeleri. |
+| HTML ve JS ile işlenen sayfalar | Yerel bir Chromium motoru aracılığıyla yapılandırılmış kayıtlar, bağlantılar, sayfalama ve işlenmiş GET okumaları. |
+| JSON ve URL kodlu formlar | Belgelenmiş girdiler, varsayılan değerler ve hesap kapsamlı form gönderimleri (`POST`, `PUT`, `PATCH`, `DELETE`). |
 
 <p align="center">
-  <img src="../../docs/images/preparation.gif" alt="Üç çalışan. Çok meşgul küçük bir kuş." width="100%" />
+  <img src="../../docs/images/preparation.gif" alt="Üç yapay zekâ çalışanı ve çok meşgul küçük bir kuş." width="100%" />
 </p>
-<p align="center"><sub>Üç çalışan. Çok meşgul küçük bir kuş.</sub></p>
+<p align="center"><sub>Üç yapay zekâ çalışanı ve çok meşgul küçük bir kuş.</sub></p>
 
-Hazırlık, web sitesinde gerçekten bulunan bilgilere dayanır: bağlantı verilen belgeler, API şemaları, yayımlanmış JavaScript ve tarayıcı eklentisinin gözlemlediği istek yapıları. Planlanan iş akışlarından sonra çalışanlar, henüz eylemi olmayan her belgelenmiş API işlemi üzerinde, her biri uygulanana ya da nedeniyle birlikte bildirilene kadar devam eder; işin `coverage` alanı geriye kalanları listeler. Bir işlemi kontrol etmek için sınırlı okuma işlemleri yapabilir. Test kayıtları oluşturmaz, içerik düzenlemez, nesne silmez, uzun uç nokta listeleri tahmin etmez veya çalışan bir sunucuya rastgele test girdileri göndermez.
-
-| İşlem | Davranış |
+| İşlem türü | Yürütme davranışı |
 | --- | --- |
-| Okuma veya arama | İşlem eldeki bulgularla destekleniyor ve okuma olarak sınıflandırılmışsa kendi başına çalışır. |
-| Oluşturma, gönderme, düzenleme veya silme | O web sitesi için değişikliklere izin verene kadar kapalıdır. Sonrasında onayınız için web sitesini, hesabı, işlemi ve kesinleşmiş girdileri gösterir. |
-| Etkisi belirsiz işlem | İstek gönderilmeden önce inceleme gerektirir. |
-| Kimlik doğrulama, ek doğrulama veya istek sınırı | Etkilenen istekleri duraklatır; yeniden bağlanmanızı veya beklemenizi sağlar. |
+| **Okuma veya arama** | Kanıtlara dayandırıldığında ve güvenli okuma olarak sınıflandırıldığında anında çalışır. |
+| **Oluşturma, gönderme, düzenleme veya silme** | Hazırlık sırasında asla çalıştırılmadan keşfedilir ve CLI tanımına eklenir. Varsayılan olarak kapalıdır (`writes: false`). Yapay zekâ ajanınız yazma işlemlerini etkinleştirmek için **CLI başına bir kez** onayınızı ister (`hycli writes SITE allow` veya MCP `hycli_writes`). Etkinleştirildikten sonra yazma işlemleri siz istediğinizde doğrudan çalışır. |
+| **Belirsiz etki** | Gönderilmeden önce inceleme için bekletilir. |
+| **Kimlik doğrulama engeli veya hız sınırı** | Aktarım stratejisini anında değiştirir (HTTP → sayfa içi `window.fetch` → gizli Chromium) veya güvenli bir şekilde duraklatır. |
 
-Her web sitesi salt okunur başlar. Değişiklik yapan işlemleri MCP'den gizlenir ve siz o web sitesinin ayrıntılarında **Değişikliklere izin ver** seçeneğini açana kadar CLI tarafından reddedilir; yeniden kapatmak bekleyen onayları iptal eder. Anahtar ve onay düğmesi yalnızca panelde bulunur ve panel oturumunu yalnızca `hycli dashboard` komutunun açtığı adrese verir; bu yüzden Hycli'yi çağıran bir ajan değişiklikleri açamaz ya da kendi isteğini onaylayamaz. Kullanıcınız olarak herhangi bir komutu çalıştırabilen bir ajan dosyalarınızı da okuyabilir; bu tür ajanları kendi izin istemlerinin altında tutun.
+Desteklenen istek biçimleri ve veri çıkarma kuralları için [işlem referansına](../SITESPEC.md) bakın.
 
-Onay, tek bir belirli istek için geçerlidir; beş dakika sonra sona erer ve yalnızca bir kez kullanılabilir. Girdilerin, hesabın, kayıtlı giriş bilgilerinin veya kurulu araç tanımının değişmesi onayı geçersiz kılar. CLI, MCP ve panel aynı sınırı uygular. Değişiklik yapan istekler hiçbir zaman otomatik olarak yeniden denenmez.
+<a id="common-concerns"></a>
+## Sıkça duyulan endişeler ve Hycli'nin çözümleri
 
-Destek web sitesine bağlıdır. Kullanılabilir belgesi veya gözlemlenmiş işlemi olmayan bir sayfa, giriş yapılmış tarayıcı, sağlanan bir SiteSpec veya ek hazırlık gerektirebilir. Hycli, her web sitesinin hazır bir API'ı olduğunu varsaymak yerine destekleyebildiği işlemleri bildirir.
+Bir yapay zekâ ajanını gerçek web sitelerine ve oturum açılmış hesaplara bağlamak önemli soruları beraberinde getirir. Hycli'nin her birini tasarım düzeyinde nasıl çözdüğü aşağıda açıklanmıştır:
 
-### Desteklenen özellikler
+### 1. "Yapay zekâ hesabımda yanlışlıkla paylaşım yapar, veri düzenler veya silerse ne olur?"
+- **CLI oluşturma sırasında sıfır canlı değişiklik:** Bir web sitesini hazırlarken veya kontrol ederken (`hycli prepare`, `hycli request`, `hycli recon`, `hycli check`), Hycli hem okuma hem de yazma işlemlerini keşfedip CLI tanımına derler ancak **asla canlı sunucuya yazma isteği göndermez**. Gizlenmiş değişiklikler bile (`/delete` gibi değiştirici yollara sahip `GET` rotaları, GraphQL `mutation` gövdeleri veya HTML `<form method="post">` eylemleri) doğrulama sırasında engellenir.
+- **CLI başına tek seferlik yazma onayı:** Yeni oluşturulan her web sitesi CLI'ı `writes: false` durumuyla başlar. Bir yapay zekâ ajanının bir CLI üzerinde ilk kez yazma işlemi çalıştırması gerektiğinde, **o CLI için bir kez** size sorar: *"`<site>` için yazma işlemlerine izin verilsin mi?"* Yalnızca siz onayladıktan sonra `hycli writes <site> allow` (veya MCP `hycli_writes`) komutunu çalıştırarak o CLI için doğrudan yazma yürütmesini etkinleştirir. Yazma iznini istediğiniz zaman `hycli writes <site> deny` komutuyla veya kontrol panelindeki **Değişikliklere izin ver** anahtarıyla geri alabilirsiniz.
+- **Başarısız yazmalarda otomatik yeniden deneme yok:** Başarısız olan veya kesintiye uğrayan yazma istekleri asla otomatik olarak yeniden denenmez. Bir değişiklik gönderildikten sonra bağlantı koparsa, Hycli mükerrer sipariş veya gönderi oluşturmak yerine önce web sitesini kontrol edebilmeniz için `action_outcome_unknown` durumunu bildirir.
 
-JSON veya YAML OpenAPI, REST, GraphQL ve JSON ya da URL kodlamalı form istekleri desteklenir. HTML kayıtları, bağlantılar ve sonraki sayfa bilgisi gözlemlenen seçicilerle çıkarılabilir; yerel Chromium ile işlenen GET sayfaları da okunabilir. Hazırlık sırasında bir okuma başarısız olursa yapay zekâ kanıtları inceler, tanımı düzeltir ve yeniden doğrular.
+### 2. "Hycli çerezlerimi, oturum belirteçlerimi veya API anahtarlarımı yapay zekâ modeline gönderiyor mu?"
+- **Sırlar asla LLM istemlerine girmez:** Tarayıcı çerezleri, `localStorage` / `sessionStorage` belirteçleri ve API anahtarları yalnızca yerel kasanızda saklanır (Windows Kimlik Bilgisi Yöneticisi, macOS Anahtar Zinciri ve Linux Secret Service üzerinden işletim sistemi anahtarlığıyla şifrelenir veya yalnızca kullanıcıya özel `0600` izinleriyle korunur).
+- **Sembolik bağlantı tarifleri (`ConnectionRecipe`):** Yapay zekâ modelleri yalnızca hesap etiketlerini, depolama anahtarı adlarını ve maskelenmiş yanıt şemalarını görür. Model sembolik bir `ConnectionRecipe` (bir çerez veya belirteç adına referans veren) oluşturur ve Hycli gerçek sırrı yürütme anında yerel olarak enjekte ederken tüm çıktılardan ve günlüklerden sırları temizler.
+- **Site kapsamlı salt okunur içe aktarma:** Bir tarayıcı oturumunu içe aktarmak, geçici bir salt okunur anlık görüntüden yalnızca hedef alan adının çerezlerini ve depolama verilerini okur. Tarayıcı güvenliğini asla zayıflatmaz veya diğer web sitelerinin verilerini dışa aktarmaz.
 
-Rastgele tarayıcı tıklama dizileri, multipart yüklemeleri ve ikili dosya indirmeleri henüz uygulanmadı. Paketler hesapları veya önceden üretilmiş CLI tanımlarını içermez.
+### 3. "Veri çekme işlemi CAPTCHA tetikler mi veya hesabımın yasaklanmasına yol açar mı?"
+- **Fuzzing veya kaba kuvvet taraması yok:** Hycli asla uç nokta kelime listelerini tahmin etmez veya canlı sunuculara fuzzing uygulamaz. Yalnızca bağlantılı dokümantasyondan, OpenAPI/GraphQL şemalarından, statik JS paketlerinden ve gözlemlenen tarayıcı ağ yapılarından öğrenir.
+- **Sıralı ve hız kontrollü trafik:** İstekler web sitesi ve hesap bazında sıraya alınır ve hız sınırına tabi tutulur; `Retry-After` başlıklarına uyulur ve okuma yeniden denemeleri sınırlandırılır.
+- **Strateji devre kesicisi ve gerçek tarayıcı yürütmesi:** Düz HTTP istekleri 403/429 hatasına veya bot korumasına (Cloudflare, Akamai Bot Manager) takıldığında, Hycli engellenen isteği döngüye sokmaz. Devre kesicisi aktarımı anında değiştirir — kimliği doğrulanmış tarayıcı bağlamınızın içinde `window.fetch(..., { credentials: 'include' })` çalıştırır veya yerel bir gizli Chromium motoruna geçer — ya da hesabınızı korumak için güvenli bir şekilde duraklatır.
 
-[İşlem biçimi](../SITESPEC.md) · [Paket doğrulaması](../RELEASING.md)
+### 4. "Bir yönlendirme oturumumu sızdırabilir mi veya paylaşılan bir tanım bilgisayarımdaki dosya yollarını ifşa edebilir mi?"
+- **Sıkı kaynak (Origin) bağlama:** Kimlik doğrulama başlıkları ve çerezler hedef kaynağa kilitlenir ve kaynaklar arası (cross-origin) yönlendirmelerde anında kaldırılır. Özel ve yerel ağ IP aralıkları, `--allow-local` açıkça belirtilmediği sürece varsayılan olarak engellenir.
+- **Taşınabilir tanımlar:** Yerel tarayıcı çalıştırılabilir dosya ve profil yolları yalnızca cihaz içi durumda kalır ve taşınabilir `SiteSpec` dosyalarına asla yazılmaz.
+
+### 5. "Oturumumun süresi dolduğunda yapay zekâ yeniden deneyerek jeton (token) israf eder mi?"
+- **Yapay zekâ olmadan deterministik sağlık kontrolü (`hycli check`):** `hycli check` (ve MCP `hycli_check`), bir LLM çağırmadan doğrulanmış okuma zincirlerini yeniden oynatır ve `signed_out` (hesabınızı yeniden bağlayın) durumunu `site_changed` (tanımı onarın), `blocked` ve `unreachable` durumlarından net bir şekilde ayırır.
 
 <a id="ai-connections"></a>
-## AI bağlantıları
+## Yapay zekâ bağlantıları
 
-| Bağlantı | Giriş |
+| Sağlayıcı | Kimlik Doğrulama |
 | --- | --- |
-| ChatGPT · API key | OpenAI API anahtarınız |
-| Claude | Anthropic API anahtarınız |
-| xAI | xAI API anahtarınız |
-| Z.ai | Z.ai API anahtarınız |
-| Z.ai Coding Plan | Z.ai Coding Plan API anahtarınız |
-| ChatGPT · login | Kurulu Codex app-server tarafından yönetilen ChatGPT girişi |
+| ChatGPT · API anahtarı | OpenAI API anahtarı |
+| Claude | Anthropic API anahtarı |
+| xAI | xAI API anahtarı |
+| Z.ai / Z.ai Coding Plan | Z.ai API anahtarı |
+| ChatGPT · oturum açma | Resmi Codex app-server protokolü üzerinden yerel ChatGPT oturumu |
 
-Panelden bir model seçin; hesabınıza özel olarak sunulan modelleri de kullanabilirsiniz. Bağlantı kontrolleri sağlayıcıyı ve seçilen modeli doğrular. API sağlayıcıları kullanımı sağlayıcı hesabınıza faturalandırır.
-
-Codex bağlantısı resmi app-server protokolünü kullanır. Hycli, Codex OAuth belirteçlerini okumaz veya kopyalamaz. Model, dosya, kabuk, tarayıcı, uygulama ve MCP çalıştırma yetkileri kapatılmış geçici bir konuşmada çalışır. Web sitesi hazırlığı Hycli'nin denetimli okuma araçlarıyla yapılır.
+Codex oturum bağlantısı; dosya, kabuk, tarayıcı ve harici MCP yürütmesi devre dışı bırakılmış geçici bir iş parçacığında çalışır; Hycli, Codex OAuth belirteçlerini asla okumaz veya kopyalamaz.
 
 <a id="use-hycli-with-your-ai"></a>
-## Hycli'yi AI'ınızla kullanın
+## Hycli'yi yapay zekânızla kullanın
 
-**Kodlama aracıları → Bağlantı ayarlarını görüntüle**
-
-Genel MCP bağlantısı, siteleri hazırlamayı ve eylemleri çalıştırmayı kapsar. Ajanınızı bir kez bağlayın; eksik araçları hazırlayabilsin, ilerlemeyi izleyebilsin ve yeni eylemleri kullanabilsin.
-
-```sh
-hycli mcp
-```
-
-Yalnızca kurulu eylemleri sunmak için `--sites-only` kullanın. Aşağıdaki bağlantı tek bir siteyle sınırlıdır.
-
-```sh
-hycli mcp --sites-only --only-site SITE
-```
+Hycli'yi MCP istemcinize ekleyin (**Kodlama ajanları → Bağlantı ayarlarını görüntüle** işletim sisteminiz için tam yolu gösterir):
 
 ```json
 {
   "mcpServers": {
     "hycli": {
       "command": "hycli",
-      "args": [
-        "mcp"
-      ]
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Ajanın PATH değişkeninde `hycli` yoksa panoda gösterilen yürütülebilir dosya yolunu kullanın.
+Yalnızca kurulu web sitesi araçlarını açığa çıkarmak için `hycli mcp --sites-only` kullanın veya tek bir siteyle sınırlandırmak için `--only-site SITE` ekleyin. MCP sunucusu `hycli_prepare`, `hycli_writes` (size sorduktan sonra CLI başına bir kez yazmayı etkinleştirir), `hycli_run`, `hycli_check`, `hycli_result` ve `hycli_activity` araçlarını sağlar — ve kimlik bilgilerini okumak için asla bir araç sunmaz.
 
-Aynı akış CLI üzerinden de kullanılabilir. Örnek URL, `SITE` ve `ACTION` yerine sitenizi ve `describe` komutunun döndürdüğü adları yazın.
+Terminalden de her iş akışı aynı şekilde çalışır:
 
 ```sh
-hycli prepare https://your-website.example --intent "Kaydedilmiş kaynakları bul"
-hycli request SITE "Add draft editing and publishing with full post content"
-hycli describe
-hycli describe SITE ACTION
+hycli prepare https://your-website.example --intent "Kaydedilen referansları bul"
+hycli request SITE "Tam gönderi içeriğiyle taslak düzenleme ve yayınlama ekle"
+hycli describe SITE
 hycli SITE ACTION --help
-hycli run SITE ACTION --arg query="design systems"
-hycli jobs show JOB_ID --watch
-```
-
-Başarısız bir işlemi yeniden denemeden önce web sitesini yapay zekâ kullanmadan kontrol edin:
-
-```sh
-hycli check          # kurulu her web sitesi
+hycli writes SITE allow
+hycli SITE ACTION --query "design systems"
 hycli check SITE
 ```
 
-Hazırlık, geçen okumaları sırayla kaydeder; önceki bir sonucun tanımlayıcısını bir sonrakine aktaran okumalar da buna dahildir. `hycli check` bunları yeniden oynatır ve önce kayıtlı hesabın kimliğini doğrular. Karar, `signed_out` (hesabı yeniden bağlayın) ile `site_changed` (hesap çalışıyor ama yanıtlar artık uyuşmuyor; onarım isteyin) arasında ayrım yapar; ayrıca `blocked` ve `unreachable` vardır. Hiçbir zaman bir değişiklik çalıştırmaz ve çıkış durumu karara göre belirlenir. MCP istemcileri aynı kontrolü `hycli_check` olarak alır.
-
-MCP üzerinden URL ve `intent` değerini `hycli_prepare` aracına verin, ardından `hycli_job` veya `hycli_result` ile işi izleyin. `hycli_run`, istemci araç listesini yenilemeden önce bile yeni eylemleri çalıştırabilir. Dahili kimlikleri önce ilgili listeleme veya arama eylemleriyle bulun. `hycli_result`, `hycli_check` ve `hycli_activity` araçları iki modda da kullanılabilir; böylece yapay zekânız çalışma notlarını, ilerlemeyi ve onaylanmış sonuçları izleyebilir, süresi dolmuş bir girişi değişmiş bir web sitesinden ayırt edebilir.
-
-Değişiklikler, panoda incelenecek bir onay kaydı döndürür. İsteği tekrarlamadan bu kaydın sonucunu izleyin. Başarısız okumalar veya beklenmeyen yanıtlar CLI üzerinde de hata durumuyla sonuçlanır.
-
-[Ajan kılavuzu](../../agent/AGENTS.md) · [Hycli becerisi](../../skills/hycli/SKILL.md)
+[Ajan kılavuzu](../../agent/AGENTS.md) · [Hycli becerisi (skill)](../../skills/hycli/SKILL.md)
 
 <a id="browser-sign-in"></a>
-## Tarayıcıdan giriş
+## Tarayıcı ile oturum açma
 
-Web sitesi hazırlığı, mevcut işletim sistemini, çalışan ve kayıtlı tarayıcıları ve kullanılabilir profilleri inceleyerek başlar. Yapay zekâ, belgeleri okumak, sayfaları görüntülemek, bir site oturumunu içe aktarmak ve bağlantıyı doğrulamak için bu imkânlar arasından seçim yapar. Tarayıcı ve profil yolları yerel makinede kalır; oluşturulan web sitesi tanımı geliştiricinin kurulum yollarına bağlı değildir.
+Hycli; Windows, macOS ve Linux'ta yerel Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale ve Firefox profillerini (ve kurulu olduğunda yerel gizli Chromium ikili dosyalarını) keşfederek yalnızca istenen web sitesinin oturumunu yerel şifreli kasaya aktarır. Aynı doğrulanmış web sitesi hesabını paylaşan profiller otomatik olarak tekilleştirilir.
 
-Chrome, Chromium, Edge, Brave ve Firefox çerezleri ile kaynak depolama verileri erişilebildiğinde içe aktarılabilir. Yalnızca istenen web sitesinin oturumu Hycli’nin yerel kasasına girer. Hycli doğrulanmış tek bir kimliği otomatik olarak seçer; aynı kimliğe ait profiller tek bir hesap seçeneği sayılır. Mevcut hesap seçimi korunur; farklı doğrulanmış kimlikler arasında seçim yapılması gerekir.
-
-**Hesaplar → Hesap bağla** bölümündeki **Oturum açma bilgilerimi bul** bu aramayı tekrarlar. Kullanılabilir oturum bulunmazsa **Web sitesinin giriş sayfasını aç** siteyi varsayılan tarayıcınızda açar. İletişim kutusu açıkken Hycli yeniden kontrol eder ve yalnızca seçilen hesap doğrulandıktan sonra hazırlığa devam eder. Yalnızca sekme açılması başarılı giriş anlamına gelmez.
-
-İşletim sistemi tarafından korunan, tarayıcıya bağlı, özel veya kapsayıcı oturumlar tarayıcı yardımcısını gerektirebilir. Yardımcı sekmesini seçip bağlantı kodu oluşturun; sonra yardımcıyı giriş yapılmış profilde açın, kodu girin ve web sitesine erişim izni verin. Doğrudan içe aktarma Windows App-Bound korumasını aşmaz veya tarayıcı profilini zayıflatmaz.
-
-- **Chrome ve Edge:** paketi açın ve tarayıcının uzantılar sayfasında **Paketlenmemiş öğe yükle** seçeneğini kullanın.
-- **Firefox:** Firefox paketini ve `about:debugging` sayfasındaki **Geçici eklenti yükle** seçeneğini kullanın. Geçici eklentiler Firefox yeniden başladığında kaldırılır. Bu sürümde mağaza üzerinden imzalı dağıtım sunulmaz.
-- **Çerez dosyası:** alternatif olarak JSON ve Netscape çerez dosyaları içe aktarılabilir. Dosyayı doğrudan panelden içe aktarın; içeriğini bir AI konuşmasına yapıştırmayın.
-
-Tarayıcı, oturum verilerini doğrudan yerel kimlik bilgisi kasasına aktarır. Modeller hesap etiketlerini, yerel anahtar adlarını ve yapısını, ayrıca kimlik bilgisi değerleri çıkarılmış araç sonuçlarını alır. Bu değerleri almadan yerel değerlere başvuran bir bağlantı tarifi oluşturabilirler. Çerez kapsamı, yolları, son kullanma tarihi ve desteklenen bölümleme bilgileri dikkate alınır; kimlik doğrulama başlıkları özgün kaynaklarıyla sınırlı kalır.
-
-Hesap kimliği, web sitesinin mevcut hesaba ilişkin gerçek yanıtından alınır. Tarayıcı profili adı, doğrulanmış web sitesi kimliği olarak kabul edilmez. Hesap henüz tanınmamışsa Hycli bunu belirtir. Bağlandıktan sonra normal gezinme, hesap yanıtını ve kullanılabilir isteklerin yapılarını sağlayabilir; istek değerleri, başlıklar veya yanıt gövdeleri hazırlığı yapan modele gösterilmez.
-
-Bir site, ayrı ve belgelenmiş API kimlik bilgileri ya da yerel olarak bulunmayan bir tarayıcı özelliği gerektirebilir. Hazırlık gerçek bağlantı ve okuma sonuçlarını kaydeder. Ana sayfanın alınması veya API’den bir giriş sayfası dönmesi entegrasyonun hazır olduğu anlamına gelmez. [Tarayıcı kurulum kılavuzu](../../browser-companion/guide.html) yardımcı uzantı akışını ve sınırlarını açıklar.
+Bir oturum Windows App-Bound şifrelemesi, özel kapsayıcılar veya içe aktarılmamış bir tarayıcı tarafından kilitlenmişse, tarayıcınız üzerinden oturum açmak için **Hesaplar → Hesap bağla** seçeneğini kullanın, [tarayıcı eşlikçi uzantısını](../../browser-companion/guide.html) bağlayın veya kontrol panelinde bir JSON/Netscape çerez dosyası içe aktarın (çerezleri asla bir yapay zekâ sohbetine yapıştırmayın).
 
 <a id="languages"></a>
 ## Diller
 
-Panel, sağdan sola yazılan Arapça dahil yukarıda bağlantısı verilen 20 dili destekler. Başlangıç dili İngilizcedir. Seçiminiz bu cihazda kaydedilir ve AI açıklamaları seçilen dilde hazırlanabilir.
+Kontrol paneli ve yapay zekâ tarafından oluşturulan işlem açıklamaları, sağdan sola (RTL) Arapça dahil olmak üzere bu README'nin üst kısmında bağlantısı verilen 20 dili destekler.
 
 <a id="local-data"></a>
 ## Yerel veriler ve istek sınırları
 
-Web sitesi tanımları, hesap üst verileri ve etkinlik yerel veri dizininde kalır. Farklı bir konum seçmek için `HYCLI_DATA_DIR` ayarlayın. Etkin konumu ve kimlik bilgilerinin nasıl korunduğunu **Ayarlar** bölümünden görebilirsiniz.
-
-Kimlik bilgisi kasası, kullanılabildiğinde işletim sisteminin anahtar deposuyla korunan bir şifreleme anahtarı kullanır. Anahtar deposu yoksa yalnızca dosya izinleriyle korunan bir depolama kullandığını açıkça bildirir; özel dizinler ve kimlik bilgisi dosyaları yalnızca mevcut işletim sistemi kullanıcısına açıktır. Kilidi açılamayan mevcut şifreli kasa sessizce değiştirilmez.
-
-İstekler her web sitesi ve hesap için sırayla, belirli aralıklarla gönderilir. Ayrıca web sitesinin tamamı için ek bir sınır uygulanır. Hycli, `Retry-After` değerini dikkate alır, yanıt boyutlarını ve okuma tekrarlarını sınırlar, kimlik doğrulama hatalarında veya sitenin ek doğrulama istemesi durumunda duraklar. Web sitesi hazırlığı sırasında Hycli hesap değiştirmez, cihaz parmak izini taklit etmez veya doğrulama adımlarını atlatmaz; motorun tanılama davranışı farklı olabilir. Bu önlemler gereksiz yükü azaltır; bir web sitesinin hesabı hiçbir zaman kısıtlamayacağını garanti etmez.
-
-Özel ve yerel web sitesi adresleri varsayılan olarak devre dışıdır. Güvendiğiniz, kendi sunucunuzda barındırılan bir site için paneli veya MCP sunucusunu açıkça `--allow-local` seçeneğiyle başlatın.
+Web sitesi tanımları, şifrelenmiş kimlik bilgileri ve etkinlik günlükleri işletim sisteminizin veri dizininde (Windows'ta `%LOCALAPPDATA%\hycli`, macOS'ta `~/Library/Application Support/hycli`, Linux'ta `~/.local/share/hycli` veya `HYCLI_DATA_DIR`) saklanır. Aktif kasa korumasını istediğiniz zaman **Ayarlar** altından inceleyebilirsiniz.
 
 <a id="contributing"></a>
 ## Geliştirme ve doğrulama
@@ -207,16 +235,18 @@ cargo build --locked --bin hycli --example dashboard_fixture
 node scripts/test-e2e.mjs --full
 ```
 
-Testler, yapay yerel web siteleri ve sağlayıcı yanıtları kullanır. Onayın isteğe bağlanmasını ve tekrar kullanımın engellenmesini, gizli bilgilerin çıkarılmasını, yönlendirmeleri, istek sınırlarını, değişikliklerin yeniden denenmemesini, tarayıcı oturumunun korunmasını ve sağlayıcı yanıtlarının beklenen yapıya uygunluğunu kapsar. Yalnızca Hycli'yi test etmek için gerçek bir hesapta içerik oluşturmayın, değiştirmeyin veya silmeyin.
-
-Ekran görüntüleri ve GIF, yalıtılmış örnek veriler kullanır. [Görsel kaynaklarına](../images/README.md) bakın.
+Tüm testler sentetik yerel web sitelerine ve test verilerine karşı çalışır — yazma işlemlerini asla gerçek bir üçüncü taraf hesabında test etmeyin. [Görsel materyal kaynaklarına](../images/README.md) bakın.
 
 ## Lisans ve kullanım amacı
 
-Hycli, [Apache-2.0](../../LICENSE) lisansı altında sunulur.
+Hycli, [Apache-2.0](../../LICENSE) lisansı altında lisanslanmıştır. Yalnızca erişim yetkiniz olan web siteleri ve hesaplarla kullanın. Garanti olmaksızın "olduğu gibi" sunulmaktadır; yazarlar ve katkıda bulunanlar, kullanımından kaynaklanan hiçbir kayıp, hesap kısıtlaması veya yasaklamadan sorumlu değildir.
 
-Hycli, web sitelerinin kullanımını kolaylaştıran komut satırı araçları oluşturmak ve kullanmak için tasarlanmıştır. Erişim yetkiniz olan web siteleri ve hesaplarla kullanın.
+## Star History
 
-Yazılım olduğu gibi, garanti verilmeksizin sunulur. Yasaların izin verdiği ölçüde yazarları ve katkıda bulunanlar, kullanımından doğan kayıplardan veya diğer sorunlardan sorumlu değildir. Yazılımı nasıl kullandığınız sizin sorumluluğunuzdadır.
-
-Yasaların izin verdiği ölçüde, yazarlar ve katkıda bulunanlar Hycli kullanımından kaynaklanan hesap yasaklamaları, askıya almaları veya kısıtlamalarından sorumlu değildir. Hycli'yi bilgisayar korsanlığı, yetkisiz erişim veya saldırılar için kullanmayın.
+<a href="https://www.star-history.com/#Hybirdss/Hycli&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+ </picture>
+</a>

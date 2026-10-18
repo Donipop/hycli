@@ -139,7 +139,7 @@ pub fn build_stealth_browser_config(
         builder = builder.new_headless_mode().window_size(1920, 947);
         #[cfg(windows)]
         {
-            builder = builder.arg("ignore-gpu-blocklist");
+            builder = builder.arg("ignore-gpu-blocklist").arg("disable-gpu");
         }
     }
     // Pass clean Chromium argument keys without leading `--` because chromiumoxide's
@@ -163,6 +163,10 @@ pub fn build_stealth_browser_config(
         .arg("disable-sync")
         .arg(("password-store", "basic"))
         .arg("use-mock-keychain")
+        .arg((
+            "disable-features",
+            "OptimizationHints,MediaRouter,DialMediaRouteProvider,Translate",
+        ))
         .arg(("disable-blink-features", "AutomationControlled"));
 
     if is_cloakbrowser_engine(engine) {

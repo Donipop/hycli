@@ -3,13 +3,16 @@
 </p>
 
 <p align="center">
-  <strong>Tự động hóa mọi trang web.</strong>
+  <strong>Biến mọi trang web thành công cụ CLI và MCP có kiểu dữ liệu rõ ràng cho tác nhân AI và terminal của bạn.</strong><br/>
+  <sub>Đọc, tìm kiếm, tạo mới, chỉnh sửa và tự động hóa—tận dụng phiên đăng nhập trình duyệt thật của bạn, không bao giờ làm lộ cookie cho LLM và tích hợp sẵn khả năng chống chặn bot.</sub>
 </p>
 
 <p align="center">
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Tải xuống (Windows · macOS · Linux)</a> ·
+  <a href="#try-it-in-30-seconds">Dùng thử trong 30 giây</a> ·
   <a href="#get-started">Bắt đầu</a> ·
   <a href="#what-your-ai-can-do">AI của bạn có thể làm gì</a> ·
-  <a href="#ai-connections">Kết nối AI</a> ·
+  <a href="#common-concerns">Mối lo ngại thường gặp</a> ·
   <a href="#use-hycli-with-your-ai">Dùng với AI</a>
 </p>
 
@@ -20,187 +23,205 @@
 
 </details>
 
-Thêm một trang web. Hycli chuẩn bị các thao tác mà AI có thể sử dụng và giải thích công dụng của từng thao tác. Quản lý trang web, thông tin đăng nhập và kết quả tại một nơi trong bảng điều khiển cục bộ.
-
-| Kết nối | Chuẩn bị | Sử dụng |
-| --- | --- | --- |
-| Thêm trang web và chọn AI. | Theo dõi tiến độ và xem các thao tác khả dụng. | Chạy một thao tác hoặc giao cho trợ lý AI. |
+Chỉ cần cung cấp cho Hycli địa chỉ trang web bất kỳ và mục tiêu bạn muốn thực hiện. Ba tác nhân AI sẽ phân tích tài liệu, gói JS giao diện và lưu lượng mạng trình duyệt thực tế để xây dựng bộ công cụ CLI và MCP có kiểu dữ liệu—bao gồm cả thao tác đọc lẫn ghi—mà không hề gửi bất kỳ yêu cầu ghi thực tế nào vào tài khoản của bạn trong suốt quá trình chuẩn bị.
 
 <p align="center">
   <img src="../../docs/images/dashboard.png" alt="Bảng điều khiển Hycli với thẻ trang web, thao tác khả dụng và tiến độ tác vụ." width="100%" />
 </p>
-<p align="center"><sub>Không gian làm việc mẫu với các công cụ và tài khoản mẫu.</sub></p>
+<p align="center"><sub>Quản lý trang web, tài khoản, quyền ghi và kết quả thực thi tại một nơi trong bảng điều khiển cục bộ và CLI.</sub></p>
+
+<a id="try-it-in-30-seconds"></a>
+## Dùng thử trong 30 giây
+
+```sh
+# 1. Trỏ Hycli tới bất kỳ trang web nào và mô tả mục tiêu (chuẩn bị cả đọc & ghi; 0 thay đổi thực tế khi chuẩn bị)
+hycli prepare https://your-website.example --intent "Tìm kiếm bài viết, lưu bản nháp và đăng bài mới"
+
+# 2. Xem toàn bộ lệnh đọc, ghi và quy trình nhiều bước đã được chuẩn bị
+hycli describe your-website
+
+# 3. Chạy ngay các thao tác đọc và tìm kiếm
+hycli your-website search-posts --query "ghi chú phát hành"
+
+# 4. Khi cần tạo, sửa hoặc xóa, chỉ cần bật quyền ghi một lần duy nhất cho CLI này rồi chạy trực tiếp
+hycli writes your-website allow
+hycli your-website create-draft --title "Xin chào từ Hycli" --body "Tự động hóa trực tiếp từ terminal."
+```
+
+Hoặc kết nối Hycli với **Claude Code, Cursor, Codex, hoặc Windsurf** một lần bằng `"command": "hycli", "args": ["mcp"]` rồi yêu cầu tác nhân bằng ngôn ngữ tự nhiên:
+> *"Dùng Hycli chuẩn bị `https://...`, cho tôi biết những thao tác nào dùng được và soạn giúp một bài viết nháp mới."*
 
 <a id="get-started"></a>
-Nhập tên miền và có thể ghi mục đích ở ô bên cạnh. AI trước tiên tìm hiểu trang web và chọn quy trình hữu ích, sau đó kiểm tra điều kiện tiên quyết, dữ liệu và kết quả cuối cùng. Nếu còn thiếu bước, trang web vẫn được đánh dấu cần kiểm tra.
-
 ## Bắt đầu
 
-Gói ứng dụng mới: Windows (`*-setup.exe`), macOS (`.dmg`) và Linux (`.deb` hoặc chạy `./install.sh` sau khi giải nén). Mở Hycli bằng biểu tượng: bộ máy tự chạy nền và mở trình duyệt. Không cần giữ cửa sổ terminal. Thoát trong Cài đặt hoặc dùng `hycli open`, `hycli status`, `hycli stop`. Các gói đang phát triển này tách biệt với v0.1.0; xem kiểm chứng nền tảng và chữ ký trong [hướng dẫn](../BUILD.md) và [CI](https://github.com/Hybirdss/Hycli/actions/workflows/verify.yml).
+Hycli được đóng gói thành một tệp thực thi gốc duy nhất chứa cả bộ máy xử lý trang web lẫn bảng điều khiển cục bộ (`http://127.0.0.1:4318`). Bạn không cần cài đặt Rust hay Node.js để chạy gói phát hành.
 
-**[Tải xuống v0.1.0 · Linux x64](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** · glibc ≥ 2.39 · [SHA-256](https://github.com/Hybirdss/Hycli/releases/download/v0.1.0/hycli-0.1.0-linux-x64.tar.gz.sha256)
+### Tải xuống và chạy (Windows, macOS, Linux)
 
-Hycli là ứng dụng Rust có bảng điều khiển web chạy cục bộ. Từ bản mã nguồn đã tải về này, hãy biên dịch bảng điều khiển và tệp thực thi:
+Tải bộ cài đặt gốc hoặc gói nén di động (portable) cho hệ điều hành của bạn từ **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**:
+
+| Hệ điều hành | Kiến trúc | Bộ cài đặt gốc | Gói nén di động | Cách khởi chạy |
+| --- | --- | --- | --- | --- |
+| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | Chạy `*-setup.exe` (không cần quyền quản trị, tự thêm `hycli` vào `PATH` người dùng và Start Menu), sau đó mở **Hycli** hoặc chạy `hycli open` trong PowerShell |
+| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Mở tệp `.dmg`, kéo **Hycli.app** vào **Applications** rồi mở ứng dụng (tự động liên kết `~/.local/bin/hycli`) |
+| **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Cài đặt tệp `.deb` (`sudo apt install ./hycli-*.deb`) hoặc giải nén `.tar.gz` và chạy `./install.sh`, sau đó chạy `hycli open` |
+
+<details>
+<summary><strong>Cài đặt gói di động qua terminal & biên dịch từ mã nguồn</strong></summary>
+
+**Gói di động cho Linux / macOS:**
+
+```sh
+sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # hoặc trên macOS: shasum -a 256 -c
+tar -xzf hycli-0.1.0-*.tar.gz
+cd hycli-0.1.0-*
+./install.sh
+hycli open
+```
+
+**Gói di động cho Windows PowerShell:**
+
+```powershell
+tar -xzf hycli-0.1.0-win32-x64.tar.gz
+cd hycli-0.1.0-win32-x64
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+hycli open
+```
+
+**Biên dịch từ mã nguồn (Linux, macOS, Windows):**
+
+Cài đặt [các công cụ cần thiết để biên dịch](../BUILD.md) rồi chạy:
 
 ```sh
 node scripts/build.mjs
 ./dist/hycli open
 ```
 
-Bảng điều khiển mở tại `http://127.0.0.1:4318`. Dùng `hycli dashboard --no-open` để in địa chỉ mà không mở trình duyệt, hoặc `--port 4320` để chọn cổng khác. Bộ máy xử lý trang web và bảng điều khiển nằm trong cùng một tệp thực thi.
+Chạy `node scripts/package-desktop.mjs` để tạo bộ cài đặt gốc `.exe`, `.dmg` hoặc `.deb` cho hệ điều hành hiện tại. Xem thêm [hướng dẫn biên dịch và đóng gói](../BUILD.md) cùng [kiểm chứng bản phát hành](../RELEASING.md).
 
-1. Mở **Kết nối AI** và kết nối nhà cung cấp.
-2. Thêm địa chỉ trang web và chọn AI sẽ chuẩn bị trang đó.
-3. Xem các thao tác khả dụng. Chạy thao tác trong bảng điều khiển hoặc mở **Tác nhân lập trình** để sao chép cấu hình MCP một lần.
+</details>
 
-Với trang web cần đăng nhập, hãy kết nối tài khoản từ mục **Tài khoản**. Một trang web có thể lưu nhiều tài khoản; bạn chọn tài khoản mà các công cụ sẽ sử dụng.
+### Kết nối trang web đầu tiên của bạn
+
+1. Chạy `hycli open` (hoặc nhấp vào biểu tượng ứng dụng **Hycli**) để mở bảng điều khiển cục bộ tại `http://127.0.0.1:4318`.
+2. Mở **Kết nối AI** và kết nối OpenAI, Anthropic Claude, xAI, Z.ai hoặc tài khoản đăng nhập ChatGPT (Codex) cục bộ.
+3. Đối với các trang web cần đăng nhập, nhấp **Tài khoản → Tìm phiên đăng nhập của tôi** để nhập phiên trình duyệt vào kho lưu trữ mã hóa cục bộ.
+4. Nhập địa chỉ trang web và mục tiêu để tạo công cụ, hoặc sao chép cấu hình MCP từ mục **Tác nhân lập trình** vào trợ lý AI của bạn.
 
 <a id="what-your-ai-can-do"></a>
 ## AI của bạn có thể làm gì
 
-Hycli chuyển các thao tác được hỗ trợ trên trang web thành công cụ có tên và kiểu dữ liệu. Phần mô tả do AI viết giải thích mục đích của mỗi thao tác, thông tin cần cung cấp và kết quả trả về.
+Hycli biến các giao diện trang web thực tế thành các lệnh con CLI và công cụ MCP có tài liệu mô tả rõ ràng:
 
-Ba tác nhân AI độc lập lần lượt xử lý việc đọc và tìm kiếm, các quy trình hữu ích và bằng chứng về tài khoản. Bảng điều khiển hiển thị các giai đoạn đã hoàn tất, trạng thái của từng tác nhân, thời gian đã trôi qua và ghi chú công việc dễ hiểu. Công việc qua CLI và MCP cũng xuất hiện trong cùng lịch sử hoạt động.
+| Giao diện trang web | Khả năng được chuẩn bị |
+| --- | --- |
+| REST và OpenAPI | Các thao tác đọc và ghi có kiểu dữ liệu dựa trên lược đồ JSON/YAML và tài liệu API. |
+| GraphQL | Các tài liệu truy vấn (query) và thay đổi (mutation) đã phân tích cú pháp cùng biến JSON có kiểu dữ liệu. |
+| Trang HTML & kết xuất bằng JS | Trích xuất danh sách bản ghi, liên kết, phân trang theo bộ chọn quan sát được và đọc trang GET kết xuất qua bộ máy Chromium cục bộ. |
+| Biểu mẫu JSON và mã hóa URL | Đầu vào có tài liệu mô tả, giá trị mặc định và gửi biểu mẫu theo phạm vi tài khoản (`POST`, `PUT`, `PATCH`, `DELETE`). |
 
 <p align="center">
   <img src="../../docs/images/preparation.gif" alt="Ba tác nhân. Một chú chim bé xíu bận rộn hết sức." width="100%" />
 </p>
 <p align="center"><sub>Ba tác nhân. Một chú chim bé xíu bận rộn hết sức.</sub></p>
 
-Quá trình chuẩn bị dựa trên thông tin thực sự có trên trang web: tài liệu được liên kết, lược đồ API, JavaScript công khai và cấu trúc yêu cầu mà tiện ích trình duyệt quan sát được. Sau các quy trình đã lên kế hoạch, các tác nhân tiếp tục xử lý mọi thao tác API đã có tài liệu mà chưa có hành động, cho đến khi từng thao tác được triển khai hoặc được báo cáo kèm lý do; `coverage` của tác vụ liệt kê những gì còn lại. Hycli có thể đọc trong phạm vi giới hạn để kiểm tra một thao tác. Nó không tạo bản ghi thử nghiệm, sửa nội dung, xóa đối tượng, phỏng đoán hàng loạt điểm cuối hay kiểm thử fuzz trên máy chủ đang hoạt động.
-
-| Thao tác | Hành vi |
+| Loại thao tác | Hành vi thực thi |
 | --- | --- |
-| Đọc hoặc tìm kiếm | Tự thực hiện khi có bằng chứng hỗ trợ và được phân loại là thao tác đọc. |
-| Tạo, gửi, sửa hoặc xóa | Tắt cho đến khi bạn cho phép thay đổi đối với trang web đó. Sau đó hiển thị trang web, tài khoản, thao tác và các giá trị đầu vào đã xác định để bạn phê duyệt. |
-| Tác động chưa rõ | Cần xem xét trước khi gửi yêu cầu. |
-| Xác thực, thử thách xác minh hoặc giới hạn yêu cầu | Tạm dừng các yêu cầu bị ảnh hưởng để bạn kết nối lại hoặc chờ. |
+| **Đọc hoặc tìm kiếm** | Chạy ngay lập tức khi có bằng chứng xác thực và được phân loại là thao tác đọc an toàn. |
+| **Tạo, gửi, sửa hoặc xóa** | Được phát hiện và tổng hợp vào đặc tả CLI nhưng tuyệt đối không bao giờ chạy trong quá trình chuẩn bị hay kiểm tra. Mặc định tắt (`writes: false`). Tác nhân AI sẽ hỏi bạn **một lần duy nhất cho mỗi CLI** xem có cho phép ghi hay không (`hycli writes SITE allow` hoặc MCP `hycli_writes`). Sau khi bật, các thao tác ghi sẽ chạy trực tiếp khi bạn yêu cầu. |
+| **Tác động chưa rõ ràng** | Được giữ lại để xem xét trước khi gửi yêu cầu. |
+| **Thử thách xác thực hoặc giới hạn tốc độ** | Chuyển đổi ngay chiến lược truyền tải (HTTP → `window.fetch` trong trang → Chromium ẩn danh) hoặc tạm dừng an toàn. |
 
-Mọi trang web đều bắt đầu ở chế độ chỉ đọc. Các thao tác thay đổi dữ liệu bị ẩn khỏi MCP và bị CLI từ chối cho đến khi bạn bật **Cho phép thay đổi** trong phần chi tiết của trang web đó; tắt lại sẽ hủy các phê duyệt đang chờ. Công tắc và nút phê duyệt chỉ có trong bảng điều khiển, và bảng điều khiển chỉ cấp phiên cho địa chỉ mà `hycli dashboard` mở, nên một tác nhân gọi Hycli không thể bật thay đổi hay tự phê duyệt yêu cầu của mình. Tác nhân có thể chạy bất kỳ lệnh nào dưới quyền người dùng của bạn cũng có thể đọc tệp của bạn; hãy giữ các tác nhân đó dưới các yêu cầu cấp quyền riêng của chúng.
+Xem [đặc tả thao tác](../SITESPEC.md) để biết các dạng yêu cầu và quy tắc trích xuất được hỗ trợ.
 
-Mỗi lần phê duyệt chỉ áp dụng cho đúng một yêu cầu, hết hạn sau năm phút và chỉ dùng được một lần. Thay đổi đầu vào, tài khoản, thông tin đăng nhập đã lưu hoặc định nghĩa công cụ đã cài sẽ làm mất hiệu lực phê duyệt. Việc thực thi qua CLI, MCP và bảng điều khiển tuân theo cùng một ranh giới. Thao tác ghi không bao giờ được tự động thử lại.
+<a id="common-concerns"></a>
+## Mối lo ngại thường gặp và cách Hycli giải quyết
 
-Mức độ hỗ trợ tùy thuộc vào trang web. Trang không có tài liệu hữu ích hoặc thao tác đã quan sát được có thể cần trình duyệt đã đăng nhập, SiteSpec được cung cấp hoặc bước chuẩn bị bổ sung. Hycli báo rõ những gì nó hỗ trợ thay vì khẳng định mọi trang web đều có API sẵn dùng.
+Khi kết nối tác nhân AI với các trang web thực tế và tài khoản đang đăng nhập, người dùng thường có những lo ngại chính đáng. Dưới đây là cách Hycli giải quyết từng vấn đề ngay từ thiết kế:
 
-### Phạm vi hỗ trợ
+### 1. "Liệu AI có vô tình đăng bài, chỉnh sửa hay xóa dữ liệu trên tài khoản của tôi không?"
+- **Không có bất kỳ thao tác ghi thực tế nào khi tạo và kiểm tra CLI:** Trong suốt quá trình chuẩn bị hoặc kiểm tra trang web (`hycli prepare`, `hycli request`, `hycli recon`, `hycli check`), Hycli phát hiện và biên dịch cả thao tác đọc lẫn ghi vào đặc tả CLI, nhưng **tuyệt đối không gửi yêu cầu ghi tới máy chủ**. Ngay cả các thao tác thay đổi ngụy trang dưới dạng đọc (đường dẫn `GET` có chứa `/delete`, thân yêu cầu GraphQL `mutation`, hoặc biểu mẫu HTML `<form method="post">`) cũng bị chặn hoàn toàn khi chạy xác minh.
+- **Xác nhận quyền ghi một lần duy nhất cho mỗi CLI:** Mọi CLI trang web mới tạo đều bắt đầu ở trạng thái tắt ghi (`writes: false`). Khi tác nhân AI cần chạy thao tác ghi trên một CLI lần đầu tiên, nó sẽ hỏi bạn **một lần duy nhất cho CLI đó**: *"Cho phép thực hiện thao tác ghi trên `<site>`?"* Chỉ sau khi bạn đồng ý để bật `hycli writes <site> allow` (hoặc MCP `hycli_writes`), các thao tác ghi mới được thực thi trực tiếp. Bạn có thể thu hồi quyền ghi bất cứ lúc nào bằng `hycli writes <site> deny` hoặc nút gạt **Cho phép thay đổi** trên bảng điều khiển.
+- **Không tự động thử lại thao tác ghi bị lỗi:** Các yêu cầu ghi bị lỗi hoặc bị gián đoạn không bao giờ được tự động gửi lại. Nếu mất kết nối sau khi gửi yêu cầu thay đổi, Hycli trả về `action_outcome_unknown` để bạn kiểm tra trang web trước thay vì tạo trùng đơn hàng hay bài đăng.
 
-Hỗ trợ OpenAPI dạng JSON hoặc YAML, REST, GraphQL, nội dung JSON và biểu mẫu mã hóa URL. Có thể trích xuất bản ghi, liên kết và trang tiếp theo từ HTML bằng bộ chọn đã quan sát; cũng hỗ trợ đọc trang GET được Chromium cục bộ kết xuất. Nếu lần đọc trong quá trình chuẩn bị thất bại, AI xem xét bằng chứng, sửa định nghĩa và kiểm tra lại.
+### 2. "Hycli có gửi cookie, token đăng nhập hay khóa API của tôi cho mô hình AI (LLM) không?"
+- **Thông tin bí mật không bao giờ đi vào prompt của LLM:** Cookie trình duyệt, token `localStorage` / `sessionStorage` và khóa API chỉ được lưu trữ nghiêm ngặt trong kho mã hóa cục bộ trên máy bạn (mã hóa qua trình quản lý khóa của hệ điều hành như Windows Credential Manager, macOS Keychain, Linux Secret Service, hoặc tệp chỉ dành cho người dùng hiện tại với quyền `0600`).
+- **Công thức kết nối ký hiệu (`ConnectionRecipe`):** Mô hình AI chỉ nhìn thấy nhãn tài khoản, tên khóa lưu trữ và lược đồ phản hồi đã được che thông tin nhạy cảm. Mô hình xây dựng một `ConnectionRecipe` dạng ký hiệu (chỉ tham chiếu đến tên cookie hoặc token), và Hycli sẽ chèn giá trị bí mật thực tế ngay tại máy cục bộ khi thực thi đồng thời tự động xóa mọi thông tin bí mật khỏi kết quả đầu ra và nhật ký.
+- **Nhập phiên chỉ đọc theo đúng phạm vi trang web:** Việc nhập phiên trình duyệt chỉ đọc cookie và bộ nhớ của đúng tên miền mục tiêu từ một bản chụp chỉ đọc tạm thời, không bao giờ làm giảm mức bảo mật của trình duyệt hay xuất dữ liệu của các trang web khác.
 
-Chưa hỗ trợ chuỗi nhấp trình duyệt tùy ý, tải lên multipart hoặc tải xuống tệp nhị phân. Gói phân phối không chứa tài khoản hay CLI đã tạo trước đó.
+### 3. "Việc thu thập dữ liệu có làm xuất hiện CAPTCHA hoặc khiến tài khoản của tôi bị khóa không?"
+- **Không fuzzing hay quét vét cạn (brute-force):** Hycli không bao giờ đoán danh sách đường dẫn ẩn hay kiểm thử fuzzing lên máy chủ đang hoạt động. Nó chỉ học từ tài liệu được liên kết, lược đồ OpenAPI/GraphQL, các gói JS tĩnh và cấu trúc mạng trình duyệt thực tế quan sát được.
+- **Lưu lượng tuần tự, được kiểm soát tốc độ:** Các yêu cầu được xếp hàng tuần tự và giới hạn tốc độ theo từng trang web và từng tài khoản, tuân thủ tiêu đề `Retry-After` cũng như giới hạn chặt chẽ số lần thử lại thao tác đọc và kích thước phản hồi.
+- **Bộ ngắt mạch chiến lược & thực thi trong ngữ cảnh trình duyệt thật:** Khi yêu cầu HTTP thông thường gặp lỗi 403/429 hoặc thử thách chống bot (Cloudflare, Akamai Bot Manager), Hycli không bao giờ lặp lại yêu cầu đã bị chặn. Bộ ngắt mạch sẽ lập tức chuyển đổi phương thức truyền tải—thực thi `window.fetch(..., { credentials: 'include' })` ngay bên trong ngữ cảnh trình duyệt đã xác thực của bạn hoặc dùng bộ máy Chromium ẩn danh cục bộ—hoặc tạm dừng an toàn để bảo vệ tài khoản.
 
-[Đặc tả thao tác](../SITESPEC.md) · [Kiểm tra gói](../RELEASING.md)
+### 4. "Chuyển hướng (redirect) có thể làm lộ phiên của tôi, hoặc việc chia sẻ tệp đặc tả có làm lộ đường dẫn máy tính không?"
+- **Ràng buộc nguồn gốc (Origin) nghiêm ngặt:** Các tiêu đề xác thực và cookie bị khóa chặt vào nguồn gốc mục tiêu và bị loại bỏ ngay lập tức khi chuyển hướng sang tên miền khác. Các dải IP mạng riêng và cục bộ (loopback) bị chặn mặc định trừ khi chỉ định rõ `--allow-local`.
+- **Đặc tả di động an toàn:** Đường dẫn tệp thực thi trình duyệt và hồ sơ cục bộ chỉ nằm trong trạng thái riêng của máy và không bao giờ được ghi vào các tệp `SiteSpec` dùng để chia sẻ.
+
+### 5. "Khi phiên đăng nhập hết hạn, AI có tốn token để thử lại liên tục không?"
+- **Kiểm tra trạng thái xác định không cần AI (`hycli check`):** `hycli check` (và MCP `hycli_check`) phát lại chuỗi thao tác đọc đã xác minh mà không cần gọi LLM, giúp phân biệt rõ ràng giữa `signed_out` (phiên đăng nhập hết hạn, cần kết nối lại tài khoản) với `site_changed` (cấu trúc trang web đã thay đổi, cần sửa đặc tả), `blocked` và `unreachable`.
 
 <a id="ai-connections"></a>
 ## Kết nối AI
 
-| Kết nối | Đăng nhập |
+| Nhà cung cấp | Phương thức xác thực |
 | --- | --- |
-| ChatGPT · khóa API | Khóa API OpenAI của bạn |
-| Claude | Khóa API Anthropic của bạn |
-| xAI | Khóa API xAI của bạn |
-| Z.ai | Khóa API Z.ai của bạn |
-| Z.ai Coding Plan | Khóa API Z.ai Coding Plan của bạn |
-| ChatGPT · đăng nhập | Đăng nhập ChatGPT do Codex app-server đã cài đặt quản lý |
+| ChatGPT · khóa API | Khóa API OpenAI |
+| Claude | Khóa API Anthropic |
+| xAI | Khóa API xAI |
+| Z.ai / Z.ai Coding Plan | Khóa API Z.ai |
+| ChatGPT · đăng nhập | Đăng nhập ChatGPT cục bộ qua giao thức Codex app-server chính thức |
 
-Chọn mô hình trong bảng điều khiển, bao gồm cả mô hình chỉ dành cho tài khoản của bạn. Kiểm tra kết nối xác minh nhà cung cấp và mô hình đã chọn. Nhà cung cấp API tính phí sử dụng vào tài khoản của bạn tại nhà cung cấp đó.
-
-Kết nối Codex dùng giao thức app-server chính thức. Hycli không đọc hay sao chép token OAuth của Codex. Suy luận chạy trong luồng tạm thời, với khả năng thực thi tệp, shell, trình duyệt, ứng dụng và MCP bị vô hiệu hóa. Các công cụ đọc do Hycli kiểm soát thực hiện việc chuẩn bị trang web.
+Kết nối đăng nhập Codex chạy trong một luồng tạm thời đã vô hiệu hóa quyền thực thi tệp, shell, trình duyệt và MCP bên ngoài; Hycli không bao giờ đọc hay sao chép token OAuth của Codex.
 
 <a id="use-hycli-with-your-ai"></a>
-## Dùng Hycli với AI
+## Dùng Hycli với AI của bạn
 
-**Tác nhân lập trình → Xem cài đặt kết nối**
-
-Kết nối MCP chung hỗ trợ cả chuẩn bị trang web và thực thi thao tác. Kết nối tác nhân một lần để tác nhân có thể chuẩn bị công cụ còn thiếu, theo dõi tiến độ và dùng thao tác mới.
-
-```sh
-hycli mcp
-```
-
-Dùng `--sites-only` để chỉ cung cấp các thao tác đã cài. Kết nối dưới đây được giới hạn trong một trang web.
-
-```sh
-hycli mcp --sites-only --only-site SITE
-```
+Thêm Hycli vào máy khách MCP của bạn (**Tác nhân lập trình → Xem cài đặt kết nối** sẽ hiển thị đường dẫn chính xác cho hệ điều hành của bạn):
 
 ```json
 {
   "mcpServers": {
     "hycli": {
       "command": "hycli",
-      "args": [
-        "mcp"
-      ]
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Nếu PATH của tác nhân không có `hycli`, hãy dùng đường dẫn tệp thực thi hiển thị trên bảng điều khiển.
+Dùng `hycli mcp --sites-only` nếu chỉ muốn hiển thị các công cụ trang web đã cài đặt, hoặc thêm `--only-site SITE` để giới hạn trong một trang web duy nhất. Máy chủ MCP cung cấp `hycli_prepare`, `hycli_writes` (bật quyền ghi một lần cho mỗi CLI sau khi hỏi bạn), `hycli_run`, `hycli_check`, `hycli_result` và `hycli_activity`—và tuyệt đối không bao giờ cung cấp công cụ nào để đọc thông tin xác thực.
 
-CLI cũng hỗ trợ cùng quy trình. Thay URL mẫu, `SITE` và `ACTION` bằng trang web của bạn và các tên do `describe` trả về.
+Từ terminal, mọi quy trình đều hoạt động theo cùng một cách:
 
 ```sh
 hycli prepare https://your-website.example --intent "Tìm tài liệu tham khảo đã lưu"
-hycli request SITE "Add draft editing and publishing with full post content"
-hycli describe
-hycli describe SITE ACTION
+hycli request SITE "Thêm tính năng chỉnh sửa nội dung, lưu bản nháp và đăng bài viết"
+hycli describe SITE
 hycli SITE ACTION --help
-hycli run SITE ACTION --arg query="design systems"
-hycli jobs show JOB_ID --watch
-```
-
-Trước khi thử lại một thao tác thất bại, hãy kiểm tra trang web mà không dùng AI:
-
-```sh
-hycli check          # mọi trang web đã cài đặt
+hycli writes SITE allow
+hycli SITE ACTION --query "design systems"
 hycli check SITE
 ```
-
-Quá trình chuẩn bị ghi lại theo thứ tự các lần đọc đã thành công, kể cả những lần chuyển mã định danh của kết quả trước cho lần đọc sau. `hycli check` chạy lại chúng, trước tiên xác nhận danh tính của tài khoản đã lưu. Kết quả phân biệt `signed_out` (kết nối lại tài khoản) với `site_changed` (tài khoản dùng được nhưng phản hồi không còn khớp; hãy yêu cầu sửa chữa), cùng với `blocked` và `unreachable`. Lệnh này không bao giờ chạy thay đổi, và mã thoát theo kết quả. Máy khách MCP nhận được cùng phép kiểm tra này dưới tên `hycli_check`.
-
-Với MCP, gửi URL và `intent` cho `hycli_prepare`, rồi theo dõi bằng `hycli_job` hoặc `hycli_result`. `hycli_run` có thể chạy thao tác mới trước khi máy khách làm mới danh sách công cụ. Hãy tìm ID nội bộ bằng các thao tác liệt kê hoặc tìm kiếm liên quan trước. Các công cụ `hycli_result`, `hycli_check` và `hycli_activity` vẫn khả dụng ở cả hai chế độ, để AI của bạn theo dõi ghi chú công việc, tiến độ và kết quả đã phê duyệt, đồng thời phân biệt phiên đăng nhập hết hạn với trang web đã thay đổi.
-
-Thao tác thay đổi trả về một phiếu để duyệt trên bảng điều khiển. Theo dõi kết quả của phiếu đó thay vì gửi lại yêu cầu. Lần đọc thất bại hoặc phản hồi không như dự kiến cũng tạo trạng thái lỗi trong CLI.
 
 [Hướng dẫn tác nhân](../../agent/AGENTS.md) · [Skill Hycli](../../skills/hycli/SKILL.md)
 
 <a id="browser-sign-in"></a>
 ## Đăng nhập qua trình duyệt
 
-Quá trình chuẩn bị trang web bắt đầu bằng việc kiểm tra hệ điều hành hiện tại, các trình duyệt đang chạy hoặc đã đăng ký và các hồ sơ hiện có. AI chọn trong số những khả năng đó để đọc tài liệu, hiển thị trang, nhập phiên của trang web và xác minh kết nối. Đường dẫn trình duyệt và hồ sơ chỉ ở trên máy cục bộ; định nghĩa trang web được tạo ra không phụ thuộc vào đường dẫn cài đặt của nhà phát triển.
+Hycli tự động phát hiện các hồ sơ Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale và Firefox cục bộ (cùng các tệp thực thi Chromium ẩn danh cục bộ nếu đã cài đặt) trên Windows, macOS và Linux, chỉ nhập phiên của đúng trang web được yêu cầu vào kho lưu trữ mã hóa cục bộ. Các hồ sơ dùng chung cùng một tài khoản trang web đã xác minh sẽ tự động được gộp lại.
 
-Có thể nhập cookie và dữ liệu lưu trữ theo nguồn từ Chrome, Chromium, Edge, Brave và Firefox khi truy cập được. Chỉ phiên của trang web được yêu cầu mới vào kho cục bộ của Hycli. Hycli tự động chọn một danh tính đã xác minh; các hồ sơ thuộc cùng danh tính đó được tính là một lựa chọn tài khoản. Lựa chọn tài khoản hiện tại được giữ nguyên; các danh tính đã xác minh khác nhau cần được chọn.
-
-Trong **Tài khoản → Kết nối tài khoản**, chọn **Tìm phiên đăng nhập của tôi** để tìm lại. Nếu không tìm thấy phiên có thể dùng, chọn **Mở trang đăng nhập của website** để mở trang web trong trình duyệt mặc định. Hycli kiểm tra lại khi hộp thoại còn mở và chỉ tiếp tục chuẩn bị sau khi tài khoản được chọn đã xác minh. Chỉ mở một thẻ không được coi là đăng nhập thành công.
-
-Phiên được hệ điều hành bảo vệ, gắn với trình duyệt, phiên riêng tư hoặc phiên trong vùng chứa có thể cần tiện ích trình duyệt. Chọn thẻ tiện ích, tạo mã kết nối, rồi mở tiện ích trong hồ sơ đã đăng nhập, nhập mã và cấp quyền truy cập trang web đó. Việc nhập trực tiếp không vượt qua cơ chế bảo vệ Windows App-Bound hoặc làm yếu tính bảo mật của hồ sơ trình duyệt.
-
-- **Chrome và Edge:** giải nén gói và dùng **Tải tiện ích đã giải nén** trên trang tiện ích mở rộng của trình duyệt.
-- **Firefox:** dùng gói Firefox và chọn **Tải tiện ích tạm thời** trong `about:debugging`. Tiện ích tạm thời bị xóa khi Firefox khởi động lại. Bản phát hành này không bao gồm bản phân phối có chữ ký qua cửa hàng.
-- **Tệp cookie:** có thể nhập tệp cookie định dạng JSON và Netscape làm phương án dự phòng. Nhập tệp trực tiếp trong bảng điều khiển; không dán nội dung vào cuộc trò chuyện với AI.
-
-Trình duyệt chuyển dữ liệu phiên trực tiếp vào kho thông tin xác thực cục bộ. Mô hình nhận nhãn tài khoản, tên và cấu trúc khóa cục bộ, cùng kết quả công cụ đã loại bỏ giá trị xác thực. Mô hình có thể tạo công thức kết nối tham chiếu các giá trị cục bộ đó mà không nhận chúng. Phạm vi, đường dẫn, thời hạn và thông tin phân vùng cookie được hỗ trợ đều được tôn trọng; tiêu đề xác thực chỉ được dùng với nguồn gốc ban đầu.
-
-Danh tính tài khoản được xác định từ phản hồi thực tế về tài khoản hiện tại của trang web. Tên hồ sơ trình duyệt không được coi là danh tính trang web đã xác minh. Nếu chưa xác định được tài khoản, Hycli sẽ thông báo rõ. Sau khi kết nối, việc duyệt web bình thường có thể cung cấp phản hồi tài khoản và cấu trúc các yêu cầu khả dụng mà không tiết lộ giá trị yêu cầu, tiêu đề hay nội dung phản hồi cho mô hình chuẩn bị.
-
-Một trang web có thể cần thông tin xác thực API riêng theo tài liệu hoặc khả năng trình duyệt không có sẵn cục bộ. Quá trình chuẩn bị ghi lại kết quả kết nối và đọc thực tế. Tải được trang chủ hoặc API trả về trang đăng nhập không có nghĩa là tích hợp đã sẵn sàng. [Hướng dẫn thiết lập trình duyệt](../../browser-companion/guide.html) giải thích quy trình tiện ích và các hạn chế.
+Nếu phiên bị khóa bởi cơ chế mã hóa Windows App-Bound, vùng chứa riêng tư (container) hoặc trình duyệt chưa được hỗ trợ nhập trực tiếp, hãy vào **Tài khoản → Kết nối tài khoản** để đăng nhập qua trình duyệt, kết nối [tiện ích mở rộng đồng hành trên trình duyệt](../../browser-companion/guide.html), hoặc nhập tệp cookie JSON/Netscape trong bảng điều khiển (tuyệt đối không dán nội dung cookie trực tiếp vào cửa sổ trò chuyện AI).
 
 <a id="languages"></a>
 ## Ngôn ngữ
 
-Bảng điều khiển hỗ trợ 20 ngôn ngữ được liên kết ở trên, bao gồm tiếng Ả Rập viết từ phải sang trái. Ngôn ngữ ban đầu là tiếng Anh. Lựa chọn được lưu trên thiết bị này và mô tả AI có thể được chuẩn bị bằng ngôn ngữ đã chọn.
+Bảng điều khiển và phần mô tả thao tác do AI tạo ra hỗ trợ 20 ngôn ngữ được liên kết ở đầu tệp README này, bao gồm cả tiếng Ả Rập viết từ phải sang trái (RTL).
 
 <a id="local-data"></a>
 ## Dữ liệu cục bộ và giới hạn yêu cầu
 
-Định nghĩa trang web, siêu dữ liệu tài khoản và hoạt động được lưu trong thư mục dữ liệu cục bộ. Đặt `HYCLI_DATA_DIR` để chọn vị trí khác. Dùng **Cài đặt** để xem vị trí đang dùng và cách bảo vệ thông tin xác thực.
-
-Khi có thể, kho thông tin xác thực dùng khóa mã hóa được bảo vệ bằng kho khóa của hệ điều hành. Khi không có kho khóa, hệ thống thông báo rõ rằng dữ liệu chỉ được bảo vệ bằng quyền truy cập tệp; thư mục riêng và tệp xác thực chỉ cho phép người dùng hệ điều hành hiện tại truy cập. Kho đã mã hóa không bị âm thầm thay thế khi không thể mở khóa.
-
-Yêu cầu được xử lý tuần tự và điều tiết theo từng trang web và tài khoản, đồng thời có hạn mức bổ sung cho toàn trang web. Hycli tuân thủ `Retry-After`, giới hạn kích thước phản hồi và số lần thử lại thao tác đọc, đồng thời tạm dừng khi xác thực thất bại hoặc gặp thử thách xác minh của trang. Quá trình chuẩn bị trang web không luân phiên tài khoản, giả mạo dấu vân tay hay vượt thử thách để né hạn chế. Các biện pháp này giảm tải không cần thiết nhưng không đảm bảo trang web sẽ không bao giờ hạn chế tài khoản.
-
-Địa chỉ trang web trong mạng riêng và trên máy cục bộ bị vô hiệu hóa mặc định. Với trang tự lưu trữ đáng tin cậy, hãy chỉ định rõ `--allow-local` khi khởi động bảng điều khiển hoặc máy chủ MCP.
+Định nghĩa trang web, thông tin xác thực đã mã hóa và nhật ký hoạt động được lưu trong thư mục dữ liệu của hệ điều hành (`%LOCALAPPDATA%\hycli` trên Windows, `~/Library/Application Support/hycli` trên macOS, `~/.local/share/hycli` trên Linux, hoặc `HYCLI_DATA_DIR`). Bạn có thể kiểm tra đường dẫn hiện tại và trạng thái bảo vệ kho khóa bất cứ lúc nào trong mục **Cài đặt**.
 
 <a id="contributing"></a>
 ## Phát triển và kiểm chứng
@@ -214,16 +235,18 @@ cargo build --locked --bin hycli --example dashboard_fixture
 node scripts/test-e2e.mjs --full
 ```
 
-Kiểm thử dùng trang web cục bộ và phản hồi nhà cung cấp được mô phỏng. Các kiểm thử bao gồm ràng buộc phê duyệt và ngăn phát lại, loại bỏ bí mật, chuyển hướng, giới hạn tốc độ, không thử lại thao tác ghi, bảo vệ phiên trình duyệt và hợp đồng phản hồi của nhà cung cấp. Không bao giờ dùng tài khoản thật để tạo, sửa hoặc xóa nội dung chỉ nhằm kiểm thử Hycli.
-
-Ảnh chụp màn hình và GIF sử dụng dữ liệu mẫu riêng biệt. Xem [nguồn hình ảnh](../images/README.md).
+Tất cả các bài kiểm thử đều chạy trên các trang web cục bộ mô phỏng và dữ liệu giả lập (fixtures)—tuyệt đối không kiểm thử thao tác ghi trên tài khoản dịch vụ bên thứ ba thật. Xem thêm [nguồn hình ảnh](../images/README.md).
 
 ## Giấy phép và mục đích sử dụng
 
-Hycli được cấp phép theo [Apache-2.0](../../LICENSE).
+Hycli được phát hành theo giấy phép [Apache-2.0](../../LICENSE). Chỉ sử dụng phần mềm với các trang web và tài khoản mà bạn có quyền truy cập hợp pháp. Phần mềm được cung cấp "nguyên trạng" không kèm theo bảo đảm; các tác giả và người đóng góp không chịu trách nhiệm đối với bất kỳ tổn thất, hạn chế tài khoản hoặc việc khóa tài khoản nào phát sinh từ quá trình sử dụng.
 
-Hycli dành cho việc tạo và sử dụng công cụ dòng lệnh giúp thao tác với trang web dễ dàng hơn. Chỉ sử dụng với trang web và tài khoản mà bạn được phép truy cập.
+## Star History
 
-Phần mềm được cung cấp nguyên trạng, không có bảo hành. Trong phạm vi pháp luật cho phép, tác giả và người đóng góp không chịu trách nhiệm về tổn thất hay vấn đề khác phát sinh từ việc sử dụng. Bạn chịu trách nhiệm về cách mình sử dụng phần mềm.
-
-Trong phạm vi pháp luật cho phép, tác giả và những người đóng góp không chịu trách nhiệm về việc tài khoản bị cấm, đình chỉ hoặc hạn chế do sử dụng Hycli. Không sử dụng Hycli để xâm nhập trái phép, truy cập khi chưa được phép hoặc thực hiện các cuộc tấn công.
+<a href="https://www.star-history.com/#Hybirdss/Hycli&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+ </picture>
+</a>

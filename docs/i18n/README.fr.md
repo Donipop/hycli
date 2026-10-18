@@ -1,15 +1,18 @@
 <p align="center">
-  <img src="../../docs/brand/concepts/hycli-shima-banner-v4.png" alt="Hycli — Des sites web prêts pour l’IA." width="100%" />
+  <img src="../../docs/brand/concepts/hycli-shima-banner-v4.png" alt="Hycli — Les sites web, prêts pour l'IA." width="100%" />
 </p>
 
 <p align="center">
-  <strong>Automatisez n’importe quel site web.</strong>
+  <strong>Transformez n'importe quel site web en une CLI typée et un serveur MCP pour votre agent d'IA.</strong><br/>
+  <sub>Lisez, recherchez, créez, modifiez et automatisez en utilisant votre vraie session de navigateur, sans fuite de cookies vers les LLM et avec une résilience anti-bot intégrée.</sub>
 </p>
 
 <p align="center">
-  <a href="#get-started">Premiers pas</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Télécharger (Windows · macOS · Linux)</a> ·
+  <a href="#try-it-in-30-seconds">Essayer en 30 secondes</a> ·
+  <a href="#get-started">Démarrer</a> ·
   <a href="#what-your-ai-can-do">Ce que votre IA peut faire</a> ·
-  <a href="#ai-connections">Connexions IA</a> ·
+  <a href="#common-concerns">Questions fréquentes</a> ·
   <a href="#use-hycli-with-your-ai">Utiliser avec votre IA</a>
 </p>
 
@@ -20,187 +23,205 @@
 
 </details>
 
-Ajoutez un site web. Hycli prépare des actions utilisables par votre IA et explique le rôle de chacune. Retrouvez vos sites web, vos connexions et vos résultats dans un tableau de bord local.
-
-| Connecter | Préparer | Utiliser |
-| --- | --- | --- |
-| Ajoutez un site web et choisissez votre IA. | Suivez la progression et consultez les actions disponibles. | Exécutez une action ou confiez-la à votre assistant IA. |
+Donnez à Hycli l'URL de n'importe quel site web et ce que vous souhaitez accomplir. Trois travailleurs d'IA inspectent sa documentation, ses bundles JS frontend et le trafic réseau réel du navigateur pour construire une CLI typée et un jeu d'outils MCP — couvrant aussi bien la lecture que l'écriture — sans jamais modifier votre compte pendant la préparation.
 
 <p align="center">
-  <img src="../../docs/images/dashboard.png" alt="Tableau de bord Hycli avec les fiches des sites web, les actions disponibles et la progression des tâches." width="100%" />
+  <img src="../../docs/images/dashboard.png" alt="Tableau de bord Hycli affichant les cartes de sites web, les actions disponibles et la progression des tâches." width="100%" />
 </p>
-<p align="center"><sub>Espace de travail d’exemple avec des outils et des comptes de démonstration.</sub></p>
+<p align="center"><sub>Un seul tableau de bord local et une seule CLI pour vos sites web, vos comptes, vos autorisations d'écriture et vos résultats.</sub></p>
+
+<a id="try-it-in-30-seconds"></a>
+## Essayer en 30 secondes
+
+```sh
+# 1. Indiquez un site web à Hycli et décrivez votre objectif (prépare lectures et écritures ; aucune modification en direct)
+hycli prepare https://your-website.example --intent "Rechercher des articles, enregistrer des brouillons et publier des billets"
+
+# 2. Consultez toutes les lectures, écritures et workflows en plusieurs étapes préparés
+hycli describe your-website
+
+# 3. Exécutez immédiatement les actions de lecture
+hycli your-website search-posts --query "notes de version"
+
+# 4. Autorisez l'écriture une seule fois pour cette CLI lorsque vous êtes prêt à créer, modifier ou supprimer
+hycli writes your-website allow
+hycli your-website create-draft --title "Bonjour depuis Hycli" --body "Automatisé depuis mon terminal."
+```
+
+Ou connectez Hycli à **Claude Code, Cursor, Codex ou Windsurf** une seule fois avec `"command": "hycli", "args": ["mcp"]` et demandez à votre agent en langage naturel :
+> *« Utilise Hycli pour préparer `https://...`, montre-moi les actions disponibles et rédige un nouveau brouillon. »*
 
 <a id="get-started"></a>
-Saisissez un domaine et, si vous le souhaitez, un objectif à côté. L’IA comprend d’abord le site et choisit des parcours utiles, puis vérifie leurs prérequis, leurs données et leurs résultats. Les étapes manquantes maintiennent le site en attente de vérification.
+## Démarrer
 
-## Premiers pas
+Hycli est distribué sous la forme d'un binaire natif unique contenant à la fois le moteur web et le tableau de bord local (`http://127.0.0.1:4318`). Ni Rust ni Node.js ne sont nécessaires pour exécuter une version publiée.
 
-Les nouveaux paquets de bureau sont Windows (`*-setup.exe`), macOS (`.dmg`) et Linux (`.deb` ou `./install.sh` après extraction). Ouvrez Hycli depuis son icône : le moteur démarre en arrière-plan et ouvre le navigateur. Aucun terminal ne doit rester ouvert. Quittez depuis les paramètres ou utilisez `hycli open`, `hycli status` et `hycli stop`. Ces paquets en développement sont distincts de v0.1.0 ; consultez les vérifications et signatures dans [le guide](../BUILD.md) et [CI](https://github.com/Hybirdss/Hycli/actions/workflows/verify.yml).
+### Télécharger et lancer (Windows, macOS, Linux)
 
-**[Télécharger v0.1.0 · Linux x64](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** · glibc ≥ 2.39 · [SHA-256](https://github.com/Hybirdss/Hycli/releases/download/v0.1.0/hycli-0.1.0-linux-x64.tar.gz.sha256)
+Téléchargez l'installateur natif ou l'archive portable correspondant à votre plateforme depuis **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** :
 
-Hycli est une application Rust dotée d'un tableau de bord web local. Depuis cette copie du dépôt, compilez le tableau de bord et l'exécutable :
+| Plateforme | Architecture | Installateur natif | Archive portable | Comment démarrer |
+| --- | --- | --- | --- | --- |
+| **Windows 10/11** | x64 et ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | Exécutez `*-setup.exe` (ajoute `hycli` au `PATH` utilisateur et au menu Démarrer sans droits administrateur), puis lancez **Hycli** ou exécutez `hycli open` dans PowerShell. |
+| **macOS 13+** | Apple Silicon (`arm64`) et Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Ouvrez le `.dmg`, faites glisser **Hycli.app** dans **Applications**, puis ouvrez-le (crée automatiquement le lien `hycli` dans `~/.local/bin`). |
+| **Linux** | x64 et ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Installez le `.deb` (`sudo apt install ./hycli-*.deb`) ou extrayez le `.tar.gz` et lancez `./install.sh`, puis exécutez `hycli open`. |
+
+<details>
+<summary><strong>Installation rapide depuis le terminal et compilation depuis les sources</strong></summary>
+
+**Archive portable Linux / macOS :**
+
+```sh
+sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # ou sur macOS : shasum -a 256 -c
+tar -xzf hycli-0.1.0-*.tar.gz
+cd hycli-0.1.0-*
+./install.sh
+hycli open
+```
+
+**Archive portable Windows PowerShell :**
+
+```powershell
+tar -xzf hycli-0.1.0-win32-x64.tar.gz
+cd hycli-0.1.0-win32-x64
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+hycli open
+```
+
+**Compiler depuis les sources (Linux, macOS, Windows) :**
+
+Installez les [prérequis de compilation](../BUILD.md) et exécutez :
 
 ```sh
 node scripts/build.mjs
 ./dist/hycli open
 ```
 
-Le tableau de bord s'ouvre à l'adresse `http://127.0.0.1:4318`. Utilisez `hycli dashboard --no-open` pour afficher l'adresse sans ouvrir de navigateur, ou `--port 4320` pour choisir un autre port. Le moteur des sites web et le tableau de bord sont inclus dans le même exécutable.
+Exécutez `node scripts/package-desktop.mjs` pour produire l'installateur natif `.exe`, `.dmg` ou `.deb` pour votre système d'exploitation. Consultez [la compilation et l'empaquetage](../BUILD.md) ainsi que [la vérification des versions](../RELEASING.md).
 
-1. Ouvrez **Connexions IA** et connectez un fournisseur.
-2. Ajoutez l'adresse d'un site web et choisissez l'IA qui le préparera.
-3. Examinez les actions disponibles. Exécutez-en une dans le tableau de bord ou ouvrez **Agents de programmation** pour copier une seule fois la configuration MCP.
+</details>
 
-Pour un site nécessitant une authentification, connectez son compte depuis **Comptes**. Plusieurs comptes peuvent être enregistrés pour un même site ; vous choisissez celui que ses outils utilisent.
+### Connecter votre premier site web
+
+1. Exécutez `hycli open` (ou cliquez sur l'icône de l'application **Hycli**) pour ouvrir le tableau de bord local sur `http://127.0.0.1:4318`.
+2. Ouvrez **Connexions IA** et connectez OpenAI, Anthropic Claude, xAI, Z.ai ou votre session locale ChatGPT Codex.
+3. Pour les sites nécessitant une connexion, cliquez sur **Comptes → Trouver ma session** afin d'importer la session de votre navigateur dans le coffre-fort local chiffré.
+4. Saisissez l'URL d'un site web et un objectif facultatif, ou copiez la configuration MCP depuis **Agents de programmation** dans votre assistant d'IA.
 
 <a id="what-your-ai-can-do"></a>
 ## Ce que votre IA peut faire
 
-Hycli transforme les opérations prises en charge sur les sites web en outils nommés et typés. Les descriptions rédigées par l'IA expliquent ce que chaque action accomplit, les informations dont elle a besoin et ce qu'elle renvoie.
+Hycli transforme les interfaces réelles des sites web en sous-commandes CLI auto-documentées et en outils MCP :
 
-Trois agents IA indépendants prennent en charge les lectures et recherches, les flux de travail utiles et les informations sur les comptes. Le tableau de bord affiche les étapes terminées, l’état de chaque agent, le temps écoulé et des notes de travail en langage clair. Les opérations de la CLI et de MCP figurent dans le même historique d’activité.
+| Interface du site web | Capacité préparée |
+| --- | --- |
+| REST et OpenAPI | Actions de lecture et d'écriture typées basées sur les schémas JSON/YAML et la documentation API. |
+| GraphQL | Documents de requête (`query`) et de mutation (`mutation`) analysés avec des variables JSON typées. |
+| Pages HTML et rendues en JS | Enregistrements structurés, liens, pagination et lectures GET rendues via un moteur Chromium local. |
+| Formulaires JSON et encodés en URL | Entrées documentées, valeurs par défaut et envois de formulaires liés au compte (`POST`, `PUT`, `PATCH`, `DELETE`). |
 
 <p align="center">
-  <img src="../../docs/images/preparation.gif" alt="Trois agents. Un petit oiseau très occupé." width="100%" />
+  <img src="../../docs/images/preparation.gif" alt="Trois travailleurs. Un tout petit oiseau très occupé." width="100%" />
 </p>
-<p align="center"><sub>Trois agents. Un petit oiseau très occupé.</sub></p>
+<p align="center"><sub>Trois travailleurs. Un tout petit oiseau très occupé.</sub></p>
 
-La préparation s'appuie sur les informations réellement disponibles sur le site : documentation liée, schémas d'API, JavaScript publié et structures de requêtes observées par l'extension du navigateur. Après les workflows prévus, les agents poursuivent avec chaque opération d'API documentée qui n'a pas encore d'action, jusqu'à ce que chacune soit implémentée ou signalée avec sa raison ; le `coverage` de la tâche indique ce qui reste. Elle peut effectuer des lectures limitées pour vérifier une opération. Elle ne crée pas de données de test, ne modifie pas de contenu, ne supprime pas d'objets, ne devine pas de longues listes de points de terminaison et ne réalise pas de fuzzing sur un serveur en production.
-
-| Action | Comportement |
+| Type d'action | Comportement d'exécution |
 | --- | --- |
-| Lire ou rechercher | S'exécute de manière autonome lorsque l'opération est étayée par des éléments concrets et classée comme lecture. |
-| Créer, envoyer, modifier ou supprimer | Désactivé tant que vous n'autorisez pas les modifications pour ce site web. Affiche ensuite le site web, le compte, l'action et les valeurs d'entrée résolues pour que vous les approuviez. |
-| Effet incertain | Nécessite une vérification avant l'envoi de la requête. |
-| Authentification, défi ou limite de requêtes | Suspend les requêtes concernées et vous permet de vous reconnecter ou d'attendre. |
+| **Lecture ou recherche** | S'exécute immédiatement lorsqu'elle s'appuie sur des preuves vérifiées et est classée comme lecture sûre. |
+| **Créer, envoyer, modifier ou supprimer** | Découverte et synthétisée dans la CLI sans jamais être exécutée pendant la préparation. Désactivée par défaut (`writes: false`). Votre agent d'IA vous demande **une seule fois par CLI** si vous souhaitez activer l'écriture (`hycli writes SITE allow` ou MCP `hycli_writes`). Une fois activées, les actions d'écriture s'exécutent directement à votre demande. |
+| **Effet incertain** | Mise en attente pour vérification avant tout envoi. |
+| **Défi d'authentification ou limite de débit** | Change de stratégie de transport (HTTP → `window.fetch` dans la page → Chromium furtif) ou se met proprement en pause. |
 
-Chaque site web démarre en lecture seule. Ses actions de modification sont masquées dans MCP et refusées par la CLI tant que vous n'avez pas activé **Autoriser les modifications** dans les détails de ce site web ; la désactiver annule les approbations en attente. Le commutateur et le bouton d'approbation n'existent que dans le tableau de bord, et celui-ci n'accorde sa session qu'à l'adresse ouverte par `hycli dashboard` : un agent qui appelle Hycli ne peut donc ni activer les modifications ni approuver sa propre requête. Un agent capable d'exécuter n'importe quelle commande sous votre utilisateur peut aussi lire vos fichiers ; laissez ces agents sous leurs propres demandes d'autorisation.
+Consultez la [référence des opérations](../SITESPEC.md) pour connaître les formats de requêtes pris en charge et les règles d'extraction.
 
-L'approbation porte sur une requête précise, expire après cinq minutes et ne peut être utilisée qu'une seule fois. Toute modification des entrées, du compte, des informations de connexion enregistrées ou de la définition de l'outil installé l'invalide. Les exécutions via la CLI, MCP et le tableau de bord respectent les mêmes règles. Les écritures ne sont jamais relancées automatiquement.
+<a id="common-concerns"></a>
+## Questions fréquentes et comment Hycli y répond
 
-La prise en charge dépend du site. Une page sans documentation exploitable ni opérations observées peut nécessiter un navigateur connecté, un SiteSpec fourni ou une préparation supplémentaire. Hycli indique ce qu'il peut prendre en charge, sans prétendre que chaque site dispose d'une API prête à l'emploi.
+Connecter un agent d'IA à de vrais sites web et à des comptes connectés soulève des questions légitimes. Voici comment Hycli les résout dès sa conception :
 
-### Fonctions prises en charge
+### 1. « L'IA risque-t-elle de publier, modifier ou supprimer des données sur mon compte par accident ? »
+- **Aucune modification en direct lors de la création de la CLI :** Lors de la préparation ou de la vérification d'un site web (`hycli prepare`, `hycli request`, `hycli recon`, `hycli check`), Hycli découvre et compile les opérations de lecture comme d'écriture dans la spécification CLI, mais **n'exécute jamais de requêtes d'écriture**. Même les mutations déguisées (routes `GET` avec des chemins modificateurs comme `/delete`, corps `mutation` GraphQL ou formulaires HTML `<form method="post">`) sont bloquées pendant la vérification.
+- **Confirmation d'écriture unique par CLI :** Chaque nouvelle CLI de site web démarre avec `writes: false`. Lorsqu'un agent d'IA doit exécuter une action d'écriture sur une CLI pour la première fois, il vous demande **une seule fois pour cette CLI** : *« Autoriser les actions d'écriture pour `<site>` ? »* Ce n'est qu'après votre confirmation qu'il exécute `hycli writes <site> allow` (ou MCP `hycli_writes`), activant l'exécution directe des écritures pour cette CLI. Vous pouvez révoquer cette autorisation à tout moment avec `hycli writes <site> deny` ou via le bouton **Autoriser les modifications** du tableau de bord.
+- **Aucun nouvel essai automatique pour les écritures :** Les requêtes d'écriture ayant échoué ou ayant été interrompues ne sont jamais relancées automatiquement. Si la connexion est coupée après l'envoi d'une mutation, Hycli renvoie `action_outcome_unknown` afin que vous puissiez vérifier l'état sur le site au lieu de dupliquer une commande ou une publication.
 
-Prise en charge d’OpenAPI JSON ou YAML, de REST, de GraphQL et des corps JSON ou de formulaire encodés pour les URL. Le HTML peut fournir des fiches, des liens et la page suivante à partir de sélecteurs observés ; les pages GET rendues par un Chromium local peuvent aussi être lues. Si une lecture échoue pendant la préparation, l’IA examine les éléments observés, corrige la définition et la vérifie à nouveau.
+### 2. « Hycli envoie-t-il mes cookies, mes jetons de session ou mes clés API au modèle d'IA ? »
+- **Les secrets n'entrent jamais dans les prompts du LLM :** Les cookies du navigateur, les jetons `localStorage` / `sessionStorage` et les clés API sont stockés exclusivement dans votre coffre-fort local (chiffré via le trousseau du système : Gestionnaire d'informations d'identification Windows, Trousseau macOS ou Linux Secret Service, ou restreint aux permissions utilisateur `0600`).
+- **Recettes de connexion symboliques (`ConnectionRecipe`) :** Les modèles d'IA ne voient que les libellés de compte, les noms de clés de stockage et les schémas de réponse masqués. Le modèle construit une `ConnectionRecipe` symbolique (faisant référence au nom d'un cookie ou d'un jeton), et Hycli injecte le secret réel localement au moment de l'exécution tout en nettoyant les secrets de toutes les sorties et de tous les journaux.
+- **Importation en lecture seule limitée au site :** L'importation d'une session de navigateur ne lit que les cookies et le stockage du domaine cible à partir d'un instantané temporaire en lecture seule. Elle n'affaiblit jamais la sécurité du navigateur et n'exporte aucun autre site web.
 
-Les séquences arbitraires de clics, les envois multipart et les téléchargements binaires ne sont pas encore pris en charge. Les paquets ne contiennent aucun compte ni CLI générée auparavant.
+### 3. « Le scraping va-t-il déclencher des CAPTCHA ou faire bannir mon compte ? »
+- **Pas de fuzzing ni de balayage par force brute :** Hycli ne devine jamais de listes d'endpoints et ne fait jamais de fuzzing sur des serveurs en production. Il apprend à partir de la documentation liée, des schémas OpenAPI/GraphQL, des bundles JS statiques et des requêtes réseau réellement observées dans le navigateur.
+- **Trafic sérialisé et cadencé :** Les requêtes sont sérialisées et limitées en débit par site web et par compte, en respectant l'en-tête `Retry-After` et en bornant les tentatives de lecture.
+- **Disjoncteur de stratégie et exécution dans le navigateur natif :** Lorsqu'une requête HTTP classique rencontre une erreur 403/429 ou un défi anti-bot (Cloudflare, Akamai Bot Manager), Hycli ne répète jamais en boucle la requête bloquée. Son disjoncteur bascule immédiatement de transport — en exécutant `window.fetch(..., { credentials: 'include' })` dans le contexte de votre navigateur authentifié ou via un moteur Chromium furtif local — ou se met proprement en pause pour protéger votre compte.
 
-[Contrat des opérations](../SITESPEC.md) · [Vérification des paquets](../RELEASING.md)
+### 4. « Une redirection peut-elle divulguer ma session, ou une spécification partagée exposer les chemins de mon ordinateur ? »
+- **Liaison stricte à l'origine :** Les en-têtes d'authentification et les cookies sont verrouillés sur l'origine cible et immédiatement supprimés lors de redirections vers une autre origine (cross-origin). Les plages d'adresses IP privées et de bouclage (loopback) sont bloquées par défaut sauf si `--allow-local` est explicitement passé.
+- **Spécifications portables :** Les chemins locaux de l'exécutable et des profils du navigateur restent dans l'état local de la machine et ne sont jamais écrits dans les fichiers `SiteSpec` portables.
+
+### 5. « L'IA va-t-elle gaspiller des tokens en réessayant lorsque ma session expire ? »
+- **Vérification d'état déterministe sans IA (`hycli check`) :** `hycli check` (et MCP `hycli_check`) rejoue les chaînes de lecture vérifiées sans invoquer de LLM et distingue clairement `signed_out` (reconnecter votre compte) de `site_changed` (réparer la spécification), `blocked` et `unreachable`.
 
 <a id="ai-connections"></a>
 ## Connexions IA
 
-| Connexion | Authentification |
+| Fournisseur | Authentification |
 | --- | --- |
-| ChatGPT · API key | Votre clé d'API OpenAI |
-| Claude | Votre clé d'API Anthropic |
-| xAI | Votre clé d'API xAI |
-| Z.ai | Votre clé d'API Z.ai |
-| Z.ai Coding Plan | Votre clé d'API Z.ai Coding Plan |
-| ChatGPT · login | Connexion ChatGPT gérée par l'app-server Codex installé |
+| ChatGPT · clé API | Clé API OpenAI |
+| Claude | Clé API Anthropic |
+| xAI | Clé API xAI |
+| Z.ai / Z.ai Coding Plan | Clé API Z.ai |
+| ChatGPT · connexion | Connexion ChatGPT locale via le protocole officiel Codex app-server |
 
-Choisissez un modèle dans le tableau de bord, y compris un modèle accessible spécifiquement à votre compte. Les vérifications de connexion contrôlent le fournisseur et le modèle sélectionné. Les fournisseurs d'API facturent l'utilisation sur votre compte chez eux.
-
-La connexion Codex utilise son protocole officiel app-server. Hycli ne lit ni ne copie les jetons OAuth de Codex. L'inférence s'exécute dans un fil éphémère où les opérations sur les fichiers et l'exécution du shell, du navigateur, des applications et de MCP sont désactivées. Les outils de lecture contrôlés de Hycli assurent la préparation des sites web.
+La connexion via Codex s'exécute dans un fil éphémère où l'accès aux fichiers, au shell, au navigateur et aux serveurs MCP externes est désactivé ; Hycli ne lit ni ne copie jamais les jetons OAuth de Codex.
 
 <a id="use-hycli-with-your-ai"></a>
 ## Utiliser Hycli avec votre IA
 
-**Agents de développement → Voir les paramètres de connexion**
-
-La connexion MCP générale permet de préparer les sites et d’exécuter leurs actions. Connectez votre agent une fois pour qu’il puisse créer les outils manquants, suivre la progression et utiliser les nouvelles actions.
-
-```sh
-hycli mcp
-```
-
-Utilisez `--sites-only` pour exposer uniquement les actions installées. La connexion suivante est limitée à un site.
-
-```sh
-hycli mcp --sites-only --only-site SITE
-```
+Ajoutez Hycli à votre client MCP (**Agents de programmation → Voir les paramètres de connexion** affiche le chemin exact pour votre système d'exploitation) :
 
 ```json
 {
   "mcpServers": {
     "hycli": {
       "command": "hycli",
-      "args": [
-        "mcp"
-      ]
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Si `hycli` n’est pas dans le PATH de l’agent, utilisez le chemin de l’exécutable indiqué dans le tableau de bord.
+Utilisez `hycli mcp --sites-only` pour n'exposer que les outils des sites web installés, ou ajoutez `--only-site SITE` pour restreindre l'accès à un seul site. Le serveur MCP fournit `hycli_prepare`, `hycli_writes` (active les écritures une fois par CLI après vous avoir demandé confirmation), `hycli_run`, `hycli_check`, `hycli_result` et `hycli_activity` — et n'expose jamais d'outil permettant de lire les identifiants.
 
-Le même parcours est disponible en CLI. Remplacez l’URL d’exemple, `SITE` et `ACTION` par votre site et les noms renvoyés par `describe`.
+Depuis le terminal, chaque workflow fonctionne exactement de la même manière :
 
 ```sh
-hycli prepare https://your-website.example --intent "Retrouver les références enregistrées"
-hycli request SITE "Add draft editing and publishing with full post content"
-hycli describe
-hycli describe SITE ACTION
+hycli prepare https://your-website.example --intent "Trouver les références enregistrées"
+hycli request SITE "Ajouter l'édition et la publication de brouillons avec le contenu complet"
+hycli describe SITE
 hycli SITE ACTION --help
-hycli run SITE ACTION --arg query="design systems"
-hycli jobs show JOB_ID --watch
-```
-
-Avant de relancer une action en échec, vérifiez le site web sans IA :
-
-```sh
-hycli check          # tous les sites web installés
+hycli writes SITE allow
+hycli SITE ACTION --query "design systems"
 hycli check SITE
 ```
 
-La préparation enregistre dans l'ordre les lectures réussies, y compris celles qui transmettent l'identifiant d'un résultat précédent à la suivante. `hycli check` les rejoue, en confirmant d'abord l'identité du compte enregistré. Le verdict distingue `signed_out` (reconnectez le compte) de `site_changed` (le compte fonctionne, mais les réponses ne correspondent plus ; demandez une réparation), en plus de `blocked` et `unreachable`. Il n'exécute jamais de modification, et le code de sortie suit le verdict. Les clients MCP disposent de la même vérification sous le nom `hycli_check`.
-
-En MCP, transmettez l’URL et `intent` à `hycli_prepare`, puis suivez le travail avec `hycli_job` ou `hycli_result`. `hycli_run` peut exécuter de nouvelles actions avant même que le client actualise sa liste d’outils. Recherchez les identifiants internes avec les actions de liste ou de recherche associées. Les outils `hycli_result`, `hycli_check` et `hycli_activity` restent disponibles dans les deux modes, afin que votre IA puisse suivre les notes de travail, la progression et les résultats approuvés, et distinguer une connexion expirée d'un site web modifié.
-
-Les modifications renvoient une demande à examiner dans le tableau de bord. Suivez son résultat sans répéter la demande. Une lecture échouée ou une réponse inattendue produit également un échec dans la CLI.
-
-[Guide des agents](../../agent/AGENTS.md) · [Skill Hycli](../../skills/hycli/SKILL.md)
+[Guide pour les agents](../../agent/AGENTS.md) · [Compétence Hycli](../../skills/hycli/SKILL.md)
 
 <a id="browser-sign-in"></a>
-## Connexion via le navigateur
+## Connexion au navigateur
 
-La préparation d’un site commence par l’examen du système d’exploitation actuel, des navigateurs en cours d’exécution ou enregistrés et des profils disponibles. L’IA choisit parmi ces possibilités pour lire la documentation, afficher les pages, importer une session du site et vérifier la connexion. Les chemins des navigateurs et des profils restent sur la machine locale ; la définition du site générée ne dépend pas des chemins d’installation du développeur.
+Hycli détecte les profils locaux de Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale et Firefox (ainsi que les binaires locaux de Chromium furtif lorsqu'ils sont installés) sous Windows, macOS et Linux, et n'importe que la session du site web demandé dans le coffre-fort local. Les profils partageant le même compte vérifié sur un site web sont automatiquement dédupliqués.
 
-Les cookies et le stockage d’origine de Chrome, Chromium, Edge, Brave et Firefox peuvent être importés lorsqu’ils sont accessibles. Seule la session du site demandé entre dans le coffre local de Hycli. Hycli sélectionne automatiquement une seule identité vérifiée ; les profils correspondant à cette identité comptent comme un seul choix de compte. Le compte déjà sélectionné est conservé ; des identités vérifiées différentes nécessitent un choix.
-
-Dans **Comptes → Connecter un compte**, **Trouver ma session** relance la recherche. Si aucune session utilisable n’est trouvée, **Ouvrir la page de connexion** ouvre le site dans votre navigateur par défaut. Hycli vérifie à nouveau tant que la boîte de dialogue est ouverte et reprend la préparation uniquement après vérification du compte sélectionné. L’ouverture d’un onglet ne suffit pas à confirmer une connexion.
-
-Les sessions protégées par le système d’exploitation, liées au navigateur, privées ou dans un conteneur peuvent nécessiter l’extension Hycli. Sélectionnez l’onglet de l’extension, créez un code de connexion, ouvrez l’extension dans le profil connecté, saisissez le code et autorisez l’accès à ce site. L’importation native ne contourne pas la protection App-Bound de Windows et n’affaiblit pas un profil de navigateur.
-
-- **Chrome et Edge :** décompressez le paquet et utilisez **Charger l'extension non empaquetée** sur la page des extensions du navigateur.
-- **Firefox :** utilisez le paquet Firefox et **Charger un module complémentaire temporaire** dans `about:debugging`. Les extensions temporaires sont supprimées au redémarrage de Firefox. Cette version n'inclut pas de distribution signée via les boutiques d'extensions.
-- **Fichier de cookies :** l'importation de fichiers de cookies JSON et Netscape est disponible comme solution de repli. Importez le fichier directement dans le tableau de bord ; ne collez pas son contenu dans une conversation avec une IA.
-
-Le navigateur transfère les données de session directement dans le coffre local des identifiants. Les modèles reçoivent les libellés des comptes, les noms et la structure des clés locales, ainsi que les résultats des outils dépourvus de valeurs d’identifiants. Ils peuvent créer une recette de connexion qui référence ces valeurs locales sans les recevoir. La portée, les chemins, l’expiration et les informations de partition prises en charge des cookies sont respectés, et les en-têtes d’authentification restent limités à leur origine initiale.
-
-L'identité du compte provient d'une réponse réelle du site concernant le compte courant. Le nom d'un profil de navigateur n'est pas considéré comme une identité vérifiée sur le site. Si le compte n'a pas encore été identifié, Hycli le précise. Après la connexion, une navigation normale peut fournir une réponse de compte et les structures des requêtes disponibles sans exposer au modèle de préparation les valeurs des requêtes, leurs en-têtes ni les corps des réponses.
-
-Un site peut nécessiter un identifiant d’API distinct et documenté ou une fonction du navigateur indisponible localement. La préparation consigne les résultats réels de connexion et de lecture. Charger la page d’accueil ou recevoir une page de connexion en réponse à une API ne signifie pas que l’intégration est prête. Le [guide de configuration du navigateur](../../browser-companion/guide.html) explique le fonctionnement de l’extension et ses limites.
+Si une session est protégée par le chiffrement App-Bound de Windows, des conteneurs privés ou un navigateur non importé, utilisez **Comptes → Connecter un compte** pour vous connecter via votre navigateur, associez l'[extension compagnon de navigateur](../../browser-companion/guide.html) ou importez un fichier de cookies JSON/Netscape dans le tableau de bord (ne collez jamais de cookies dans une conversation avec une IA).
 
 <a id="languages"></a>
 ## Langues
 
-Le tableau de bord prend en charge les 20 langues liées ci-dessus, dont l'arabe de droite à gauche. L'anglais est la langue initiale. Votre choix est enregistré sur cet appareil, et les descriptions de l'IA peuvent être préparées dans la langue sélectionnée.
+Le tableau de bord et les descriptions d'actions générées par l'IA prennent en charge les 20 langues listées en haut de ce README, y compris l'arabe de droite à gauche (RTL).
 
 <a id="local-data"></a>
 ## Données locales et limites de requêtes
 
-Les définitions des sites web, les métadonnées des comptes et l'activité restent dans le répertoire local de données. Définissez `HYCLI_DATA_DIR` pour choisir un autre emplacement. Consultez **Paramètres** pour voir l'emplacement actif et la protection des identifiants.
-
-Le coffre des identifiants utilise une clé de chiffrement protégée par le trousseau du système d'exploitation lorsqu'il est disponible. En l'absence de trousseau, il indique explicitement que le stockage n'est protégé que par les permissions des fichiers ; les répertoires privés et les fichiers d'identifiants sont réservés à l'utilisateur actuel du système. Un coffre chiffré existant n'est pas remplacé silencieusement lorsqu'il ne peut pas être déverrouillé.
-
-Les requêtes sont exécutées en série et espacées par site et par compte, avec un quota supplémentaire à l'échelle du site. Hycli respecte `Retry-After`, limite la taille des réponses et les nouvelles tentatives de lecture, et se met en pause en cas d'échec d'authentification ou de défi du site. La préparation des sites web ne change pas de compte, ne falsifie pas les empreintes et ne contourne pas les défis pour éviter une restriction. Ces mesures réduisent la charge évitable ; elles ne peuvent garantir qu'un site ne restreindra jamais un compte.
-
-Les adresses de sites privées et locales sont désactivées par défaut. Pour un site auto-hébergé de confiance, lancez le tableau de bord ou le serveur MCP avec l'option explicite `--allow-local`.
+Les définitions de sites web, les identifiants chiffrés et les journaux d'activité sont conservés dans le répertoire de données de votre système d'exploitation (`%LOCALAPPDATA%\hycli` sous Windows, `~/Library/Application Support/hycli` sous macOS, `~/.local/share/hycli` sous Linux ou `HYCLI_DATA_DIR`). Vous pouvez vérifier l'état de protection du coffre-fort à tout moment dans **Paramètres**.
 
 <a id="contributing"></a>
 ## Développement et vérification
@@ -214,16 +235,18 @@ cargo build --locked --bin hycli --example dashboard_fixture
 node scripts/test-e2e.mjs --full
 ```
 
-Les tests utilisent des sites locaux et des réponses de fournisseurs synthétiques. Ils couvrent la liaison des approbations aux requêtes et la prévention du rejeu, le masquage des secrets, les redirections, les limites de débit, l'absence de nouvelles tentatives d'écriture, la protection des sessions de navigateur et les contrats de réponse des fournisseurs. N'utilisez jamais un compte réel pour créer, modifier ou supprimer du contenu dans le seul but de tester Hycli.
-
-Les captures et le GIF utilisent des données de démonstration isolées. Consultez les [sources visuelles](../images/README.md).
+Tous les tests s'exécutent sur des sites web locaux synthétiques et des fixtures — ne testez jamais d'opérations d'écriture sur un véritable compte tiers. Consultez la [provenance des ressources visuelles](../images/README.md).
 
 ## Licence et utilisation prévue
 
-Hycli est distribué sous licence [Apache-2.0](../../LICENSE).
+Hycli est distribué sous licence [Apache-2.0](../../LICENSE). Utilisez-le uniquement avec des sites web et des comptes auxquels vous êtes autorisé à accéder. Fourni « en l'état » sans garantie ; les auteurs et contributeurs déclinent toute responsabilité en cas de pertes, de restrictions de compte ou de bannissements résultant de son utilisation.
 
-Hycli est destiné à la création et à l'utilisation d'outils en ligne de commande facilitant l'usage des sites web. Utilisez-le avec des sites et des comptes auxquels vous êtes autorisé à accéder.
+## Star History
 
-Le logiciel est fourni en l'état, sans garantie. Dans la mesure permise par la loi, ses auteurs et contributeurs ne sont pas responsables des pertes ou autres problèmes résultant de son utilisation. Vous êtes responsable de l'usage que vous en faites.
-
-Dans la mesure permise par la loi, les auteurs et les contributeurs ne sont pas responsables des bannissements, suspensions ou restrictions de comptes résultant de l’utilisation de Hycli. N’utilisez pas Hycli pour pirater, accéder sans autorisation ou mener des attaques.
+<a href="https://www.star-history.com/#Hybirdss/Hycli&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
+ </picture>
+</a>

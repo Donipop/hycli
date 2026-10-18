@@ -20,12 +20,48 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
+        let mut paths: Vec<_> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        paths.push(directory.clone());
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            for suffix in [".local\\bin", ".cargo\\bin"] {
+                paths.push(std::path::Path::new(&profile).join(suffix));
+            }
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            paths.push(std::path::Path::new(&appdata).join("npm"));
+        }
+        if let Ok(joined) = std::env::join_paths(paths) {
+            command.env("PATH", joined);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // When launched from an installed Hycli.app in /Applications or ~/Applications,
+        // automatically link ~/.local/bin/hycli so terminal and MCP users can run `hycli`.
+        let dir_str = directory.to_string_lossy();
+        let in_apps = dir_str.starts_with("/Applications/")
+            || std::env::var_os("HOME").is_some_and(|h| {
+                directory.starts_with(std::path::Path::new(&h).join("Applications"))
+            });
+        if in_apps && dir_str.ends_with(".app/Contents/MacOS") {
+            if let Some(home) = std::env::var_os("HOME") {
+                let local_bin = std::path::Path::new(&home).join(".local/bin");
+                let cli_target = directory.join("hycli");
+                if cli_target.is_file() && std::fs::create_dir_all(&local_bin).is_ok() {
+                    let link_path = local_bin.join("hycli");
+                    let _ = std::fs::remove_file(&link_path);
+                    let _ = std::os::unix::fs::symlink(&cli_target, &link_path);
+                }
+            }
+        }
     }
     #[cfg(unix)]
     {
         // Finder/application menus do not read interactive shell PATH configuration.
         let mut paths: Vec<_> =
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        paths.push(directory.clone());
         if let Some(home) = std::env::var_os("HOME") {
             for suffix in [".local/bin", ".cargo/bin"] {
                 paths.push(std::path::Path::new(&home).join(suffix));

@@ -56,9 +56,14 @@ Section "Hycli"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "Publisher" "Hybirdss"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "DisplayIcon" "$INSTDIR\hycli.ico"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Hycli" "NoRepair" 1
+  ${If} "$INSTDIR" == "$LOCALAPPDATA\Programs\Hycli"
+    nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$dir = \"$INSTDIR\"; $$u = [Environment]::GetEnvironmentVariable(\"Path\", \"User\"); $$parts = @(if ($$u) { $$u -split \";\" | Where-Object { $$_ -ne \"\" } } else { @() }); if ($$parts -notcontains $$dir) { [Environment]::SetEnvironmentVariable(\"Path\", (($$parts + $$dir) -join \";\"), \"User\") }"'
+    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=1000
+  ${EndIf}
 SectionEnd
 Section "Uninstall"
   SetShellVarContext current
@@ -67,6 +72,10 @@ Section "Uninstall"
   ${If} $0 != 0
     MessageBox MB_ICONSTOP "Hycli is busy. Finish or cancel active work before uninstalling."
     Abort
+  ${EndIf}
+  ${If} "$INSTDIR" == "$LOCALAPPDATA\Programs\Hycli"
+    nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$dir = \"$INSTDIR\"; $$u = [Environment]::GetEnvironmentVariable(\"Path\", \"User\"); if ($$u) { $$parts = @($$u -split \";\" | Where-Object { $$_ -ne \"\" -and $$_ -ne $$dir }); [Environment]::SetEnvironmentVariable(\"Path\", ($$parts -join \";\"), \"User\") }"'
+    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=1000
   ${EndIf}
   Delete "$DESKTOP\Hycli.lnk"
   Delete "$SMPROGRAMS\Hycli\Hycli.lnk"

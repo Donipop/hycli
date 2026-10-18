@@ -62,7 +62,14 @@ fn family(name: &str) -> Option<&'static str> {
         Some("Chromium")
     } else if name.contains("chrome") {
         Some("Chrome")
-    } else if name.contains("vivaldi") || name.contains("opera") {
+    } else if name.contains("vivaldi")
+        || name.contains("opera")
+        || name.contains("whale")
+        || name == "arc"
+        || name == "arc.app"
+        || name == "arc.exe"
+        || name == "arc browser"
+    {
         Some("Chromium")
     } else {
         None
@@ -158,7 +165,15 @@ impl Inventory {
                 for rel in [
                     "chrome",
                     "chrome.exe",
+                    "chrome-win/chrome.exe",
+                    "chrome-win64/chrome.exe",
+                    "chrome-win32/chrome.exe",
                     "Chromium.app/Contents/MacOS/Chromium",
+                    "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                    "Chrome.app/Contents/MacOS/Chrome",
+                    "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+                    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                    "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
                 ] {
                     let bin = dir_path.join(rel);
                     if bin.is_file() {
@@ -275,6 +290,7 @@ impl Inventory {
         if let Some(dirs) = directories::BaseDirs::new() {
             cloak_roots.push(dirs.home_dir().join(".cloakbrowser"));
             cloak_roots.push(dirs.data_local_dir().join("cloakbrowser"));
+            cloak_roots.push(dirs.cache_dir().join("cloakbrowser"));
         }
         self.cloakbrowser_apps(&cloak_roots);
         if let Some(paths) = std::env::var_os("PATH") {
@@ -336,7 +352,7 @@ impl Inventory {
         }
         #[cfg(target_os = "macos")]
         {
-            // Standard application containers, then bundle metadata; no browser-specific path.
+            // Standard application containers, then bundle metadata; check direct bundle stem before spawning plutil.
             for root in [
                 PathBuf::from("/Applications"),
                 dirs.home_dir().join("Applications"),
@@ -345,9 +361,23 @@ impl Inventory {
                     continue;
                 };
                 for entry in entries.filter_map(Result::ok).take(2048) {
-                    let Some(browser) = family(&entry.file_name().to_string_lossy()) else {
+                    let file_name = entry.file_name().to_string_lossy().into_owned();
+                    let Some(browser) = family(&file_name) else {
                         continue;
                     };
+                    let macos_dir = entry.path().join("Contents/MacOS");
+                    if let Some(stem) = file_name.strip_suffix(".app") {
+                        let direct = macos_dir.join(stem);
+                        if direct.is_file() {
+                            self.engine(direct, "application_registration", Some(browser));
+                            continue;
+                        }
+                        let lower_direct = macos_dir.join(stem.to_ascii_lowercase());
+                        if lower_direct.is_file() {
+                            self.engine(lower_direct, "application_registration", Some(browser));
+                            continue;
+                        }
+                    }
                     let plist = entry.path().join("Contents/Info.plist");
                     if let Some(binary) = metadata_command(
                         "plutil",
@@ -361,7 +391,7 @@ impl Inventory {
                         ],
                     ) {
                         self.engine(
-                            entry.path().join("Contents/MacOS").join(binary.trim()),
+                            macos_dir.join(binary.trim()),
                             "application_registration",
                             Some(browser),
                         );
@@ -371,6 +401,27 @@ impl Inventory {
         }
         #[cfg(windows)]
         {
+            for env_key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+                if let Some(base) = std::env::var_os(env_key).map(PathBuf::from) {
+                    for (rel, fam) in [
+                        ("Google\\Chrome\\Application\\chrome.exe", "Chrome"),
+                        ("Microsoft\\Edge\\Application\\msedge.exe", "Edge"),
+                        (
+                            "BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                            "Brave",
+                        ),
+                        ("Chromium\\Application\\chrome.exe", "Chromium"),
+                        ("Vivaldi\\Application\\vivaldi.exe", "Chromium"),
+                        ("Naver\\Naver Whale\\Application\\whale.exe", "Chromium"),
+                        ("Mozilla Firefox\\firefox.exe", "Firefox"),
+                    ] {
+                        let candidate = base.join(rel);
+                        if candidate.is_file() {
+                            self.engine(candidate, "application_registration", Some(fam));
+                        }
+                    }
+                }
+            }
             let _ = dirs;
             for hive in ["HKCU", "HKLM"] {
                 for key in [
@@ -393,11 +444,44 @@ impl Inventory {
     }
 
     fn configuration_roots(&mut self, dirs: &directories::BaseDirs) {
+        let mut base_dirs = Vec::new();
         for path in [
             dirs.config_dir(),
             dirs.config_local_dir(),
             dirs.data_local_dir(),
         ] {
+            if !base_dirs.contains(&path) {
+                base_dirs.push(path);
+            }
+        }
+        for base in &base_dirs {
+            for (rel, fam) in [
+                ("Google/Chrome/User Data", "Chrome"),
+                ("Google/Chrome", "Chrome"),
+                ("google-chrome", "Chrome"),
+                ("Microsoft/Edge/User Data", "Edge"),
+                ("Microsoft Edge", "Edge"),
+                ("microsoft-edge", "Edge"),
+                ("BraveSoftware/Brave-Browser/User Data", "Brave"),
+                ("BraveSoftware/Brave-Browser", "Brave"),
+                ("Chromium/User Data", "Chromium"),
+                ("Chromium", "Chromium"),
+                ("chromium", "Chromium"),
+                ("Vivaldi/User Data", "Chromium"),
+                ("Vivaldi", "Chromium"),
+                ("Arc/User Data", "Chromium"),
+                ("Naver/Naver Whale/User Data", "Chromium"),
+                ("Naver/Whale", "Chromium"),
+                ("Mozilla/Firefox", "Firefox"),
+                ("Firefox", "Firefox"),
+            ] {
+                let candidate = base.join(rel);
+                if candidate.is_dir() {
+                    self.roots.push((fam.into(), candidate));
+                }
+            }
+        }
+        for path in base_dirs {
             self.roots.push((String::new(), path.to_owned()));
         }
         // Legacy application-owned configuration and container directories may be outside XDG.
@@ -531,6 +615,7 @@ impl Inventory {
                 let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
                 if [
                     "cache",
+                    "caches",
                     "code cache",
                     "gpucache",
                     "node_modules",
@@ -545,6 +630,18 @@ impl Inventory {
                     "puppeteer",
                     "playwright",
                     "cypress",
+                    "logs",
+                    "containers",
+                    "group containers",
+                    "mobilesync",
+                    "clouddocs",
+                    "xcode",
+                    "docker",
+                    "steam",
+                    "packages",
+                    "temp",
+                    "programs",
+                    "windows",
                 ]
                 .contains(&name.as_str())
                     || name.contains("-backup")
@@ -560,9 +657,17 @@ impl Inventory {
                     hint.clone()
                 };
                 let is_browser_dir = !next_hint.is_empty()
-                    || ["mozilla", "bravesoftware", "google", "microsoft", "default"]
-                        .iter()
-                        .any(|k| name.contains(k))
+                    || [
+                        "mozilla",
+                        "bravesoftware",
+                        "google",
+                        "microsoft",
+                        "naver",
+                        "arc",
+                        "default",
+                    ]
+                    .iter()
+                    .any(|k| name.contains(k))
                     || name.starts_with("profile ");
                 if is_browser_dir {
                     queue.push_front((next_hint, entry.path(), depth + 1));
@@ -593,13 +698,18 @@ fn metadata_command(binary: &str, args: &[&str]) -> Option<String> {
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
-    let mut child = Command::new(which::which(binary).ok()?)
+    let mut command = Command::new(which::which(binary).ok()?);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = command.spawn().ok()?;
     let stdout = child.stdout.take()?;
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
