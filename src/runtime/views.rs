@@ -82,7 +82,9 @@ impl Runtime {
                         description: d
                             .map(|d| d.description.clone())
                             .unwrap_or_else(|| op.desc.clone()),
-                        output: d.map(|d| d.output.clone()).unwrap_or_default(),
+                        output: d.map(|d| d.output.clone()).filter(|value| !value.is_empty()).unwrap_or_else(|| {
+                            if op.pagination.is_some() { "One page of data with next_cursor when another page is available. Pass that handle back to this action; no automatic page fetching.".into() } else { String::new() }
+                        }),
                         effect: policy::operation_effect(op, &BTreeMap::new()),
                         verified: m.verified.get(&op.name) == Some(&true),
                         inputs: params(op)
@@ -94,7 +96,9 @@ impl Runtime {
                                     label: t
                                         .map(|i| i.label.clone())
                                         .unwrap_or_else(|| humanize(id)),
-                                    hint: t.map(|i| i.hint.clone()).unwrap_or_default(),
+                                    hint: t.map(|i| i.hint.clone()).filter(|value| !value.is_empty()).unwrap_or_else(|| {
+                                        if op.pagination.as_ref().is_some_and(|pagination| &pagination.input == id) { "Omit for the first page. For another page, use returned next_cursor within 15 minutes with the same action, account and other inputs; never supply a raw website cursor.".into() } else { String::new() }
+                                    }),
                                     kind: p.kind.clone(),
                                     required: p.required,
                                     default: p.default.clone(),

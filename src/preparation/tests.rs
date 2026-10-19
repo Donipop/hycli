@@ -491,3 +491,66 @@ fn write_auth_diagnostics_are_per_operation_and_do_not_claim_verification() {
         vec!["create-public".to_string(), "create-undeclared".to_string()]
     );
 }
+
+#[test]
+fn preparation_teaches_explicit_pagination_without_changing_default_contract() {
+    let environment = crate::environment::Environment {
+        discovery_pending: false,
+        os: "fixture".into(),
+        architecture: "fixture".into(),
+        browsers: vec![],
+        profiles: vec![],
+        capabilities: vec![],
+    };
+    let prompt = super::prompts::build_round_prompt(
+        &crate::state::Job::new("prepare", "en"),
+        &url::Url::parse("https://example.com").unwrap(),
+        0,
+        &environment,
+        0,
+        0,
+        0,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &[],
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(prompt["output_contract"]["spec"]["spec_version"], 2);
+    assert!(
+        prompt["output_contract"]["spec"]["operations"][0]
+            .get("pagination")
+            .is_none()
+    );
+    let optional = &prompt["optional_pagination_contract"];
+    assert_eq!(optional["spec_version"], 3);
+    assert_eq!(optional["operation"]["pagination"]["input"], "cursor");
+    let text = optional.to_string();
+    for required in [
+        "evidence",
+        "15 minutes",
+        "next_cursor",
+        "Never automatically",
+        "8 characters",
+        "4096 bytes",
+        "preflight",
+    ] {
+        assert!(text.contains(required), "{required}");
+    }
+    for (role, _) in super::prompts::WORKERS {
+        let worker = super::prompts::build_worker_task(&prompt, role, "fixture", &BTreeMap::new());
+        assert_eq!(worker["optional_pagination_contract"], *optional);
+    }
+    assert_eq!(
+        include_str!("../../agent/AGENTS.md"),
+        include_str!("../../agent/CLAUDE.md")
+    );
+}

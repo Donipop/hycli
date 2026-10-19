@@ -820,3 +820,37 @@ async fn auth_declaration_diagnostics_preserve_intentional_public_writes() {
     );
     assert_eq!(seen.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn mcp_listing_survives_metadata_removal_after_snapshot() {
+    for remove_site in [false, true] {
+        let core = runtime();
+        let definition = spec_for("https://fixture.test");
+        core.install(&definition).unwrap();
+        let mut unrelated = definition.clone();
+        unrelated.site.name = "unrelated".into();
+        core.install(&unrelated).unwrap();
+        let snapshot = core.sites("en").unwrap();
+        if remove_site {
+            core.remove_site("fixture").unwrap();
+        } else {
+            let mut replacement = definition.clone();
+            replacement.operations.retain(|op| op.name != "read-items");
+            core.install(&replacement).unwrap();
+        }
+        let mcp = crate::guarded_mcp::Server {
+            core,
+            sites_only: false,
+            only_site: None,
+        };
+        let names: Vec<_> = mcp
+            .tools_from_snapshot(snapshot)
+            .unwrap()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        assert!(names.contains(&"fixture_read-items".into()));
+        assert!(names.contains(&"unrelated_read-items".into()));
+        assert!(names.contains(&"hycli_result".into()));
+    }
+}

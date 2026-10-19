@@ -55,6 +55,14 @@ impl Spec {
                     "Set spec_version to 1, 2 or 3",
                 );
             }
+            if self.spec_version != 3 && self.operations.iter().any(|op| op.pagination.is_some()) {
+                add(
+                    &mut out,
+                    "spec_version",
+                    "Explicit private pagination requires SiteSpec v3".into(),
+                    "Set spec_version to 3 for an evidenced supported pagination contract, or remove pagination metadata; never expose the raw continuation as an ordinary input.",
+                );
+            }
             if self.site.name.is_empty() {
                 add(
                     &mut out,
