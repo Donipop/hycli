@@ -262,3 +262,182 @@ fn self_qa_decoding_and_redaction_preserves_adversarial_audit_trail() {
     assert_eq!(review.self_qa.len(), 1);
     assert_eq!(review.self_qa[0].lens, "interrogate_id_chain");
 }
+
+#[tokio::test]
+async fn query_addressed_iframe_is_read_without_requesting_unsafe_query_links() {
+    use crate::{runtime::Runtime, state::Job};
+    use axum::{Router, http::Uri};
+    use std::sync::{Arc, Mutex};
+    for unsafe_target in [
+        "/?do=delete&id=123",
+        "/oauth/callback?code=opaqueAuthorizationCode&state=opaqueState",
+        "/reference?sid=opaqueSessionId",
+        "/reference?key=opaqueApiKey",
+        "/graphql?query=mutation%20%7BdeleteAccount%7D",
+        "/reference?authId=opaque",
+        "/reference?accessKeyId=opaque",
+    ] {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        let router = Router::new().fallback(move |uri: Uri| {
+            let recorded = recorded.clone();
+            async move {
+                recorded.lock().unwrap().push(uri.to_string());
+                axum::response::Html(if uri.to_string() == "/" {
+                    format!(r#"<html><body><iframe src="/EntryList.page?blogId=demo&amp;categoryNo=0"></iframe><a href="{unsafe_target}">Untrusted navigation</a></body></html>"#)
+                } else {
+                    "<html><body><article><h1>Public entry</h1><p>Useful blog content</p></article></body></html>".into()
+                })
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let initial =
+            url::Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/tests")
+            .join(crate::util::id());
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        let mut job = Job::new("prepare", "en");
+        job.url = initial.to_string();
+        core.state.add_job(job.clone()).unwrap();
+        let mut sources = vec![];
+        let mut documents = BTreeMap::new();
+        let mut evidence = BTreeSet::new();
+        let mut links = BTreeSet::new();
+        core.ingest_round_reads(
+            &job,
+            &initial,
+            0,
+            "",
+            &mut vec![job.url.clone()],
+            &mut BTreeSet::new(),
+            &mut sources,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+            &mut links,
+            &mut BTreeSet::new(),
+            &mut evidence,
+            &mut BTreeSet::new(),
+            &mut documents,
+            &mut BTreeMap::new(),
+            &mut vec![],
+        )
+        .await
+        .unwrap();
+        server.abort();
+        assert_eq!(
+            *requests.lock().unwrap(),
+            vec!["/", "/EntryList.page?blogId=demo&categoryNo=0"],
+            "unsafe link was requested: {unsafe_target}"
+        );
+        let frame_url = initial
+            .join("/EntryList.page?blogId=demo&categoryNo=0")
+            .unwrap()
+            .to_string();
+        assert!(links.contains(&frame_url));
+        assert!(evidence.contains("/EntryList.page"));
+        assert!(
+            documents
+                .get(&frame_url)
+                .is_some_and(|text| text.contains("Useful blog content"))
+        );
+        assert!(sources.iter().any(|source| {
+            source.content["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Useful blog content"))
+        }));
+    }
+}
+
+#[tokio::test]
+async fn authenticated_document_discovery_leaves_icons_to_anonymous_image_cache() {
+    use crate::{runtime::Runtime, state::Job};
+    use axum::{
+        Router,
+        http::{HeaderMap, Uri},
+    };
+    use std::sync::{Arc, Mutex};
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+    let router = Router::new().fallback(move |uri: Uri, headers: HeaderMap| {
+        let recorded = recorded.clone();
+        async move {
+            recorded.lock().unwrap().push((uri.to_string(), headers.contains_key("cookie"), headers.contains_key("authorization")));
+            if uri.path() == "/favicon.svg" {
+                return ([("content-type", "image/svg+xml"), ("link", "")], r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32"/></svg>"#.to_owned());
+            }
+            ([("content-type", "text/html"), ("link", r#"</header-icon>; rel="alternate icon", </header-image>; rel=icon; title="alternate image""#)], if uri.path() == "/" {
+                r#"<html><head><link rel="icon" href="/favicon.svg?version=2"><link rel="icon" href="/icon?version=2&#38;id=1"><img src="/&#105;mage"></head><body><iframe src="/EntryList.page?blogId=demo&amp;categoryNo=0"></iframe></body></html>"#.into()
+            } else { "<html><article>Authenticated document</article></html>".into() })
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let initial = url::Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let root = std::env::var_os("HYCLI_TEST_DATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/tests")
+        })
+        .join(crate::util::id());
+    let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+    let cookies = crate::accounts::parse_cookies(&json!([{"name":"sid","value":"synthetic-fixture-session","domain":initial.host_str().unwrap(),"path":"/"}]).to_string(), initial.as_str()).unwrap();
+    let account = core
+        .connect_account("", initial.as_str(), cookies, "Test", "Test", "")
+        .unwrap();
+    let mut job = Job::new("prepare", "en");
+    job.url = initial.to_string();
+    core.state.add_job(job.clone()).unwrap();
+    let mut icons = vec![];
+    let mut documents = BTreeMap::new();
+    core.ingest_round_reads(
+        &job,
+        &initial,
+        0,
+        &account.id,
+        &mut vec![job.url.clone()],
+        &mut BTreeSet::new(),
+        &mut vec![],
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut documents,
+        &mut BTreeMap::new(),
+        &mut icons,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        *requests.lock().unwrap(),
+        vec![
+            ("/".into(), true, false),
+            (
+                "/EntryList.page?blogId=demo&categoryNo=0".into(),
+                true,
+                false
+            )
+        ],
+        "document crawler requested a static resource"
+    );
+    assert!(
+        documents
+            .values()
+            .any(|text| text.contains("Authenticated document"))
+    );
+    assert!(
+        core.fetch_site_image("fixture", &initial, icons)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        requests.lock().unwrap().last().unwrap(),
+        &("/favicon.svg?version=2".into(), false, false)
+    );
+    assert_eq!(requests.lock().unwrap().len(), 3);
+    assert!(root.join("site-images/fixture.image").exists());
+    server.abort();
+}
