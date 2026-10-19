@@ -1068,8 +1068,11 @@ fn large_results_do_not_bloat_dashboard_snapshots_and_clear_with_history() {
     job.result = Some(json!({"text":"x".repeat(2*1024*1024)}));
     let id = job.id.clone();
     state.add_job(job).unwrap();
-    assert!(std::fs::metadata(&path).unwrap().len() < 8192);
-    assert!(state.read().unwrap().jobs[0].result.is_none());
+    assert!(state.db_path().exists());
+    let snapshot = state.read().unwrap();
+    assert!(serde_json::to_vec(&snapshot).unwrap().len() < 8192);
+    assert!(snapshot.jobs[0].result.is_none());
+    assert!(state.has_job_result(&id).unwrap());
     assert_eq!(
         state.job(&id).unwrap().result.unwrap()["text"]
             .as_str()
@@ -1083,7 +1086,74 @@ fn large_results_do_not_bloat_dashboard_snapshots_and_clear_with_history() {
             Ok(())
         })
         .unwrap();
+    assert!(!state.has_job_result(&id).unwrap());
     assert!(!folder.join("results").join(format!("{id}.json")).exists());
+}
+
+#[test]
+fn legacy_json_state_and_results_migrate_atomically_to_sqlite() {
+    let folder = root();
+    let json_path = folder.join("dashboard.json");
+    let results_dir = folder.join("results");
+    std::fs::create_dir_all(&results_dir).unwrap();
+    let job_id = "fedcba9876543210fedcba9876543210";
+    let mut legacy = crate::state::Data::default();
+    legacy.settings.locale = "ko".into();
+    legacy.settings.theme = "dark".into();
+    let mut site = crate::state::SiteMeta::default();
+    site.title = "Example Site".into();
+    site.writes = true;
+    legacy.sites.insert("example".into(), site);
+    let mut job = crate::state::Job::new("action", "ko");
+    job.id = job_id.into();
+    job.site_id = "example".into();
+    job.status = "completed".into();
+    job.note("started", "", 0, "");
+    job.notes.push(crate::state::JobNote {
+        seq: 0,
+        at: crate::util::now(),
+        code: "completed".into(),
+        message: "Done".into(),
+        agent: String::new(),
+        count: 0,
+    });
+    legacy.jobs.push(job);
+    crate::util::atomic_file(&json_path, &serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let result_file = results_dir.join(format!("{job_id}.json"));
+    crate::util::atomic_file(
+        &result_file,
+        &serde_json::to_vec(&json!({"migrated": true, "items": [1, 2, 3]})).unwrap(),
+    )
+    .unwrap();
+
+    let state = crate::state::StateStore::open_with_recovery(&json_path, false).unwrap();
+    assert!(!json_path.exists());
+    assert!(folder.join("dashboard.json.migrated").exists());
+    assert!(!result_file.exists());
+    let data = state.read().unwrap();
+    assert_eq!(data.settings.locale, "ko");
+    assert_eq!(data.settings.theme, "dark");
+    assert!(state.site_writes("example").unwrap());
+    assert_eq!(data.jobs.len(), 1);
+    assert_eq!(data.jobs[0].notes.len(), 2);
+    let full_job = state.job(job_id).unwrap();
+    assert_eq!(full_job.result.unwrap()["migrated"], json!(true));
+
+    state
+        .update(|d| {
+            d.settings.locale = "ja".into();
+            Ok(())
+        })
+        .unwrap();
+    crate::util::atomic_file(
+        &json_path,
+        &serde_json::to_vec(&crate::state::Data::default()).unwrap(),
+    )
+    .unwrap();
+    let reopened = crate::state::StateStore::open_with_recovery(&json_path, false).unwrap();
+    assert!(!json_path.exists());
+    assert_eq!(reopened.settings().unwrap().locale, "ja");
+    assert!(reopened.site_writes("example").unwrap());
 }
 
 #[test]

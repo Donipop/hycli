@@ -26,7 +26,7 @@ impl Server {
         Ok(())
     }
     pub(crate) fn tools(&self) -> AppResult<Vec<Tool>> {
-        let language = self.core.state.read()?.settings.locale;
+        let language = self.core.state.settings()?.locale;
         let mut out = vec![];
         for site in self.core.sites(&language)? {
             if self.allowed(&site.id).is_err() {
@@ -155,7 +155,7 @@ impl Server {
     }
     async fn invoke(&self, name: &str, args: JsonObject) -> AppResult<Value> {
         let get = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("");
-        let locale = self.core.state.read()?.settings.locale;
+        let locale = self.core.state.settings()?.locale;
         if name == "hycli_activity" {
             let jobs: Vec<_> = self
                 .core
