@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import {documentationScreenshot} from './e2e-screenshots.mjs';
 process.chdir(fileURLToPath(new URL('..',import.meta.url)));
 const ports=JSON.parse(await fs.readFile(process.env.HYCLI_FIXTURE_OUTPUT || '.cache/e2e-ports.json','utf8'));
 const root=path.resolve(process.env.HYCLI_TEST_DATA || '.cache','hycli-extension-test-'+crypto.randomUUID());
@@ -26,7 +27,7 @@ try {
  await popup.locator('details summary').click();
  await popup.locator('#address').fill(ports.dashboard);await popup.locator('#code').fill(pair.code);await popup.locator('#pair').click();await popup.locator('#connect-step').waitFor({state:'visible'});
  await popup.locator('#profile').fill('Synthetic test profile');await popup.locator('#connect').click();await popup.locator('#status').getByText('Account connected',{exact:false}).waitFor({timeout:60000});
- await popup.screenshot({animations:'disabled',path:'docs/design/browser-companion-actual.png',timeout:120000});
+ await documentationScreenshot(popup,{path:'docs/design/browser-companion-actual.png',timeout:120000});
  console.log('Cookie transfer completed; verifying observed identity.');
  await website.bringToFront();await website.evaluate(async()=>{await fetch('/account');await fetch('/articles?q=fixture-query-must-not-be-recorded');});
  const start=Date.now();let state;while(Date.now()-start<45000){state=await request('/api/state');if(state.accounts.some(a=>a.profile==='Synthetic test profile'&&a.verified_identity))break;await new Promise(r=>setTimeout(r,500));}

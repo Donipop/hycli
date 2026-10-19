@@ -57,7 +57,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Registry and fixture regression tests
         shell: bash
-        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs
+        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs dashboard/e2e-screenshots.test.mjs
       - name: Rust toolchain
         run: |
           rustup update stable --no-self-update
@@ -124,6 +124,8 @@ jobs:
           BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/binding-e2e.mjs
           node scripts/test-e2e.mjs --full
+          # Verification must preserve reviewed screenshots before source packaging.
+          git diff --exit-code -- docs/images docs/design
       - name: Embedded release
         run: node scripts/build.mjs --skip-dependencies
       - name: Package public files

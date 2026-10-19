@@ -2,6 +2,7 @@ import {fileURLToPath} from 'node:url';
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import { documentationScreenshot } from './e2e-screenshots.mjs';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 const ports = JSON.parse(await fs.readFile(process.env.HYCLI_FIXTURE_OUTPUT || '.cache/e2e-ports.json', 'utf8'));
@@ -78,15 +79,15 @@ try {
   data = await state();
   assert.equal(data.providers.find(p => p.id === 'zai-coding-plan').connected, true);
   assert.equal(data.providers.find(p => p.id === 'zai').model, 'glm-5.3');
-  await page.screenshot({ path: 'docs/images/ai-connections.png', fullPage: true, animations: 'disabled' });
+  await documentationScreenshot(page, { path: 'docs/images/ai-connections.png', fullPage: true });
   await edit('zai-coding-plan');
-  await page.screenshot({ path: 'docs/design/zai-plan-selection.png', animations: 'disabled' });
+  await documentationScreenshot(page, { path: 'docs/design/zai-plan-selection.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await choice().isVisible(), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   await button(dialog(), 'common.cancel').click();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-  await page.screenshot({ path: 'docs/design/zai-connections-mobile.png', fullPage: true, animations: 'disabled' });
+  await documentationScreenshot(page, { path: 'docs/design/zai-connections-mobile.png', fullPage: true });
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ zai: 'passed', codingPlan: 'passed', selector: 'separate keys and models; no unsaved-key carryover', persistence: 'save, reload and disconnect isolated', mobile: 'no overflow', consoleErrors: 0 }, null, 2));
 } finally {

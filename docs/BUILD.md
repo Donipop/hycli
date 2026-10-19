@@ -97,6 +97,8 @@ Install the test browser with `cd dashboard && npx playwright install chromium`,
 
 `HYCLI_TEST_DATA` can select a different parent directory for isolated test data and browser profiles; the default is `.cache/` inside the project.
 
+The aggregate browser runner skips documentation screenshots so verification does not change reviewed source assets. Set `HYCLI_NO_SCREENSHOTS=0` to deliberately regenerate them from the synthetic fixtures. Direct browser suites generate screenshots by default; set `HYCLI_NO_SCREENSHOTS=1` to skip them. Failure diagnostics under `.cache/` remain available.
+
 The browser tests run real Rust dashboard and MCP APIs against synthetic local website/provider servers. They cover exact approval, secret redaction, account resume, website-key setup and rotation, summary failure/retry, duplicate jobs, cancellation, management and server-session reconnection. Mutations stay in those fixtures. Live paid provider accounts and every external website are not prerequisites for the fixture suite.
 
 An optional live check uses the already signed-in Codex connection and an explicitly supplied public website: `cargo run --example live_prepare -- https://your-public-website.example "The intended task"`. It prepares actions, runs one evidenced public read with complete inputs, and summarizes the result. It uses provider quota and performs no mutation.
