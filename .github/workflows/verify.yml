@@ -114,7 +114,13 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end service
         if: matrix.browser_tests
-        run: node scripts/test-e2e.mjs --full
+        run: |
+          # The hosted runner's installed Chrome has an existing Ubuntu sandbox profile.
+          # Keep chromiumSandbox enabled; downloaded headless shells lack that profile.
+          : "${CHROME_BIN:?The browser-test runner must provide installed Chrome}"
+          "$CHROME_BIN" --version
+          BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
+          node scripts/test-e2e.mjs --full
       - name: Embedded release
         run: node scripts/build.mjs --skip-dependencies
       - name: Package public files
