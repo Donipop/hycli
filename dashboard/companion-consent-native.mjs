@@ -77,7 +77,7 @@ try{
     const {sessionId}=await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:false});
     const send=(method,params={})=>new Promise((resolve,reject)=>{const command=++nextId,key=sessionId+':'+command;const timer=setTimeout(()=>{outstanding.delete(key);reject(Error('Popup protocol timed out: '+method));},15000);outstanding.set(key,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});cdp.send('Target.sendMessageToTarget',{sessionId,message:JSON.stringify({id:command,method,params})}).catch(reject);});
     const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('Popup evaluation failed');return r.result.value;};
-    const click=async selector=>{const rect=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView();const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...rect});await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...rect});};
+    const click=async selector=>{const rect=await evaluate(`(async()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...rect});await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...rect});};
     const fill=async(selector,text)=>{await click(selector);await evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`);await send('Input.insertText',{text});};
     await until(()=>evaluate("document.readyState==='complete'"),'popup ready');
     return{evaluate,click,fill};
@@ -87,8 +87,23 @@ try{
   await until(()=>popup.evaluate("!document.getElementById('connect-step').hidden"),'pairing');
   assert.equal(await popup.evaluate("document.getElementById('permission-origins').textContent"),site+'/*\n'+parent+'/*');
   const active=await worker.evaluate(async()=>{const tabs=await chrome.tabs.query({active:true,currentWindow:true});return tabs[0]?.url;});assert.equal(new URL(active).origin,site,'Browser-action popup must retain the real website as active tab');
+  // Observe real dispatched input without replacing the production handler or
+  // browser tab/cookie/permission APIs. Only synthetic fixture metadata is kept.
+  await popup.evaluate("document.getElementById('connect').addEventListener('click',e=>{globalThis.nativeClickProof={trusted:e.isTrusted,active:navigator.userActivation.isActive};},{capture:true,once:true})");
   await popup.click('#connect');
-  const connected=await until(()=>bridgeRequests.find(r=>r.route==='/bridge/connect'),'real popup connection');
+  let connected;
+  try {
+    connected=await until(async()=>{
+      const request=bridgeRequests.find(r=>r.route==='/bridge/connect');if(request)return request;
+      const error=await popup.evaluate("document.getElementById('status').className==='error'&&document.getElementById('status').textContent");
+      if(error)throw Error('Production popup rejected connection: '+error);
+      return null;
+    },'real popup connection');
+  } catch(error) {
+    report.popupDiagnostic=await popup.evaluate("({click:globalThis.nativeClickProof||null,status:document.getElementById('status').textContent,disabled:document.getElementById('connect').disabled,visibility:document.visibilityState})").catch(()=>({unavailable:true}));
+    report.cookieDiagnostic=await worker.evaluate(async()=>({stores:await chrome.cookies.getAllCookieStores(),cookies:(await chrome.cookies.getAll({})).map(({name,domain,path,hostOnly,secure,storeId,session,expirationDate})=>({name,domain,path,hostOnly,secure,storeId,session,expirationDate}))})).catch(()=>({unavailable:true}));
+    throw error;
+  }
   assert.deepEqual(connected.body.cookies.map(c=>c.name).sort(),['parent_domain','www_host']);
   assert.ok(!connected.body.identity_source,'No pre-connection identity is fabricated');
   report.checks.push('Actual browser-action popup shows finite scopes and connects through native click with already-held grants; parent-domain cookie imported, apex hostOnly excluded');
