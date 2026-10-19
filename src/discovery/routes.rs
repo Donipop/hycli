@@ -155,6 +155,57 @@ pub fn ranked<'a>(links: impl IntoIterator<Item = &'a String>) -> Vec<String> {
     result
 }
 
+// Query links are fetched automatically during discovery. Admit only a narrow
+// document-address shape; unknown parameters are not evidence of a read. This
+// is deliberately stricter than explicit operation execution's URL policy.
+fn navigation_query(url: &Url) -> bool {
+    let mut keys = BTreeSet::new();
+    url.query_pairs().all(|(key, value)| {
+        let name = key.to_ascii_lowercase().replace(['-', '_'], "");
+        if !keys.insert(name.clone())
+            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            || [
+                "auth",
+                "token",
+                "session",
+                "cookie",
+                "password",
+                "secret",
+                "credential",
+                "key",
+                "code",
+            ]
+            .iter()
+            .any(|part| name.contains(part))
+            || crate::util::secret_field(&key)
+            || crate::policy::dangerous_intent(&key)
+            || crate::policy::dangerous_intent(&value)
+            || crate::util::redact_text(&value) != value
+            || value.is_empty()
+            || value.len() > 128
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte))
+        {
+            return false;
+        }
+        if matches!(
+            name.as_str(),
+            "page" | "pagesize" | "pagenumber" | "offset" | "limit" | "start" | "count"
+        ) {
+            return value.bytes().all(|byte| byte.is_ascii_digit());
+        }
+        name == "version"
+            || name == "id"
+            || name
+                .strip_suffix("id")
+                .or_else(|| name.strip_suffix("no"))
+                .is_some_and(|stem| {
+                    stem.len() >= 3 && stem.bytes().all(|byte| byte.is_ascii_alphabetic())
+                })
+    })
+}
+
 pub fn published_links(base: &Url, text: &str) -> BTreeSet<String> {
     let mut links = BTreeSet::new();
     let expressions = [
@@ -180,7 +231,7 @@ pub fn published_links(base: &Url, text: &str) -> BTreeSet<String> {
                 || (base.scheme() == "https" && target.scheme() != "https")
                 || !target.username().is_empty()
                 || target.password().is_some()
-                || target.query().is_some()
+                || !navigation_query(&target)
                 || target.path().contains(['{', '}', '(', ')', '*'])
                 || target.path().contains("/:")
                 || !crate::browser_session::navigation_safe(&target)
@@ -212,8 +263,11 @@ pub fn header_links(base: &Url, value: &str) -> BTreeSet<String> {
         .filter_map(|capture| base.join(&capture[1]).ok())
         .filter(|url| {
             matches!(url.scheme(), "https" | "http")
+                && (base.scheme() != "https" || url.scheme() == "https")
+                && url.username().is_empty()
+                && url.password().is_none()
                 && policy::safe_read_url(url)
-                && url.query().is_none()
+                && navigation_query(url)
         })
         .map(|url| url.to_string())
         .collect()

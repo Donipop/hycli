@@ -238,6 +238,81 @@ mod tests {
         );
     }
     #[test]
+    fn query_addressed_pages_remain_discoverable_without_credentials_or_mutations() {
+        let home = Url::parse("https://blog.example.com/").unwrap();
+        let links = published_links(
+            &home,
+            r##"<iframe id="mainFrame" src="/PostList.naver?blogId=demo&amp;categoryNo=0#posts"></iframe>
+                <a href="/PostView.naver?blogId=demo&amp;logNo=123">Read entry</a>
+                <a href="https://m.blog.example.com/PostView.naver?blogId=demo&amp;logNo=123">Mobile entry</a>
+                <a href="/entries?entry_id=record-1&amp;page=2&amp;limit=20">Catalogue</a>
+                <a href="/read?access_token=private">Secret</a>
+                <a href="/read?sessionId=private">Session</a>
+                <a href="/read?password=private">Password</a>
+                <a href="/read?api_key=private">Key</a>
+                <a href="/read?key=sk-abcdefghijklmnop0123456789">Opaque secret value</a>
+                <a href="/entry?action=delete&amp;id=123">Delete</a>
+                <a href="/entry?op=publish&amp;id=123">Publish</a>
+                <a href="/logout?next=/">Sign out</a>
+                <a href="http://blog.example.com/read?id=123">Downgrade</a>
+                <a href="https://user:password@blog.example.com/read?id=123">User info</a>"##,
+        );
+        assert_eq!(
+            links,
+            BTreeSet::from([
+                "https://blog.example.com/entries?entry_id=record-1&page=2&limit=20".into(),
+                "https://blog.example.com/PostList.naver?blogId=demo&categoryNo=0".into(),
+                "https://blog.example.com/PostView.naver?blogId=demo&logNo=123".into(),
+                "https://m.blog.example.com/PostView.naver?blogId=demo&logNo=123".into(),
+            ])
+        );
+    }
+
+    #[test]
+    fn query_navigation_excludes_unknown_commands_and_opaque_credentials() {
+        let home = Url::parse("https://example.com/").unwrap();
+        let unsafe_targets = [
+            "/?do=delete&id=123",
+            "/oauth/callback?code=opaqueAuthorizationCode&state=opaqueState",
+            "/reference?sid=opaqueSessionId",
+            "/reference?key=opaqueApiKey",
+            "/graphql?query=mutation%20%7BdeleteAccount%7D",
+            "/reference?authId=opaque",
+            "/reference?tokenId=opaque",
+            "/reference?sessionNo=opaque",
+            "/reference?accessKeyId=opaque",
+            "/reference?credentialId=opaque",
+            "/reference?id=delete",
+            "/reference?id=123&unknown=opaque",
+            "/reference?id=123&id=456",
+            "/reference?page=delete",
+        ];
+        for target in unsafe_targets {
+            assert!(
+                published_links(&home, &format!("<iframe src='{target}'></iframe>")).is_empty(),
+                "published {target}"
+            );
+            assert!(
+                header_links(&home, &format!("<{target}>; rel=describedby")).is_empty(),
+                "header {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn published_header_documents_keep_safe_query_parameters() {
+        let home = Url::parse("https://example.com/").unwrap();
+        let links = header_links(
+            &home,
+            r#"</reference?version=2>; rel="describedby", </reference?token=private>; rel="describedby", </reference?action=delete>; rel="alternate", <http://example.com/reference?version=2>; rel="describedby", <https://user:password@example.com/reference?version=2>; rel="describedby", </reference?key=sk-abcdefghijklmnop0123456789>; rel="describedby""#,
+        );
+        assert_eq!(
+            links,
+            BTreeSet::from(["https://example.com/reference?version=2".into()])
+        );
+    }
+
+    #[test]
     fn reference_routes_keep_methods_and_parameter_evidence() {
         let routes = documented_routes(
             "## Current user % GET /users/@me\n## Messages % GET /channels/{channel.id}/messages\n## Send % POST /channels/{channel.id}/messages",
