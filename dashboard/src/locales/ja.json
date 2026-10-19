@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "オフ: AIとCLIはこのウェブサイトを読み取るだけです。オン: どの変更もここでの承認を待ちます。",
   "sites.changesOff": "変更はオフ",
   "errors.writes_disabled": "このウェブサイトでは変更がオフです。この操作を使うには詳細で「変更を許可」をオンにしてください。",
-  "errors.launch_required": "このウィンドウを使うには hycli dashboard コマンドで Hycli を開いてください。",
+  "errors.launch_required": "このウィンドウを使うには hycli open コマンドで Hycli を開いてください。",
   "activity.note.coverage_incomplete": "ドキュメント化された操作のうち {count} 件にまだアクションがありません。追加しています。",
   "settings.quit": "Hycliを終了",
   "settings.quitHint": "ブラウザーを閉じてもHycliは動作し続けます。終了するにはこちらを押してください。",

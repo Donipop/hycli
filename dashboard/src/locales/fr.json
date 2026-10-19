@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "Désactivé : votre IA et la CLI peuvent seulement lire ce site. Activé : chaque modification attend toujours votre approbation ici.",
   "sites.changesOff": "modifications désactivées",
   "errors.writes_disabled": "Les modifications sont désactivées pour ce site. Activez Autoriser les modifications dans ses détails pour utiliser cette action.",
-  "errors.launch_required": "Ouvrez Hycli avec la commande hycli dashboard pour utiliser cette fenêtre.",
+  "errors.launch_required": "Ouvrez Hycli avec la commande hycli open pour utiliser cette fenêtre.",
   "activity.note.coverage_incomplete": "{count} opérations documentées n'ont pas encore d'action. Ajout en cours.",
   "settings.quit": "Quitter Hycli",
   "settings.quitHint": "Hycli continue de fonctionner après la fermeture du navigateur. Quittez ici pour l’arrêter.",

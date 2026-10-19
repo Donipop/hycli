@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "Aus: Ihre KI und die CLI können diese Website nur lesen. An: Jede Änderung wartet weiterhin hier auf Ihre Freigabe.",
   "sites.changesOff": "Änderungen aus",
   "errors.writes_disabled": "Änderungen sind für diese Website ausgeschaltet. Schalten Sie in den Details Änderungen erlauben ein, um diese Aktion zu nutzen.",
-  "errors.launch_required": "Öffnen Sie Hycli mit dem Befehl hycli dashboard, um dieses Fenster zu verwenden.",
+  "errors.launch_required": "Öffnen Sie Hycli mit dem Befehl hycli open, um dieses Fenster zu verwenden.",
   "activity.note.coverage_incomplete": "{count} dokumentierte Vorgänge haben noch keine Aktion. Sie werden hinzugefügt.",
   "settings.quit": "Hycli beenden",
   "settings.quitHint": "Hycli läuft weiter, wenn Sie den Browser schließen. Beenden Sie es hier.",

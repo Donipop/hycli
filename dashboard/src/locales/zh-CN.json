@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "关闭时，你的 AI 和 CLI 只能读取此网站。开启后，每项更改仍需在此处批准。",
   "sites.changesOff": "更改已关闭",
   "errors.writes_disabled": "此网站的更改已关闭。要使用此操作，请在详情中开启“允许更改”。",
-  "errors.launch_required": "请使用 hycli dashboard 命令打开 Hycli 以使用此窗口。",
+  "errors.launch_required": "请使用 hycli open 命令打开 Hycli 以使用此窗口。",
   "activity.note.coverage_incomplete": "还有 {count} 个已记录的操作没有对应动作，正在添加。",
   "settings.quit": "退出 Hycli",
   "settings.quitHint": "关闭浏览器后 Hycli 仍会继续运行。请在此退出。",

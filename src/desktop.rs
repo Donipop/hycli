@@ -74,7 +74,7 @@ fn read_launch(root: &Path) -> Option<String> {
     (!launch.is_empty()).then(|| launch.to_owned())
 }
 
-fn launch_url(root: &Path, instance: &Instance) -> String {
+pub fn launch_url(root: &Path, instance: &Instance) -> String {
     match read_launch(root) {
         Some(launch) => format!("{}/?launch={launch}", instance.url()),
         None => instance.url(),

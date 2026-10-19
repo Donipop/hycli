@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "Wyłączone: Twoja AI i CLI mogą tylko czytać tę witrynę. Włączone: każda zmiana nadal czeka tutaj na Twoją zgodę.",
   "sites.changesOff": "zmiany wyłączone",
   "errors.writes_disabled": "Zmiany są wyłączone dla tej witryny. Włącz Zezwalaj na zmiany w szczegółach, aby użyć tej akcji.",
-  "errors.launch_required": "Otwórz Hycli poleceniem hycli dashboard, aby używać tego okna.",
+  "errors.launch_required": "Otwórz Hycli poleceniem hycli open, aby używać tego okna.",
   "activity.note.coverage_incomplete": "{count} udokumentowanych operacji nie ma jeszcze akcji. Dodawanie.",
   "settings.quit": "Zamknij Hycli",
   "settings.quitHint": "Hycli działa dalej po zamknięciu przeglądarki. Zakończ go tutaj.",

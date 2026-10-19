@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "إيقاف: يمكن للذكاء الاصطناعي وCLI قراءة هذا الموقع فقط. تشغيل: كل تغيير ينتظر موافقتك هنا.",
   "sites.changesOff": "التغييرات متوقفة",
   "errors.writes_disabled": "التغييرات متوقفة لهذا الموقع. فعّل السماح بالتغييرات في تفاصيله لاستخدام هذا الإجراء.",
-  "errors.launch_required": "افتح Hycli باستخدام الأمر hycli dashboard لاستخدام هذه النافذة.",
+  "errors.launch_required": "افتح Hycli باستخدام الأمر hycli open لاستخدام هذه النافذة.",
   "activity.note.coverage_incomplete": "لا يوجد إجراء بعد لـ {count} من العمليات الموثقة. جارٍ إضافتها.",
   "settings.quit": "إنهاء Hycli",
   "settings.quitHint": "يستمر Hycli في العمل بعد إغلاق المتصفح. أنهِ التطبيق هنا لإيقافه.",

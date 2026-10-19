@@ -506,7 +506,7 @@
   "sites.allowChangesHint": "끄면 AI와 CLI는 이 웹사이트를 읽기만 할 수 있습니다. 켜도 모든 변경은 여기서 승인해야 실행됩니다.",
   "sites.changesOff": "변경 꺼짐",
   "errors.writes_disabled": "이 웹사이트는 변경이 꺼져 있습니다. 이 작업을 쓰려면 상세 화면에서 변경 허용을 켜세요.",
-  "errors.launch_required": "이 창을 사용하려면 hycli dashboard 명령으로 Hycli를 여세요.",
+  "errors.launch_required": "이 창을 사용하려면 hycli open 명령으로 Hycli를 여세요.",
   "activity.note.coverage_incomplete": "문서화된 기능 {count}개에 아직 액션이 없습니다. 추가하는 중입니다.",
   "settings.quit": "Hycli 종료",
   "settings.quitHint": "브라우저를 닫아도 Hycli는 계속 실행됩니다. 완전히 종료하려면 이 버튼을 누르세요.",
