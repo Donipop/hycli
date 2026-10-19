@@ -139,6 +139,7 @@ jobs:
           "$CHROME_BIN" --version
           BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/binding-e2e.mjs
+          BROWSER_BIN="$CHROME_BIN" node dashboard/result-recovery-e2e.mjs
           node scripts/test-e2e.mjs --full
           # Verification must preserve reviewed screenshots before source packaging.
           git diff --exit-code -- docs/images docs/design

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownToLine, ArrowRight, Bell, BookOpen, Check, CheckCircle2, ChevronRight, CircleHelp, Clock3, ExternalLink, Globe2, KeyRound, LayoutGrid, Link2, Menu, MoreHorizontal, Pin, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Trash2, UserRound, UsersRound, TerminalSquare, Pencil, X } from 'lucide-react';
 import { ApiError, copyText, download, request, session, setApiLocale, websiteURL } from './api';
 import { I18n, initialLocale, languages, useI18n } from './i18n';
-import { AccountDialog, ActionDialog, ApprovalDialog, HandoffDialog, ProviderDialog, ResultDialog, WebsiteDialog } from './dialogs';
+import { AccountDialog, ActionDialog, ApprovalDialog, HandoffDialog, ProviderDialog, ResultDialog, useSummaryRequests, WebsiteDialog } from './dialogs';
 import { Badge, Bird, Button, EmptyState, ErrorNotice, Field, IconButton, Modal, ProviderMark, SearchField, Select, SiteIcon, Toggle, Wordmark } from './ui';
 import { Progress, RunningIndicator, providerName } from './work';
 import type { Account, Action, Approval, Job, Provider, Settings, Site, Snapshot, Toast, View } from './types';
@@ -28,6 +28,7 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
   const [action, setAction] = useState<{ site: Site; action: Action } | null>(null);
   const [handoff, setHandoff] = useState<Site | true | null>(null);
   const [jobID, setJobID] = useState('');
+  const summaries = useSummaryRequests(data?.jobs || []);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; description: string; run: () => Promise<unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,7 +118,7 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
     {accountSite !== undefined && data && <AccountDialog site={accountSite} data={data} ops={ops} resume={accountResume} onClose={() => { setAccountSite(undefined); setAccountResume(null); }} />}
     {action && data && <ActionDialog {...action} data={data} ops={ops} onClose={() => setAction(null)} onJob={id => { setAction(null); setJobID(id); }} onApproval={a => { setAction(null); setApproval(a); }} />}
     {handoff && <HandoffDialog site={handoff === true ? null : handoff} ops={ops} onClose={() => setHandoff(null)} />}
-    {activeJob && <ResultDialog job={activeJob} data={data!} ops={ops} onClose={() => setJobID('')} connectAccount={() => { const site = data!.sites.find(s => s.id === activeJob.site_id); const url = activeJob.url || site?.url; if (!url) return; setAccountResume({url,provider:activeJob.provider,intent:activeJob.intent}); setAccountSite(site || null); setJobID(''); }} />}
+    {activeJob && <ResultDialog summaries={summaries} job={activeJob} data={data!} ops={ops} onClose={() => setJobID('')} connectAccount={() => { const site = data!.sites.find(s => s.id === activeJob.site_id); const url = activeJob.url || site?.url; if (!url) return; setAccountResume({url,provider:activeJob.provider,intent:activeJob.intent}); setAccountSite(site || null); setJobID(''); }} />}
     {approval && <ApprovalDialog approval={approval} ops={ops} onClose={() => setApproval(null)} onJob={id => { setApproval(null); setJobID(id); }} />}
     {confirm && <Modal title={confirm.title} onClose={() => setConfirm(null)}><p className="dialog-intro">{confirm.description}</p><div className="dialog-buttons"><Button variant="secondary" onClick={() => setConfirm(null)}>{t('common.cancel')}</Button><Button variant="danger" loading={busy} onClick={() => { setBusy(true); void confirm.run().then(() => setConfirm(null)).catch(e => toast(`errors.${e instanceof ApiError ? e.code : 'internal'}`, 'error')).finally(() => setBusy(false)); }}>{t('common.confirm')}</Button></div></Modal>}
     <div className="toast-stack" aria-live="polite">{toasts.map(n => <div className={`toast toast--${n.kind}`} key={n.id}>{n.kind === 'success' ? <CheckCircle2 size={18} /> : <CircleHelp size={18} />}<span>{t(n.text)}</span><button aria-label={t('common.close')} onClick={() => setToasts(x => x.filter(v => v.id !== n.id))}><X size={16} /></button></div>)}</div>
