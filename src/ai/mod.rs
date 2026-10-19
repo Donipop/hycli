@@ -76,13 +76,22 @@ pub struct ProviderView {
 }
 pub struct Client {
     gate: tokio::sync::Semaphore,
+    http: reqwest::Client,
     pub codex: Arc<codex::Codex>,
     pub origins: BTreeMap<String, String>,
 }
 impl Client {
     pub fn new(codex: Arc<codex::Codex>) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(240))
+            .connect_timeout(Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             gate: tokio::sync::Semaphore::new(3),
+            http,
             codex,
             origins: BTreeMap::new(),
         }
@@ -203,16 +212,10 @@ impl Client {
             .get(&config.provider)
             .map(String::as_str)
             .unwrap_or(default);
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(240))
-            .connect_timeout(Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .build()
-            .map_err(|_| AppError::api("ai_unavailable", 502))?;
         let method = reqwest::Method::from_bytes(method.as_bytes())
             .map_err(|_| AppError::api("internal", 500))?;
-        let mut request = client
+        let mut request = self
+            .http
             .request(method, format!("{}{path}", origin.trim_end_matches('/')))
             .header("content-type", "application/json");
         if config.provider == "anthropic" {

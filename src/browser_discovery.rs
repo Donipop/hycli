@@ -74,7 +74,8 @@ impl Drop for ChromiumSnapshot {
 }
 impl ChromiumSnapshot {
     fn create(source: &Path) -> Result<Self, ()> {
-        let snapshot = Self(std::env::temp_dir().join(format!("hycli-browser-{}", util::id())));
+        let snapshot =
+            Self(crate::platform::temp_dir().join(format!("hycli-browser-{}", util::id())));
         util::private_dir(&snapshot.0).map_err(|_| ())?;
         let wal = PathBuf::from(format!("{}-wal", source.display()));
         let stamp = |path: &Path| -> Result<Option<(u64, std::time::SystemTime)>, ()> {
@@ -357,19 +358,17 @@ impl Runtime {
                 continue;
             }
             let id = if let Some(id) = existing {
-                let mut credential = self.credential(&id)?;
-                let changed = serde_json::to_value(&credential.cookies)?
-                    != serde_json::to_value(&session.cookies)?
-                    || credential.local_storage != session.storage;
-                credential.cookies = session.cookies;
-                credential.local_storage = session.storage;
-                if changed {
-                    credential.headers.clear();
-                }
-                self.vault
-                    .lock()
-                    .map_err(|_| crate::apperr::AppError::api("internal", 500))?
-                    .set("accounts", &id, &serde_json::to_string(&credential)?)?;
+                let (credential, changed) = self.update_credential(&id, |credential| {
+                    let changed = serde_json::to_value(&credential.cookies)?
+                        != serde_json::to_value(&session.cookies)?
+                        || credential.local_storage != session.storage;
+                    credential.cookies = session.cookies;
+                    credential.local_storage = session.storage;
+                    if changed {
+                        credential.headers.clear();
+                    }
+                    Ok(changed)
+                })?;
                 self.state.update(|d| {
                     if let Some(account) = d.accounts.get_mut(&id) {
                         account.cookie_count = credential.cookies.len();
@@ -423,16 +422,10 @@ impl Runtime {
                     d.sites.entry(effective_id.clone()).or_default().account_id = before;
                     Ok(())
                 })?;
-                let mut credential = self.credential(&account.id)?;
-                credential.source_profile = session.profile.id;
-                self.vault
-                    .lock()
-                    .map_err(|_| crate::apperr::AppError::api("internal", 500))?
-                    .set(
-                        "accounts",
-                        &account.id,
-                        &serde_json::to_string(&credential)?,
-                    )?;
+                self.update_credential(&account.id, |credential| {
+                    credential.source_profile = session.profile.id;
+                    Ok(())
+                })?;
                 account.id
             };
             // A proven recipe references portable local keys, not the old machine's
@@ -452,7 +445,7 @@ impl Runtime {
             if render
                 && !refreshed.is_ok_and(|view| view.verified_identity && view.status == "connected")
             {
-                let mut credential = self.credential(&id)?;
+                let credential = self.credential(&id)?;
                 if !credential.cookies.is_empty() || !credential.local_storage.is_empty() {
                     let entry = match self.read_page(raw_url, "").await {
                         Ok(page) => published_login(&target, &String::from_utf8_lossy(&page.bytes))
@@ -468,17 +461,18 @@ impl Runtime {
                     {
                         let has_headers = !capture.headers.is_empty();
                         let has_observations = !capture.observations.is_empty();
-                        if has_headers {
-                            credential.headers.extend(capture.headers);
-                        }
+                        let captured_headers = capture.headers;
                         if let Some(identity) = capture.identity {
-                            credential.identity_source = capture.identity_url.clone();
-                            self.vault
-                                .lock()
-                                .map_err(|_| crate::apperr::AppError::api("internal", 500))?
-                                .set("accounts", &id, &serde_json::to_string(&credential)?)?;
-                            let observations = capture.observations;
                             let identity_url = capture.identity_url;
+                            let identity_url_for_cred = identity_url.clone();
+                            self.update_credential(&id, |c| {
+                                if has_headers {
+                                    c.headers.extend(captured_headers);
+                                }
+                                c.identity_source = identity_url_for_cred;
+                                Ok(())
+                            })?;
+                            let observations = capture.observations;
                             self.state.update(|data| {
                                 if let Some(view) = data.accounts.get_mut(&id) {
                                     crate::accounts::apply_identity(view, identity);
@@ -504,10 +498,10 @@ impl Runtime {
                             let _ = self.refresh_account(&id).await;
                         } else if has_headers || has_observations {
                             if has_headers {
-                                self.vault
-                                    .lock()
-                                    .map_err(|_| crate::apperr::AppError::api("internal", 500))?
-                                    .set("accounts", &id, &serde_json::to_string(&credential)?)?;
+                                self.update_credential(&id, |c| {
+                                    c.headers.extend(captured_headers);
+                                    Ok(())
+                                })?;
                             }
                             let observations = capture.observations;
                             self.state.update(|data| {

@@ -368,6 +368,7 @@ impl ServerHandler for Server {
     }
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
         let server = self.clone();
+        let mut rx = server.core.events.subscribe();
         let mut previous = server
             .tools()
             .ok()
@@ -375,7 +376,10 @@ impl ServerHandler for Server {
             .map(|v| util::hash(&v));
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                tokio::select! {
+                    _ = rx.recv() => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+                }
                 if context.peer.is_transport_closed() {
                     break;
                 }

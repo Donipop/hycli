@@ -638,6 +638,39 @@ impl Policy {
             _ => Ok(None),
         }
     }
+    fn clear_strategies_for_scope(conn: &Connection, scope: &str) -> AppResult<()> {
+        let (origin, account) = match scope.split_once('|') {
+            Some((origin, account)) => (origin.trim_end_matches('/'), Some(account)),
+            None => (scope.trim_end_matches('/'), None),
+        };
+        if origin.is_empty() {
+            return Ok(());
+        }
+        let mut stmt = conn.prepare("SELECT strategy_key FROM strategy_gate")?;
+        let keys: Vec<String> = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for key in keys {
+            let mut parts = key.splitn(4, '|');
+            let _method = parts.next();
+            let Some(url_str) = parts.next() else {
+                continue;
+            };
+            let _transport = parts.next();
+            let Some(key_account) = parts.next() else {
+                continue;
+            };
+            let same_origin = url_str == origin
+                || url_str
+                    .strip_prefix(origin)
+                    .is_some_and(|rest| rest.starts_with('/'));
+            let same_account = account.is_none_or(|a| a == "*" || key_account == a);
+            if same_origin && same_account {
+                conn.execute("DELETE FROM strategy_gate WHERE strategy_key=?1", [key])?;
+            }
+        }
+        Ok(())
+    }
     pub fn resume_auth(&self, scope: &str) -> AppResult<()> {
         let conn = self
             .conn
@@ -647,13 +680,7 @@ impl Policy {
             "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1 AND paused IN ('auth_required','blocked_by_site')",
             [scope],
         )?;
-        if let Some((origin, _)) = scope.split_once('|') {
-            let pattern = format!("%|{}%", origin);
-            let _ = conn.execute(
-                "DELETE FROM strategy_gate WHERE strategy_key LIKE ?1",
-                [pattern],
-            );
-        }
+        Self::clear_strategies_for_scope(&conn, scope)?;
         Ok(())
     }
     pub fn resume(&self, scope: &str) -> AppResult<()> {
@@ -661,17 +688,19 @@ impl Policy {
             .conn
             .lock()
             .map_err(|_| AppError::api("internal", 500))?;
-        conn.execute(
-            "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
-            [scope],
-        )?;
-        if let Some((origin, _)) = scope.split_once('|') {
-            let pattern = format!("%|{}%", origin);
-            let _ = conn.execute(
-                "DELETE FROM strategy_gate WHERE strategy_key LIKE ?1",
-                [pattern],
-            );
+        if scope.contains('|') {
+            conn.execute(
+                "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1",
+                [scope],
+            )?;
+        } else {
+            let origin = scope.trim_end_matches('/');
+            conn.execute(
+                "UPDATE request_gate SET paused='',cooldown=0 WHERE scope=?1 OR scope LIKE ?1 || '|%'",
+                [origin],
+            )?;
         }
+        Self::clear_strategies_for_scope(&conn, scope)?;
         Ok(())
     }
 }

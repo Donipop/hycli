@@ -273,7 +273,7 @@ impl Runtime {
     ) -> AppResult<AccountView> {
         let mut credential = self.credential(account)?;
         let resolved = recipe.resolve_headers(&credential)?;
-        credential.headers.extend(resolved);
+        credential.headers.extend(resolved.clone());
         self.policy
             .resume_auth(&format!("{}|{account}", credential.origin))?;
         let response = self
@@ -327,12 +327,12 @@ impl Runtime {
         if anonymous.successful() && recipe.identity_from_response(&anonymous).is_some() {
             return Err(AppError::api("identity_unavailable", 422));
         }
-        credential.identity_source = recipe.identity_url.clone();
-        credential.recipe = Some(recipe.clone());
-        self.vault
-            .lock()
-            .map_err(|_| AppError::api("internal", 500))?
-            .set("accounts", account, &serde_json::to_string(&credential)?)?;
+        self.update_credential(account, |c| {
+            c.headers.extend(resolved);
+            c.identity_source = recipe.identity_url.clone();
+            c.recipe = Some(recipe.clone());
+            Ok(())
+        })?;
         let mut view = self
             .state
             .read()?

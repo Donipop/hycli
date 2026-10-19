@@ -9,7 +9,7 @@ pub type Storage = BTreeMap<String, String>;
 pub struct Snapshot(pub PathBuf);
 impl Snapshot {
     pub fn new() -> Result<Self, ()> {
-        let path = std::env::temp_dir().join(format!("hycli-session-{}", util::id()));
+        let path = crate::platform::temp_dir().join(format!("hycli-session-{}", util::id()));
         util::private_dir(&path).map_err(|_| ())?;
         util::atomic_file(&path.join(".hycli-session"), b"private broker workspace")
             .map_err(|_| ())?;

@@ -48,3 +48,8 @@ pub fn specs_dir() -> PathBuf {
 pub fn store_path() -> PathBuf {
     data_dir().join("store.json")
 }
+pub fn temp_dir() -> PathBuf {
+    env_path("HYCLI_TEST_DATA")
+        .unwrap_or_else(data_dir)
+        .join("tmp")
+}

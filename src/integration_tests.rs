@@ -2616,6 +2616,94 @@ async fn write_path_commit_barrier_and_pid_aware_recovery_keep_state_consistent(
     let recovered = reopened.job(&dead_pid_job.id).unwrap();
     assert_eq!(recovered.status, "failed");
     assert_eq!(recovered.error_code, "action_outcome_unknown");
-
     server.abort();
+}
+
+#[test]
+fn resume_auth_exact_scope_and_atomic_credential_update_preserve_isolation() {
+    let core = runtime();
+
+    // 1. Exact origin & account matching on strategy_gate cleanup:
+    // Resuming https://example.com|acc-1 must NOT clear https://example.com.evil.org|acc-1 or https://example.com|acc-2.
+    let k_target =
+        policy::Policy::strategy_key("GET", "https://example.com/api/me", "http", "acc-1");
+    let k_other_acc =
+        policy::Policy::strategy_key("GET", "https://example.com/api/me", "http", "acc-2");
+    let k_sibling_domain = policy::Policy::strategy_key(
+        "GET",
+        "https://example.com.evil.org/api/me",
+        "http",
+        "acc-1",
+    );
+
+    core.policy
+        .record_blocked_strategy(&k_target, "auth_required", 60_000)
+        .unwrap();
+    core.policy
+        .record_blocked_strategy(&k_other_acc, "auth_required", 60_000)
+        .unwrap();
+    core.policy
+        .record_blocked_strategy(&k_sibling_domain, "challenge_required", 60_000)
+        .unwrap();
+
+    core.policy
+        .resume_auth("https://example.com|acc-1")
+        .unwrap();
+    assert_eq!(core.policy.is_strategy_blocked(&k_target).unwrap(), None);
+    assert_eq!(
+        core.policy.is_strategy_blocked(&k_other_acc).unwrap(),
+        Some("auth_required".into())
+    );
+    assert_eq!(
+        core.policy.is_strategy_blocked(&k_sibling_domain).unwrap(),
+        Some("challenge_required".into())
+    );
+
+    // Origin-wide resume clears all accounts on https://example.com, still leaving https://example.com.evil.org intact.
+    core.policy.resume("https://example.com").unwrap();
+    assert_eq!(core.policy.is_strategy_blocked(&k_other_acc).unwrap(), None);
+    assert_eq!(
+        core.policy.is_strategy_blocked(&k_sibling_domain).unwrap(),
+        Some("challenge_required".into())
+    );
+
+    // 2. Atomic credential read-modify-write via Runtime::update_credential:
+    let account = core
+        .register_browser_credential(
+            "fixture",
+            crate::accounts::Credential {
+                origin: "https://example.com".into(),
+                cookies: serde_json::from_value(json!([
+                    {"name":"sid","value":"v1","domain":"example.com","path":"/"}
+                ]))
+                .unwrap(),
+                local_storage: BTreeMap::new(),
+                headers: BTreeMap::new(),
+                recipe: None,
+                identity_source: String::new(),
+                browser_session: String::new(),
+                extension_origin: String::new(),
+                browser_session_expires_ms: 0,
+                source_profile: String::new(),
+            },
+            "Chrome",
+            "Default",
+        )
+        .unwrap();
+    let (updated, prev_len) = core
+        .update_credential(&account.id, |cred| {
+            let prev = cred.headers.len();
+            cred.headers.insert("x-custom".into(), "token-123".into());
+            cred.identity_source = "https://example.com/me".into();
+            Ok(prev)
+        })
+        .unwrap();
+    assert_eq!(prev_len, 0);
+    assert_eq!(
+        updated.headers.get("x-custom").map(String::as_str),
+        Some("token-123")
+    );
+    let reloaded = core.credential(&account.id).unwrap();
+    assert_eq!(reloaded.identity_source, "https://example.com/me");
+    assert_eq!(reloaded.cookies.len(), 1);
 }
