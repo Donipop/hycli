@@ -242,3 +242,36 @@ pub fn file_lock(path: &Path, nonblocking: bool) -> AppResult<fs::File> {
     }
     Ok(file)
 }
+
+pub fn is_pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        if let Some((_, rest)) = stat.rsplit_once(") ")
+            && let Some(state_ch) = rest.chars().next()
+        {
+            return !matches!(state_ch, 'Z' | 'X' | 'x');
+        }
+        return true;
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let target = Pid::from_u32(pid);
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[target]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        system.process(target).is_some()
+    }
+}

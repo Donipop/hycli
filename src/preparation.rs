@@ -248,6 +248,9 @@ impl Runtime {
         mut job: Job,
         work: impl std::future::Future<Output = AppResult<Option<Value>>> + Send + 'static,
     ) -> AppResult<Job> {
+        if job.owner_pid == 0 {
+            job.owner_pid = std::process::id();
+        }
         job.status = "running".into();
         job.phase = if job.kind == "action" {
             "run"
@@ -353,13 +356,17 @@ impl Runtime {
         Ok(job)
     }
     pub fn cancel_job(&self, id: &str) -> AppResult<()> {
+        let mut approval_id = String::new();
         self.state.update_job(id, |j| {
             if ["queued", "running"].contains(&j.status.as_str()) {
-                let uncertain = j.kind == "action" && !j.approval_id.is_empty();
+                approval_id = j.approval_id.clone();
+                let uncertain = j.is_outcome_uncertain();
                 j.status = if uncertain { "failed" } else { "cancelled" }.into();
                 j.phase = j.status.clone();
                 if uncertain {
                     j.error_code = "action_outcome_unknown".into();
+                } else if j.error_code.is_empty() {
+                    j.error_code = "cancelled".into();
                 }
                 j.finished_at = util::now();
                 j.note("cancelled", "", 0, "");
@@ -371,6 +378,9 @@ impl Runtime {
                 }
             }
         })?;
+        if !approval_id.is_empty() {
+            let _ = self.policy.reject_claimed_or_pending(&approval_id);
+        }
         if let Some(handle) = self
             .tasks
             .lock()
@@ -1921,9 +1931,22 @@ impl Runtime {
         job.action_title = action.title.clone();
         job.account_id = request.account_id.clone();
         job.approval_id = approval.clone().unwrap_or_default();
+        job.effect = action.effect;
+        if let Ok(sp) = self.spec(&request.site_id)
+            && let Ok(op) = sp.op(&request.action_id)
+        {
+            let op_eff = crate::policy::operation_effect(op, &request.inputs);
+            if op_eff != crate::policy::Effect::Read {
+                job.effect = op_eff;
+            }
+        }
+        job.dispatch_phase = crate::state::DispatchPhase::PreDispatch;
+        let job_id = job.id.clone();
         let core = self.clone();
         self.spawn_job(job, async move {
-            let (result, _) = core.execute(request, approval.as_deref()).await?;
+            let (result, _) = core
+                .execute_for_job(request, approval.as_deref(), Some(&job_id))
+                .await?;
             result.ensure_success()?;
             Ok(result.mapped.or(result.body))
         })

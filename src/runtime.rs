@@ -126,13 +126,24 @@ impl Runtime {
         let specs_dir = specs_dir.unwrap_or_else(|| root.join("specs"));
         util::private_dir(&specs_dir)?;
         let policy = Arc::new(policy::Policy::open(&root.join("runtime.db"))?);
+        let state = StateStore::open_with_recovery(&root.join("dashboard.json"), recover)?;
+        if let Ok(snapshot) = state.read() {
+            for job in snapshot.jobs {
+                if !job.approval_id.is_empty()
+                    && (job.status == "cancelled"
+                        || (job.status == "failed" && job.error_code == "action_outcome_unknown"))
+                {
+                    let _ = policy.reject_claimed_or_pending(&job.approval_id);
+                }
+            }
+        }
         let codex = Arc::new(ai::codex::Codex::new(root.join("provider-workspace")));
         let (events, _) = tokio::sync::broadcast::channel(100);
         Ok(Arc::new(Self {
             _instance: instance,
             root: root.into(),
             specs_dir,
-            state: StateStore::open_with_recovery(&root.join("dashboard.json"), recover)?,
+            state,
             vault: Mutex::new(Store::open_with_keyring(&root.join("store.json"), keyring)?),
             policy: policy.clone(),
             network: Network::new(policy, allow_local),
@@ -471,6 +482,16 @@ impl Runtime {
         })?;
         if !writes {
             self.policy.invalidate(Some(site), None)?;
+            if let Ok(snapshot) = self.state.read() {
+                for job in snapshot.jobs {
+                    if job.site_id == site
+                        && ["queued", "running"].contains(&job.status.as_str())
+                        && job.is_write_action()
+                    {
+                        let _ = self.cancel_job(&job.id);
+                    }
+                }
+            }
         }
         self.changed();
         Ok(())
@@ -552,7 +573,8 @@ impl Runtime {
             self.execute_observed(request, &self.state.settings()?.locale)
                 .await
         } else {
-            self.execute_definition(sp, request, None, false).await
+            self.execute_definition(sp, request, None, false, None)
+                .await
         }
     }
     /// Approval IDs are validated when supplied by the dashboard handler; direct CLI/MCP calls execute when writes are enabled.
@@ -561,8 +583,17 @@ impl Runtime {
         request: ExecutionRequest,
         approval: Option<&str>,
     ) -> AppResult<(OpResult, i64)> {
+        self.execute_for_job(request, approval, None).await
+    }
+    pub(crate) async fn execute_for_job(
+        &self,
+        request: ExecutionRequest,
+        approval: Option<&str>,
+        job_id: Option<&str>,
+    ) -> AppResult<(OpResult, i64)> {
         let sp = self.spec(&request.site_id)?;
-        self.execute_definition(&sp, request, approval, true).await
+        self.execute_definition(&sp, request, approval, true, job_id)
+            .await
     }
     /// Verify a proposed read without replacing the user's installed definition.
     pub async fn verify_candidate_with_inputs(
@@ -578,7 +609,8 @@ impl Runtime {
             return Err(AppError::api("approval_required", 409));
         }
         let request = self.request(sp, action, inputs, Some(account))?;
-        self.execute_definition(sp, request, None, false).await
+        self.execute_definition(sp, request, None, false, None)
+            .await
     }
     async fn execute_definition(
         &self,
@@ -586,6 +618,7 @@ impl Runtime {
         request: ExecutionRequest,
         approval: Option<&str>,
         installed: bool,
+        job_id: Option<&str>,
     ) -> AppResult<(OpResult, i64)> {
         let op = sp.op(&request.action_id)?;
         if Self::spec_hash(sp)? != request.spec_hash {
@@ -597,20 +630,20 @@ impl Runtime {
             request.inputs.clone(),
             Some(&request.account_id),
         )?;
-        let effect = policy::operation_effect(op, &request.inputs);
+        let mut effect = policy::operation_effect(op, &request.inputs);
         let (mut url, mut body) = sp.build_request(op, &request.inputs)?;
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
         let (mut headers, mut secrets) = self.headers(&sp, op, &url, &request.account_id)?;
         checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
-        if effect != Effect::Read {
-            if op.effect == Effect::Read {
+        if effect != Effect::Read || approval.is_some() {
+            if op.effect == Effect::Read && approval.is_none() {
                 return Err(AppError::api("approval_required", 409));
             }
             self.ensure_writes(&sp.site.name)?;
             if let Some(approval_id) = approval {
-                self.policy.consume(approval_id, &checked)?;
+                self.policy.verify_consumable(approval_id, &checked)?;
             }
         }
         if !op.preflight.is_empty() {
@@ -623,6 +656,14 @@ impl Runtime {
                 &mut secrets,
             )
             .await?;
+            let post_effect = policy::operation_effect(op, &effective_inputs);
+            if post_effect != Effect::Read {
+                if effect == Effect::Read || (op.effect == Effect::Read && approval.is_none()) {
+                    return Err(AppError::api("approval_required", 409));
+                }
+                effect = post_effect;
+                self.ensure_writes(&sp.site.name)?;
+            }
             let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
             if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
                 return Err(AppError::api("unsafe_target", 400));
@@ -638,6 +679,15 @@ impl Runtime {
                         &effective_inputs,
                     );
                 }
+            }
+        }
+        if effect != Effect::Read || approval.is_some() {
+            self.ensure_writes(&sp.site.name)?;
+            if let Some(approval_id) = approval {
+                self.policy.consume(approval_id, &checked)?;
+            }
+            if let Some(id) = job_id {
+                self.state.mark_job_dispatched(id)?;
             }
         }
         let req_origin = origin(&url)?;
@@ -798,7 +848,15 @@ impl Runtime {
                     verdict: "error".into(),
                     ..Default::default()
                 });
-                return Err(if effect != Effect::Read {
+                let pre_dispatch_err = matches!(
+                    e.public_code.as_str(),
+                    "unsafe_target"
+                        | "rate_limited"
+                        | "blocked_by_site"
+                        | "data_invalid"
+                        | "auth_required"
+                );
+                return Err(if effect != Effect::Read && !pre_dispatch_err {
                     AppError::api("action_outcome_unknown", 502)
                 } else {
                     e
@@ -935,6 +993,16 @@ impl Runtime {
             let r = self
                 .read_page_profile(&step_url, account_id, &sp.defaults.tls_profile)
                 .await?;
+            if !r.successful() {
+                return Err(AppError::api(
+                    if r.status == 401 {
+                        "auth_required"
+                    } else {
+                        "operation_failed"
+                    },
+                    r.status,
+                ));
+            }
             let text = String::from_utf8_lossy(&r.bytes);
             let json_doc = r.json();
             let ssr_map = crate::html::extract_ssr_map(&text);

@@ -341,12 +341,17 @@ impl Policy {
             .lock()
             .map_err(|_| AppError::api("internal", 500))?;
         let mut statement = conn.prepare(
-            "SELECT review FROM approvals WHERE state='pending' AND expires_ms>?1 ORDER BY rowid",
+            "SELECT review, state FROM approvals WHERE state='pending' AND expires_ms>?1 ORDER BY rowid",
         )?;
-        let rows = statement.query_map([util::unix_ms()], |r| r.get::<_, String>(0))?;
+        let rows = statement.query_map([util::unix_ms()], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
         let mut result = Vec::new();
         for row in rows {
-            result.push(serde_json::from_str(&row?)?);
+            let (raw, state) = row?;
+            let mut item: Approval = serde_json::from_str(&raw)?;
+            item.status = state;
+            result.push(item);
         }
         Ok(result)
     }
@@ -368,11 +373,29 @@ impl Policy {
             return Err(AppError::api("approval_expired", 409));
         }
         let mut review: Approval = serde_json::from_str(&review)?;
+        review.status = state;
         review.request = Some(serde_json::from_str(&request)?);
         Ok(review)
     }
+    pub(crate) fn verify_consumable(&self, id: &str, request: &ExecutionRequest) -> AppResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM approvals WHERE id=?1 AND digest=?2 AND state IN ('pending','approved') AND expires_ms>?3",
+                params![id, request.digest()?, util::unix_ms()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if exists.is_none() {
+            return Err(AppError::api("approval_expired", 409));
+        }
+        Ok(())
+    }
     /// Only the browser approval handler calls this after authenticating its session.
-    /// Consumption happens before any network request, including failed writes.
+    /// Consumption happens at the commit barrier right before the network request is dispatched.
     pub(crate) fn consume(&self, id: &str, request: &ExecutionRequest) -> AppResult<()> {
         let conn = self
             .conn
@@ -394,11 +417,31 @@ impl Policy {
             )?;
         Ok(())
     }
+    pub fn reject_claimed_or_pending(&self, id: &str) -> AppResult<()> {
+        self.conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?
+            .execute(
+                "UPDATE approvals SET state='rejected' WHERE id=?1 AND state IN ('pending','approved')",
+                [id],
+            )?;
+        Ok(())
+    }
     pub fn claim(&self, id: &str) -> AppResult<()> {
         let changed=self.conn.lock().map_err(|_|AppError::api("internal",500))?.execute("UPDATE approvals SET state='approved' WHERE id=?1 AND state='pending' AND expires_ms>?2",params![id,util::unix_ms()])?;
         if changed != 1 {
             return Err(AppError::api("approval_expired", 409));
         }
+        Ok(())
+    }
+    pub fn unclaim(&self, id: &str) -> AppResult<()> {
+        self.conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?
+            .execute(
+                "UPDATE approvals SET state='pending' WHERE id=?1 AND state='approved' AND expires_ms>?2",
+                params![id, util::unix_ms()],
+            )?;
         Ok(())
     }
     pub fn invalidate(&self, site: Option<&str>, account: Option<&str>) -> AppResult<()> {

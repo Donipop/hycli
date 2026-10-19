@@ -159,6 +159,39 @@ pub struct JobNote {
     pub agent: String,
     pub count: usize,
 }
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchPhase {
+    #[default]
+    Pending,
+    PreDispatch,
+    Dispatched,
+}
+impl DispatchPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::PreDispatch => "pre_dispatch",
+            Self::Dispatched => "dispatched",
+        }
+    }
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "pre_dispatch" => Self::PreDispatch,
+            "dispatched" => Self::Dispatched,
+            _ => Self::Pending,
+        }
+    }
+}
+fn is_default_effect(effect: &crate::policy::Effect) -> bool {
+    *effect == crate::policy::Effect::Read
+}
+fn is_default_dispatch_phase(phase: &DispatchPhase) -> bool {
+    *phase == DispatchPhase::Pending
+}
+fn is_zero_pid(pid: &u32) -> bool {
+    *pid == 0
+}
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct Job {
     pub id: String,
@@ -197,6 +230,12 @@ pub struct Job {
     pub notes: Vec<JobNote>,
     #[serde(default)]
     pub parent_id: String,
+    #[serde(default, skip_serializing_if = "is_default_effect")]
+    pub effect: crate::policy::Effect,
+    #[serde(default, skip_serializing_if = "is_default_dispatch_phase")]
+    pub dispatch_phase: DispatchPhase,
+    #[serde(default, skip_serializing_if = "is_zero_pid")]
+    pub owner_pid: u32,
 }
 fn default_progress_total() -> usize {
     5
@@ -231,7 +270,17 @@ impl Job {
             agents: vec![],
             notes: vec![],
             parent_id: String::new(),
+            effect: crate::policy::Effect::Read,
+            dispatch_phase: DispatchPhase::Pending,
+            owner_pid: 0,
         }
+    }
+    pub fn is_write_action(&self) -> bool {
+        self.kind == "action"
+            && (self.effect != crate::policy::Effect::Read || !self.approval_id.is_empty())
+    }
+    pub fn is_outcome_uncertain(&self) -> bool {
+        self.is_write_action() && self.dispatch_phase != DispatchPhase::PreDispatch
     }
 }
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -371,6 +420,9 @@ struct JobRow {
     progress_done: usize,
     progress_total: usize,
     parent_id: String,
+    effect: String,
+    dispatch_phase: String,
+    owner_pid: u32,
 }
 impl JobRow {
     fn from_row(r: &Row<'_>) -> rusqlite::Result<Self> {
@@ -399,6 +451,9 @@ impl JobRow {
             progress_done: r.get::<_, i64>(21)? as usize,
             progress_total: r.get::<_, i64>(22)? as usize,
             parent_id: r.get(23)?,
+            effect: r.get(24)?,
+            dispatch_phase: r.get(25)?,
+            owner_pid: r.get::<_, i64>(26)? as u32,
         })
     }
     fn into_job(
@@ -407,6 +462,11 @@ impl JobRow {
         notes: Vec<JobNote>,
         result: Option<Value>,
     ) -> AppResult<Job> {
+        let effect = match self.effect.as_str() {
+            "write" => crate::policy::Effect::Write,
+            "unknown" => crate::policy::Effect::Unknown,
+            _ => crate::policy::Effect::Read,
+        };
         Ok(Job {
             id: self.id,
             kind: self.kind,
@@ -439,6 +499,9 @@ impl JobRow {
             agents,
             notes,
             parent_id: self.parent_id,
+            effect,
+            dispatch_phase: DispatchPhase::from_str(&self.dispatch_phase),
+            owner_pid: self.owner_pid,
         })
     }
 }
@@ -551,7 +614,10 @@ impl StateStore {
                  approval_id TEXT NOT NULL DEFAULT '',
                  progress_done INTEGER NOT NULL DEFAULT 0,
                  progress_total INTEGER NOT NULL DEFAULT 5,
-                 parent_id TEXT NOT NULL DEFAULT ''
+                 parent_id TEXT NOT NULL DEFAULT '',
+                 effect TEXT NOT NULL DEFAULT 'read',
+                 dispatch_phase TEXT NOT NULL DEFAULT 'pending',
+                 owner_pid INTEGER NOT NULL DEFAULT 0
              );
              CREATE INDEX IF NOT EXISTS idx_jobs_ord ON jobs(ord ASC);
              CREATE INDEX IF NOT EXISTS idx_jobs_status_kind_site
@@ -586,15 +652,20 @@ impl StateStore {
                  result_json BLOB NOT NULL
              );",
         )?;
+        for ddl in [
+            "ALTER TABLE jobs ADD COLUMN effect TEXT NOT NULL DEFAULT 'read'",
+            "ALTER TABLE jobs ADD COLUMN dispatch_phase TEXT NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE jobs ADD COLUMN owner_pid INTEGER NOT NULL DEFAULT 0",
+        ] {
+            let _ = conn.execute(ddl, []);
+        }
         let store = Self {
             legacy_path,
             db_path,
             conn: Mutex::new(conn),
         };
         store.migrate_legacy_json_if_needed()?;
-        if recover {
-            store.recover_interrupted_jobs()?;
-        }
+        store.recover_interrupted_jobs(recover)?;
         Ok(store)
     }
 
@@ -615,6 +686,18 @@ impl StateStore {
             )
             .optional()?;
         Ok(exists.is_some())
+    }
+
+    pub fn mark_job_dispatched(&self, id: &str) -> AppResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        conn.execute(
+            "UPDATE jobs SET dispatch_phase = 'dispatched', updated_at = ?2 WHERE id = ?1",
+            params![id, util::now()],
+        )?;
+        Ok(())
     }
 
     fn migrate_legacy_json_if_needed(&self) -> AppResult<()> {
@@ -688,27 +771,44 @@ impl StateStore {
         Ok(())
     }
 
-    fn recover_interrupted_jobs(&self) -> AppResult<()> {
+    fn recover_interrupted_jobs(&self, recover_all_local: bool) -> AppResult<()> {
         let mut conn = self
             .conn
             .lock()
             .map_err(|_| AppError::api("internal", 500))?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut stmt = tx.prepare(
-            "SELECT id FROM jobs WHERE status IN ('queued', 'running') ORDER BY ord ASC",
-        )?;
-        let ids: Vec<String> = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(stmt);
+        let current_pid = std::process::id();
+        let candidates: Vec<(String, u32)> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, owner_pid FROM jobs WHERE status IN ('queued', 'running') ORDER BY ord ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u32))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let ids: Vec<String> = candidates
+            .into_iter()
+            .filter_map(|(id, pid)| {
+                let should_recover = if recover_all_local {
+                    pid == 0 || pid == current_pid || !util::is_pid_alive(pid)
+                } else {
+                    pid != 0 && pid != current_pid && !util::is_pid_alive(pid)
+                };
+                should_recover.then_some(id)
+            })
+            .collect();
         if ids.is_empty() {
             return Ok(());
         }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         for id in ids {
             if let Ok(mut job) = Self::load_single_job(&tx, &id, false) {
+                if !["queued", "running"].contains(&job.status.as_str()) {
+                    continue;
+                }
                 let before_agents = job.agents.clone();
                 let before_notes = job.notes.clone();
-                let uncertain = job.kind == "action" && !job.approval_id.is_empty();
+                let uncertain = job.is_outcome_uncertain();
                 job.status = if uncertain { "failed" } else { "cancelled" }.into();
                 job.phase = job.status.clone();
                 job.error_code = if uncertain {
@@ -1087,7 +1187,8 @@ impl StateStore {
                 "SELECT id, kind, site_id, site_title, url, intent, understanding_json,
                         action_id, action_title, provider, locale, account_id, status, phase,
                         error_code, found_json, started_at, updated_at, finished_at, summary,
-                        approval_id, progress_done, progress_total, parent_id
+                        approval_id, progress_done, progress_total, parent_id,
+                        effect, dispatch_phase, owner_pid
                  FROM jobs ORDER BY ord ASC, rowid DESC",
             )?;
             let rows = stmt.query_map([], JobRow::from_row)?;
@@ -1114,7 +1215,8 @@ impl StateStore {
                 "SELECT id, kind, site_id, site_title, url, intent, understanding_json,
                         action_id, action_title, provider, locale, account_id, status, phase,
                         error_code, found_json, started_at, updated_at, finished_at, summary,
-                        approval_id, progress_done, progress_total, parent_id
+                        approval_id, progress_done, progress_total, parent_id,
+                        effect, dispatch_phase, owner_pid
                  FROM jobs WHERE id = ?1",
                 params![id],
                 JobRow::from_row,
@@ -1396,15 +1498,22 @@ impl StateStore {
             return Err(AppError::api("too_large", 413));
         }
 
+        let effect_str = match job.effect {
+            crate::policy::Effect::Read => "read",
+            crate::policy::Effect::Write => "write",
+            crate::policy::Effect::Unknown => "unknown",
+        };
         tx.execute(
             "INSERT INTO jobs (
                  ord, id, kind, site_id, site_title, url, intent, understanding_json,
                  action_id, action_title, provider, locale, account_id, status, phase,
                  error_code, found_json, started_at, updated_at, finished_at, summary,
-                 approval_id, progress_done, progress_total, parent_id
+                 approval_id, progress_done, progress_total, parent_id,
+                 effect, dispatch_phase, owner_pid
              ) VALUES (
                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                 ?26, ?27, ?28
              )
              ON CONFLICT(id) DO UPDATE SET
                  ord = excluded.ord,
@@ -1430,7 +1539,16 @@ impl StateStore {
                  approval_id = excluded.approval_id,
                  progress_done = excluded.progress_done,
                  progress_total = excluded.progress_total,
-                 parent_id = excluded.parent_id",
+                 parent_id = excluded.parent_id,
+                 effect = excluded.effect,
+                 dispatch_phase = CASE
+                     WHEN jobs.dispatch_phase = 'dispatched' THEN 'dispatched'
+                     ELSE excluded.dispatch_phase
+                 END,
+                 owner_pid = CASE
+                     WHEN excluded.owner_pid != 0 THEN excluded.owner_pid
+                     ELSE jobs.owner_pid
+                 END",
             params![
                 ord,
                 job.id,
@@ -1457,6 +1575,9 @@ impl StateStore {
                 job.progress_done as i64,
                 job.progress_total as i64,
                 job.parent_id,
+                effect_str,
+                job.dispatch_phase.as_str(),
+                job.owner_pid as i64,
             ],
         )?;
 

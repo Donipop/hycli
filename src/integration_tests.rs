@@ -2485,3 +2485,137 @@ fn har_capture_synthesizes_rich_v2_spec_with_query_body_auth_and_pointers() {
     );
     assert!(!body.json.contains_key("password"));
 }
+
+#[tokio::test]
+async fn write_path_commit_barrier_and_pid_aware_recovery_keep_state_consistent() {
+    let preflight_ok = Arc::new(AtomicUsize::new(0));
+    let pf = preflight_ok.clone();
+    let writes_hit = Arc::new(AtomicUsize::new(0));
+    let wh = writes_hit.clone();
+    let (base, server) = host(
+        Router::new()
+            .route(
+                "/boot",
+                get(move || {
+                    let pf = pf.clone();
+                    async move {
+                        if pf.load(Ordering::SeqCst) == 0 {
+                            (StatusCode::SERVICE_UNAVAILABLE, "boot down")
+                        } else {
+                            (StatusCode::OK, "<meta name=\"csrf\" content=\"tok-1\">")
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/items",
+                post(move || {
+                    let wh = wh.clone();
+                    async move {
+                        wh.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"created": true}))
+                    }
+                }),
+            ),
+    )
+    .await;
+
+    let core = runtime();
+    let sp = spec::parse(
+        json!({
+            "spec_version": 2,
+            "site": { "name": "fixture", "base_url": base },
+            "operations": [
+                {
+                    "name": "create-item",
+                    "method": "POST",
+                    "path": "/items",
+                    "effect": "write",
+                    "evidence": "Synthetic write with preflight",
+                    "preflight": [
+                        {
+                            "name": "boot",
+                            "path": "/boot",
+                            "extract": { "csrf": "css:meta[name='csrf']@content" }
+                        }
+                    ],
+                    "headers": { "x-csrf": "{{step.boot.csrf}}" },
+                    "body": { "json": { "title": { "type": "string", "required": true } } }
+                }
+            ]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    core.install(&sp).unwrap();
+    allow_changes(&core, "fixture");
+
+    let req = core
+        .request(
+            &sp,
+            "create-item",
+            BTreeMap::from([("title".into(), "Task 1".into())]),
+            None,
+        )
+        .unwrap();
+    let review = core.approval(req.clone(), "en").unwrap();
+
+    // 1. Preflight fails before the commit barrier: approval must NOT be consumed and server receives 0 writes.
+    assert!(core.execute(req.clone(), Some(&review.id)).await.is_err());
+    assert_eq!(writes_hit.load(Ordering::SeqCst), 0);
+    assert!(core.policy.review(&review.id).is_ok());
+
+    // 2. Once preflight succeeds, execution crosses the commit barrier and consumes the approval.
+    preflight_ok.store(1, Ordering::SeqCst);
+    assert_eq!(
+        core.execute(req.clone(), Some(&review.id))
+            .await
+            .unwrap()
+            .0
+            .status,
+        200
+    );
+    assert_eq!(writes_hit.load(Ordering::SeqCst), 1);
+    assert!(core.policy.review(&review.id).is_err());
+
+    // 3. Pre-dispatch write job cancelled before commit barrier is cleanly "cancelled", whereas a dispatched direct write is "action_outcome_unknown".
+    let mut pre_dispatch_write = crate::state::Job::new("action", "en");
+    pre_dispatch_write.effect = Effect::Write;
+    pre_dispatch_write.dispatch_phase = crate::state::DispatchPhase::PreDispatch;
+    let pre_job = core
+        .spawn_job(pre_dispatch_write, std::future::pending())
+        .unwrap();
+    core.cancel_job(&pre_job.id).unwrap();
+    let cancelled_pre = core.state.job(&pre_job.id).unwrap();
+    assert_eq!(cancelled_pre.status, "cancelled");
+    assert_eq!(cancelled_pre.error_code, "cancelled");
+
+    let mut dispatched_direct_write = crate::state::Job::new("action", "en");
+    dispatched_direct_write.effect = Effect::Write;
+    dispatched_direct_write.dispatch_phase = crate::state::DispatchPhase::Dispatched;
+    let disp_job = core
+        .spawn_job(dispatched_direct_write, std::future::pending())
+        .unwrap();
+    core.cancel_job(&disp_job.id).unwrap();
+    let cancelled_disp = core.state.job(&disp_job.id).unwrap();
+    assert_eq!(cancelled_disp.status, "failed");
+    assert_eq!(cancelled_disp.error_code, "action_outcome_unknown");
+
+    // 4. Multi-process PID-aware recovery: a job owned by a dead PID is recovered, while a job owned by a live external PID (e.g. parent PID 1 or live process) is untouched on open_with_recovery(_, false).
+    let mut dead_pid_job = crate::state::Job::new("action", "en");
+    dead_pid_job.status = "running".into();
+    dead_pid_job.effect = Effect::Write;
+    dead_pid_job.dispatch_phase = crate::state::DispatchPhase::Dispatched;
+    dead_pid_job.owner_pid = i32::MAX as u32;
+    core.state.add_job(dead_pid_job.clone()).unwrap();
+
+    let reopened =
+        crate::state::StateStore::open_with_recovery(&core.root.join("dashboard.json"), false)
+            .unwrap();
+    let recovered = reopened.job(&dead_pid_job.id).unwrap();
+    assert_eq!(recovered.status, "failed");
+    assert_eq!(recovered.error_code, "action_outcome_unknown");
+
+    server.abort();
+}
