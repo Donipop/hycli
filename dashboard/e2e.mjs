@@ -1,3 +1,4 @@
+import {selectPersistedLocale} from './e2e-settings.mjs';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import fs from 'node:fs/promises';
@@ -45,8 +46,8 @@ try {
  await button(page,'accounts.add').first().click();await screenshot({path:'docs/images/connect-account.png',timeout:120000});await button(dialog(),'common.close').click();
  // The UI runs against real APIs at narrow and RTL layouts as well.
  await page.setViewportSize({width:390,height:844});await screenshot({path:'docs/design/accounts-mobile.png',fullPage:true,timeout:120000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Mobile layout overflows');
- await page.setViewportSize({width:1536,height:1024});await page.getByLabel(en['settings.language'],{exact:true}).first().selectOption('ar');await poll(()=>page.locator('html').getAttribute('dir').then(v=>v==='rtl'));await screenshot({path:'docs/design/accounts-arabic.png',fullPage:true,timeout:120000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'RTL layout overflows');
- const ar=JSON.parse(await fs.readFile('dashboard/src/locales/ar.json','utf8'));await page.getByLabel(ar['settings.language'],{exact:true}).first().selectOption('en');
+ await page.setViewportSize({width:1536,height:1024});await selectPersistedLocale(page,page.getByLabel(en['settings.language'],{exact:true}).first(),'ar');await poll(()=>page.locator('html').getAttribute('dir').then(v=>v==='rtl'));await screenshot({path:'docs/design/accounts-arabic.png',fullPage:true,timeout:120000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'RTL layout overflows');
+ const ar=JSON.parse(await fs.readFile('dashboard/src/locales/ar.json','utf8'));await selectPersistedLocale(page,page.getByLabel(ar['settings.language'],{exact:true}).first(),'en');
  assert.equal((await fixtureStatus()).secret_prompts,0,'A credential entered a model prompt');assert.deepEqual(consoleErrors,[]);
  console.log(JSON.stringify({ui:'passed',provider:'saved and checked without exporting the key',approval:'cancel=0; approve=1',preparation:'no test writes',secret_prompts:0,mobile:'no horizontal overflow',rtl:'no horizontal overflow',screenshots:process.env.HYCLI_NO_SCREENSHOTS==='1'?'skipped; checked separately':'docs/images and docs/design'},null,2));
 } catch(error){await screenshot({path:'docs/design/e2e-failure.png',fullPage:true,timeout:120000}).catch(()=>{});console.error(error);process.exitCode=1;} finally{await context.close();if(!process.env.TEST_CDP)await browser.close();}
