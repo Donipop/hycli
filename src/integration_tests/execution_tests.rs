@@ -1728,3 +1728,127 @@ fn mcp_listing_survives_metadata_removal_after_snapshot() {
         assert!(names.contains(&"hycli_result".into()));
     }
 }
+
+#[tokio::test]
+async fn identity_refresh_permission_denial_preserves_session_but_401_expires_it() {
+    use std::sync::atomic::AtomicU16;
+    let status = Arc::new(AtomicU16::new(200));
+    let response_status = status.clone();
+    let (url, server) = host(Router::new().route(
+        "/account",
+        get(move |headers: HeaderMap| {
+            let status = response_status.clone();
+            async move {
+                if headers
+                    .get("cookie")
+                    .is_some_and(|v| v == "sid=synthetic-session")
+                {
+                    (
+                        StatusCode::from_u16(status.load(Ordering::SeqCst)).unwrap(),
+                        Json(json!({"id":"private-person", "name":"Private Person"})),
+                    )
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error":"signed_out"})),
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+    let core = runtime();
+    for recipe_refresh in [false, true] {
+        status.store(200, Ordering::SeqCst);
+        let credential: crate::accounts::Credential = serde_json::from_value(json!({"origin":url,"cookies":[{"name":"sid","value":"synthetic-session","domain":"127.0.0.1","path":"/"}],"identity_source":format!("{url}/account")})).unwrap();
+        let account = core
+            .register_browser_credential("fixture", credential, "Fixture", "Synthetic")
+            .unwrap();
+        if recipe_refresh {
+            let recipe = crate::session_recipe::ConnectionRecipe {
+                identity_url: format!("{url}/account"),
+                identity: crate::session_recipe::IdentityMapping {
+                    user_id: "/id".into(),
+                    ..Default::default()
+                },
+                evidence: "observed_browser_request".into(),
+                ..Default::default()
+            };
+            core.observe_account_session(&account.id, &recipe.identity_url, false)
+                .await
+                .unwrap();
+            core.verify_session_recipe(&account.id, &recipe)
+                .await
+                .unwrap();
+        } else {
+            core.refresh_account(&account.id).await.unwrap();
+        }
+        let before_credential =
+            serde_json::to_value(core.credential(&account.id).unwrap()).unwrap();
+        let before_account =
+            serde_json::to_value(core.state.account(&account.id).unwrap()).unwrap();
+        let generation = core.state.read().unwrap().identity_generations[&account.id].clone();
+        status.store(403, Ordering::SeqCst);
+        let code = if recipe_refresh {
+            core.refresh_account_session(&account.id)
+                .await
+                .err()
+                .map(|e| e.public_code)
+        } else {
+            core.refresh_account(&account.id)
+                .await
+                .err()
+                .map(|e| e.public_code)
+        };
+        assert_eq!(
+            code.as_deref(),
+            Some("request_failed"),
+            "403 is not proof of logout"
+        );
+        assert_eq!(
+            serde_json::to_value(core.credential(&account.id).unwrap()).unwrap(),
+            before_credential
+        );
+        assert_eq!(
+            serde_json::to_value(core.state.account(&account.id).unwrap()).unwrap(),
+            before_account
+        );
+        assert_eq!(
+            core.state.read().unwrap().identity_generations[&account.id],
+            generation
+        );
+        // The same account can be verified again without importing or signing in again.
+        status.store(200, Ordering::SeqCst);
+        if recipe_refresh {
+            core.refresh_account_session(&account.id).await.unwrap();
+        } else {
+            core.refresh_account(&account.id).await.unwrap();
+        }
+        status.store(401, Ordering::SeqCst);
+        if recipe_refresh {
+            assert_eq!(
+                core.refresh_account_session(&account.id)
+                    .await
+                    .err()
+                    .unwrap()
+                    .public_code,
+                "auth_required"
+            );
+        } else {
+            assert_eq!(
+                core.refresh_account(&account.id).await.unwrap().status,
+                "expired"
+            );
+        }
+        let expired = core.state.account(&account.id).unwrap().unwrap();
+        assert_eq!(expired.status, "expired");
+        assert!(!expired.verified_identity);
+        assert!(
+            core.credential(&account.id)
+                .unwrap()
+                .identity_proof
+                .is_empty()
+        );
+    }
+    server.abort();
+}

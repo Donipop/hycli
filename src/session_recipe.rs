@@ -295,7 +295,7 @@ impl Runtime {
             .await?;
         if !response.successful() {
             return Err(AppError::api(
-                if response.status == 401 || response.status == 403 {
+                if response.status == 401 {
                     "auth_required"
                 } else {
                     "request_failed"
