@@ -55,9 +55,9 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
-      - name: Registry and fixture regression tests
+      - name: Registry, fixture and companion boundary tests
         shell: bash
-        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs
+        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs
       - name: Rust toolchain
         run: |
           rustup update stable --no-self-update
@@ -110,6 +110,22 @@ jobs:
           cargo build --locked --bin hycli --example dashboard_fixture
       - name: Private pagination CLI and MCP
         run: node scripts/test-pagination.mjs
+      - name: Native companion popup dependencies
+        if: matrix.platform == 'win32-x64'
+        working-directory: dashboard
+        run: npx --no-install playwright install chromium
+      - name: Native packaged companion consent and cookie proof
+        if: matrix.platform == 'win32-x64'
+        timeout-minutes: 10
+        run: node dashboard/companion-consent-native.mjs
+      - name: Retain synthetic companion proof only
+        if: always() && matrix.platform == 'win32-x64'
+        uses: actions/upload-artifact@v6
+        with:
+          name: companion-consent-native-report
+          path: test-results/companion-consent-native.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Browser dependencies
         if: matrix.browser_tests
         working-directory: dashboard
