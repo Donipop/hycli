@@ -54,7 +54,7 @@ function background(overrides={}) {
   return {context,handlers,calls,connection,site};
 }
 test('cookie-only parent grants do not record or forward parent/sibling traffic',async()=>{
-  for(const url of ['https://example.com/account','https://sibling.example.com/account']){
+  for(const url of ['https://example.com/account','https://sibling.example.com/account','https://www.example.com:8443/account']){
     const b=background({apply:c=>{c.chrome.tabs.get=async id=>({id,url,incognito:false});}});
     await b.handlers.before({tabId:1,requestId:'r',method:'GET',url});
     await b.handlers.completed({tabId:1,requestId:'r',statusCode:200});
@@ -122,10 +122,11 @@ test('popup denial, empty visibility and tab changes never connect or replace a 
   }
 });
 
-test('Firefox host grants omit unsupported ports without widening execution origin or partition site',()=>{
+test('Cookie host grants omit ports on both browsers without widening execution origin or partition site',()=>{
   const chrome=scope.plan('https://a.example.com:8443/path');
   const firefox=scope.plan('https://a.example.com:8443/path',true);
-  assert.deepEqual([...chrome.permissions],['https://a.example.com:8443/*','https://example.com:8443/*']);
+  assert.deepEqual([...chrome.permissions],['https://a.example.com/*','https://example.com/*']);
+  assert.equal(chrome.origin,'https://a.example.com:8443');
   assert.deepEqual([...firefox.permissions],['https://a.example.com/*','https://example.com/*']);
   assert.equal(firefox.origin,'https://a.example.com:8443');
   assert.equal(firefox.topLevelSite,'https://example.com');

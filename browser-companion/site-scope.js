@@ -17,9 +17,10 @@ globalThis.HYCLI_SITE_SCOPE = (() => {
       }
     }
     return {origin:site.origin, hostname:site.hostname, parent, origins,
-      // Firefox rejects ports in match patterns. The displayed grant list
-      // matches these actual host permissions; execution remains origin-bound.
-      permissions:origins.map(origin => { const url=new URL(origin); if(firefox)url.port=''; return url.origin+'/*'; }),
+      // Cookies are host-oriented, not port-oriented; Firefox also rejects
+      // ports in match patterns. Display the actual host grant, but retain
+      // the exact port in origin for observation and execution boundaries.
+      permissions:origins.map(origin => { const url=new URL(origin); url.port=''; return url.origin+'/*'; }),
       topLevelSite:site.protocol + '//' + (parent || site.hostname)};
   }
   function allowsCookie(cookie, scope, storeId) {

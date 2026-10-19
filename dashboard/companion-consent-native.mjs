@@ -52,7 +52,23 @@ try{
   const manifest=JSON.parse(await fs.readFile(path.join(extension,'manifest.json'),'utf8'));
   // Same approved foundation as the raw visibility matrix: required synthetic
   // grants only. This does NOT claim to automate accepting a new host prompt.
-  manifest.host_permissions=[...manifest.host_permissions,site+'/*',parent+'/*'];
+  const cookieHosts=['http://www.example.com/*','http://example.com/*'];
+  manifest.host_permissions=[...manifest.host_permissions,...cookieHosts];
+  await fs.writeFile(path.join(extension,'manifest.json'),JSON.stringify(manifest));
+  const seededCookies=[{name:'www_host',value:'synthetic',url:site+'/'},{name:'parent_domain',value:'synthetic',domain:'.example.com',path:'/'},{name:'apex_host',value:'synthetic',url:parent+'/'}];
+  // Reproduce the prior native empty result against positively seeded cookies
+  // in a separate fresh profile, before testing the corrected host grants.
+  const portManifest={...manifest,host_permissions:[...manifest.host_permissions.filter(p=>!cookieHosts.includes(p)),site+'/*',parent+'/*']};
+  await fs.writeFile(path.join(extension,'manifest.json'),JSON.stringify(portManifest));
+  context=await chromium.launchPersistentContext(path.join(temporary,'port-profile'),{channel:'chromium',headless:false,chromiumSandbox:true,timeout:30000,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
+  await context.addCookies(seededCookies);
+  assert.deepEqual((await context.cookies()).map(c=>c.name).sort(),['apex_host','parent_domain','www_host']);
+  const portWorker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker',{timeout:15000});
+  report.portGrantProbe=await portWorker.evaluate(async site=>({all:(await chrome.cookies.getAll({})).map(c=>c.name),url:(await chrome.cookies.getAll({url:site})).map(c=>c.name)}),site);
+  assert.deepEqual(report.portGrantProbe.all,[],'Reproduce prior all-cookie invisibility for port-specific grants');
+  // URL-scoped behavior is measured, not assumed; it cannot alone import
+  // cookies scoped to paths other than the root selected-site URL.
+  await context.close();context=null;
   await fs.writeFile(path.join(extension,'manifest.json'),JSON.stringify(manifest));
   context=await chromium.launchPersistentContext(path.join(temporary,'profile'),{channel:'chromium',headless:false,chromiumSandbox:true,timeout:30000,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
   await context.route('**/*',async route=>{
@@ -66,7 +82,9 @@ try{
   const permissions=await worker.evaluate(()=>chrome.permissions.getAll());
   assert.deepEqual([...(permissions.origins||[])].sort(),[...manifest.host_permissions].sort(),'Only exact synthetic fixture grants are permitted');
   report.grantedOrigins=permissions.origins;
-  await context.addCookies([{name:'www_host',value:'synthetic',url:site+'/'},{name:'parent_domain',value:'synthetic',domain:'.example.com',path:'/'},{name:'apex_host',value:'synthetic',url:parent+'/'}]);
+  await context.addCookies(seededCookies);
+  assert.deepEqual((await context.cookies()).map(c=>c.name).sort(),['apex_host','parent_domain','www_host'],'Synthetic cookies must exist before extension import');
+  report.checks.push('Synthetic cookies exist in the isolated browser before extension import');
   const website=await context.newPage();await website.goto(site);await website.bringToFront();
   const cdp=await context.browser().newBrowserCDPSession();
   let nextId=0;const outstanding=new Map();
@@ -85,7 +103,7 @@ try{
   const popup=await openPopup();
   await popup.click('details summary');await popup.fill('#address',address);await popup.fill('#code','SYNTHETIC');await popup.click('#pair');
   await until(()=>popup.evaluate("!document.getElementById('connect-step').hidden"),'pairing');
-  assert.equal(await popup.evaluate("document.getElementById('permission-origins').textContent"),site+'/*\n'+parent+'/*');
+  assert.equal(await popup.evaluate("document.getElementById('permission-origins').textContent"),cookieHosts.join('\n'));
   const active=await worker.evaluate(async()=>{const tabs=await chrome.tabs.query({active:true,currentWindow:true});return tabs[0]?.url;});assert.equal(new URL(active).origin,site,'Browser-action popup must retain the real website as active tab');
   // Observe real dispatched input without replacing the production handler or
   // browser tab/cookie/permission APIs. Only synthetic fixture metadata is kept.
