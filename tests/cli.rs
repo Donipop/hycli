@@ -570,3 +570,67 @@ async fn feedback_does_not_claim_a_page_opened_on_windows() {
     }
     assert!(!root.exists(), "synthetic Windows launcher did not exit");
 }
+
+#[tokio::test]
+async fn explicit_pagination_explains_handles_and_version_mismatches() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".cache/cli-tests")
+        .join(util::id());
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("fixture.json");
+    let mut value = json!({"spec_version":3,"site":{"name":"cursor-help","base_url":"https://example.com"},"operations":[{"name":"list-items","method":"GET","path":"/items","effect":"read","evidence":"Synthetic documented pagination","pagination":{"input":"page","query":"pageToken","next":"/nextPageToken"}}]});
+    std::fs::write(&file, value.to_string()).unwrap();
+    ok(cli(
+        &root,
+        &[
+            "--format",
+            "json",
+            "spec",
+            "install",
+            file.to_str().unwrap(),
+        ],
+    )
+    .await);
+    let action = ok(cli(
+        &root,
+        &["--format", "json", "describe", "cursor-help", "list-items"],
+    )
+    .await);
+    assert!(
+        action["inputs"][0]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("next_cursor")
+    );
+    assert!(
+        action["inputs"][0]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("15 minutes")
+    );
+    assert!(action["output"].as_str().unwrap().contains("next_cursor"));
+    let help = cli(&root, &["cursor-help", "list-items", "--help"]).await;
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("next_cursor"));
+    value["spec_version"] = json!(2);
+    std::fs::write(&file, value.to_string()).unwrap();
+    let invalid = cli(
+        &root,
+        &[
+            "--format",
+            "json",
+            "spec",
+            "validate",
+            file.to_str().unwrap(),
+        ],
+    )
+    .await;
+    assert!(!invalid.status.success());
+    let issues: Value = serde_json::from_slice(&invalid.stdout).unwrap();
+    assert!(issues["issues"].as_array().unwrap().iter().any(|issue| {
+        issue["field"] == "spec_version"
+            && issue["remedy"]
+                .as_str()
+                .is_some_and(|v| v.contains("spec_version to 3"))
+    }));
+}

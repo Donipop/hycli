@@ -27,11 +27,17 @@ impl Server {
     }
     pub(crate) fn tools(&self) -> AppResult<Vec<Tool>> {
         let language = self.core.state.settings()?.locale;
+        self.tools_from_snapshot(self.core.sites(&language)?)
+    }
+    pub(crate) fn tools_from_snapshot(&self, sites: Vec<crate::runtime::SiteView>) -> AppResult<Vec<Tool>> {
         let mut out = vec![];
-        for site in self.core.sites(&language)? {
+        for site in sites {
             if self.allowed(&site.id).is_err() {
                 continue;
             }
+            // Supplementary help must not invalidate the already captured listing
+            // if an installed definition changes concurrently. Execution revalidates.
+            let definition = self.core.spec(&site.id).ok();
             // A read-only website offers its change actions to no agent.
             for action in site
                 .actions
@@ -63,7 +69,7 @@ impl Server {
                 let schema = json!({"type":"object","properties":properties,"required":required,"additionalProperties":false});
                 let schema: JsonObject = serde_json::from_value(schema)?;
                 let name = format!("{}_{}", site.id, action.id);
-                let description = format!(
+                let mut description = format!(
                     "{} · {}. {} {}",
                     site.title,
                     action.title,
@@ -74,6 +80,11 @@ impl Server {
                         "Runs a website change."
                     }
                 );
+                if definition.as_ref().and_then(|spec| spec.op(&action.id).ok())
+                    .is_some_and(|op| op.pagination.is_some()) && !action.output.is_empty() {
+                    description.push(' ');
+                    description.push_str(&action.output);
+                }
                 out.push(
                     Tool::new(name, description, Arc::new(schema)).with_annotations(
                         ToolAnnotations::new()
