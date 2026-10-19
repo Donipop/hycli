@@ -18,6 +18,8 @@
   ],
   "background": {
     "scripts": [
+      "vendor/tldts.js",
+      "site-scope.js",
       "background.js"
     ]
   },
