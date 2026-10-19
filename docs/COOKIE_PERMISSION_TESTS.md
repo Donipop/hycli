@@ -71,3 +71,15 @@ report is still a failed CI step, never a passing native test.
 
 Until that workflow has actually run, the native matrix is unverified. Passing
 pure contract tests validates the report checker, not browser behavior.
+
+## Packaged companion popup gate
+
+`dashboard/companion-consent-native.mjs` runs after the ordinary Rust build in the Windows x64 verification job. It downloads the actual companion archive from an isolated Rust fixture and checks the production JavaScript and parser/license bytes before loading it. Only the owned test manifest's required host grants are extended with exact synthetic fixture hosts, following the raw API matrix above. It uses the bundled Chromium with `chromiumSandbox: true`, a fresh disposable normal profile, and no user browser path or account.
+
+The test calls the supported `chrome.action.openPopup()` API and drives the actual browser-action popup using CDP input events. It does not open a fake popup as a tab or replace `tabs.query`. The active website must remain the paired origin. A missing or uncontrollable action-popup target fails with a concrete capability error; it must not fall back to disabled sandboxing, browser policy changes or managed-cloud extension loading.
+
+The gate checks displayed finite scopes, native-cookie import with both existing grants, apex host-only exclusion, empty native visibility preserving saved state, a changed active website being rejected, cookie-only ancestor grants not recording identity/forwarding traffic, and delayed forbidden responses preserving a replaced connection. A separate real Rust fixture control makes its account endpoint return HTTP 401, verifying account expiry is based on server rejection rather than empty cookie visibility.
+
+This does **not** automate accepting or denying a new optional host-permission prompt. The browser already holds only the synthetic required grants; required grants cannot be revoked with `permissions.remove`. Native optional-prompt consent and revocation, private stores, Firefox and real accounts remain unverified. The source-level VM regressions separately cover denied/revoked permissions without claiming native-browser coverage.
+
+Only a sanitized JSON result is uploaded. The profile, pairing/session data, fixture state and downloaded archive remain in the invocation-owned temporary directory and are removed on exit. The Windows gate is designed but must not be reported as passed until that exact commit executes successfully in CI.
