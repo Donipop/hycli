@@ -780,3 +780,43 @@ fn resume_auth_exact_scope_and_atomic_credential_update_preserve_isolation() {
     assert_eq!(reloaded.identity_source, "https://example.com/me");
     assert_eq!(reloaded.cookies.len(), 1);
 }
+
+#[tokio::test]
+async fn auth_declaration_diagnostics_preserve_intentional_public_writes() {
+    let seen = Arc::new(AtomicUsize::new(0));
+    let counted = seen.clone();
+    let (url, server) = host(Router::new().route(
+        "/items",
+        post(move |headers: HeaderMap| {
+            let counted = counted.clone();
+            async move {
+                if !headers.contains_key("cookie") && !headers.contains_key("authorization") {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                }
+                Json(json!({"ok":true}))
+            }
+        }),
+    ))
+    .await;
+    let core = runtime();
+    let sp = spec_for(&url);
+    core.install(&sp).unwrap();
+    let inputs = BTreeMap::from([("title".into(), "Synthetic item".into())]);
+    assert_eq!(
+        core.run_op(&sp, "create-item", &inputs)
+            .await
+            .err()
+            .unwrap()
+            .public_code,
+        "writes_disabled"
+    );
+    assert_eq!(seen.load(Ordering::SeqCst), 0);
+    allow_changes(&core, "fixture");
+    let outcome = core.run_op(&sp, "create-item", &inputs).await;
+    server.abort();
+    assert!(
+        outcome.is_ok(),
+        "intentional public write must remain supported"
+    );
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+}

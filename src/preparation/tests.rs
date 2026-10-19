@@ -2,6 +2,7 @@ use super::{
     grounding::{apply_documented_auth, documented_auth, merge_worker_spec, supported_path},
     models::{
         WorkflowReview, complete_workflows, decode_plan, redact_self_qa, valid_understanding,
+        writes_without_declared_auth,
     },
 };
 use crate::{
@@ -12,6 +13,33 @@ use crate::{
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
+
+#[test]
+fn writes_without_a_credentialed_auth_strategy_are_reported_as_gaps() {
+    let public = crate::spec::parse(
+        json!({"spec_version":2,"site":{"name":"s","base_url":"https://x.example"},"operations":[
+            {"name":"read-items","method":"GET","path":"/items","effect":"read","evidence":"fixture"},
+            {"name":"create-item","method":"POST","path":"/items","effect":"write","evidence":"fixture"}
+        ]})
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        writes_without_declared_auth(&public),
+        vec!["create-item".to_string()]
+    );
+
+    let authed = crate::spec::parse(
+        json!({"spec_version":2,"site":{"name":"s","base_url":"https://x.example"},"auth":[{"name":"session","kind":"browser"}],"operations":[
+            {"name":"create-item","method":"POST","path":"/items","auth":"session","effect":"write","evidence":"fixture"}
+        ]})
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    assert!(writes_without_declared_auth(&authed).is_empty());
+}
 
 #[test]
 fn nullable_optional_review_sections_do_not_discard_observed_coverage() {
@@ -440,4 +468,26 @@ async fn authenticated_document_discovery_leaves_icons_to_anonymous_image_cache(
     assert_eq!(requests.lock().unwrap().len(), 3);
     assert!(root.join("site-images/fixture.image").exists());
     server.abort();
+}
+
+#[test]
+fn write_auth_diagnostics_are_per_operation_and_do_not_claim_verification() {
+    let sp = crate::spec::parse(json!({"spec_version":2,"site":{"name":"s","base_url":"https://example.com"},"auth":[
+        {"name":"session","kind":"browser"}, {"name":"public","kind":"none"},
+        {"name":"key","kind":"header","header":"Authorization","value_from":"store:s/key"},
+        {"name":"csrf","kind":"derived","header":"X-CSRF-Token","value_from":"cookie:csrf"}
+    ],"operations":[
+        {"name":"read-items","method":"GET","path":"/items","effect":"read","evidence":"fixture"},
+        {"name":"read-private","method":"GET","path":"/private","auth":"session","effect":"read","evidence":"fixture"},
+        {"name":"create-public","method":"POST","path":"/items","auth":"public","effect":"write","evidence":"fixture"},
+        {"name":"create-undeclared","method":"POST","path":"/items","effect":"write","evidence":"fixture"},
+        {"name":"create-session","method":"POST","path":"/items","auth":"session","effect":"write","evidence":"fixture"},
+        {"name":"create-key","method":"POST","path":"/items","auth":"key","effect":"write","evidence":"fixture"},
+        {"name":"create-csrf","method":"POST","path":"/items","auth":"csrf","effect":"write","evidence":"fixture"}
+    ]}).to_string().as_bytes()).unwrap();
+    assert!(sp.validate().is_empty());
+    assert_eq!(
+        writes_without_declared_auth(&sp),
+        vec!["create-public".to_string(), "create-undeclared".to_string()]
+    );
 }

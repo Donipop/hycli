@@ -1,6 +1,6 @@
 use super::{
     grounding::{accounts_identity, merge_worker_spec, uncovered_routes, verification_key},
-    models::{WorkflowReview, complete_workflows},
+    models::{WorkflowReview, complete_workflows, writes_without_declared_auth},
     prompts::SYSTEM,
 };
 use crate::{
@@ -356,7 +356,7 @@ impl Runtime {
         understanding: Option<WebsiteUnderstanding>,
         workflow_review: Option<WorkflowReview>,
         self_interrogation: BTreeMap<String, Vec<SelfQa>>,
-        capability_gaps: BTreeMap<String, Vec<String>>,
+        mut capability_gaps: BTreeMap<String, Vec<String>>,
         verification: BTreeMap<String, bool>,
         smoke_checks: Vec<ReadCheck>,
         api_routes: BTreeSet<(String, String)>,
@@ -499,6 +499,15 @@ impl Runtime {
         description
             .actions
             .retain(|name, _| sp.operations.iter().any(|op| &op.name == name));
+        // Missing declarations are a diagnostic, not a ban on intentional public
+        // writes or proof that a declared credential is configured and verified.
+        let undeclared = writes_without_declared_auth(&sp);
+        if !undeclared.is_empty() {
+            capability_gaps.entry("auth".into()).or_default().push(format!(
+                "No authentication strategy is declared for these changes: {}. Their authentication requirements have not been verified. If they require sign-in, connect the intended account and prepare again; intentionally public changes remain available under the existing write permissions.",
+                undeclared.join(", ")
+            ));
+        }
         self.job_progress(&job.id, "verify", 3)?;
         self.job_note(&job.id, "checking", "", 0, "")?;
         if self
