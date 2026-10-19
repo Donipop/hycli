@@ -206,7 +206,88 @@ fn navigation_query(url: &Url) -> bool {
     })
 }
 
+// Only recognizable non-document assets are excluded by path. In particular,
+// JSON, YAML, Markdown, PDF and extensionless document routes remain eligible.
+// Query strings must not hide an asset extension or change its classification.
+fn document_path(url: &Url) -> bool {
+    let path = url.path().to_ascii_lowercase();
+    ![
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".avif", ".bmp", ".woff",
+        ".woff2", ".ttf", ".otf", ".eot", ".css", ".js", ".mjs", ".mp3", ".mp4", ".webm", ".wav",
+        ".ogg",
+    ]
+    .iter()
+    .any(|extension| path.ends_with(extension))
+}
+
+fn resource_relation(rel: &str) -> bool {
+    matches!(
+        rel,
+        "icon"
+            | "apple-touch-icon"
+            | "apple-touch-icon-precomposed"
+            | "mask-icon"
+            | "stylesheet"
+            | "modulepreload"
+    )
+}
+
+fn resource_destination(kind: &str) -> bool {
+    matches!(
+        kind.to_ascii_lowercase().as_str(),
+        "image" | "font" | "style" | "script" | "audio" | "video"
+    )
+}
+
+// Use the same HTML attribute decoding as published_resources, exactly once.
+// Otherwise numeric entities can turn into URL fragments and be truncated into
+// unrelated document URLs before the resource exclusion is applied.
+fn decoded_link(raw: &str) -> String {
+    if !raw.contains('&') {
+        return raw.to_owned();
+    }
+    let html =
+        scraper::Html::parse_fragment(&format!("<a href=\"{}\"></a>", raw.replace('"', "&quot;")));
+    let selector = scraper::Selector::parse("a[href]").expect("constant");
+    html.select(&selector)
+        .next()
+        .and_then(|element| element.value().attr("href"))
+        .unwrap_or(raw)
+        .to_owned()
+}
+
+// Keep exclusions across every extraction pass, including quoted-string and
+// Markdown fallbacks, so an extensionless icon cannot reenter as a document.
+fn published_resources(base: &Url, text: &str) -> BTreeSet<String> {
+    let html = scraper::Html::parse_fragment(text);
+    let selector = scraper::Selector::parse(
+        "link[href], img[src], script[src], audio[src], video[src], source[src]",
+    )
+    .expect("constant");
+    html.select(&selector)
+        .take(4000)
+        .filter_map(|element| {
+            let value = element.value();
+            let raw = if value.name() == "link" {
+                let rel = value.attr("rel").unwrap_or("").to_ascii_lowercase();
+                let resource = rel.split_whitespace().any(resource_relation)
+                    || value.attr("as").is_some_and(resource_destination);
+                if !resource {
+                    return None;
+                }
+                value.attr("href")?
+            } else {
+                value.attr("src")?
+            };
+            let mut url = base.join(raw).ok()?;
+            url.set_fragment(None);
+            Some(url.to_string())
+        })
+        .collect()
+}
+
 pub fn published_links(base: &Url, text: &str) -> BTreeSet<String> {
+    let resources = published_resources(base, text);
     let mut links = BTreeSet::new();
     let expressions = [
         r#"(?i)(?:href|src)\s*=\s*["']([^"'<>\s]+)["']"#,
@@ -219,7 +300,7 @@ pub fn published_links(base: &Url, text: &str) -> BTreeSet<String> {
             .captures_iter(text)
             .take(4000)
         {
-            let raw = capture[1].replace("&amp;", "&");
+            let raw = decoded_link(&capture[1]);
             if raw.contains(['{', '}', '(', ')', '*']) || raw.contains("/:") {
                 continue;
             }
@@ -232,6 +313,8 @@ pub fn published_links(base: &Url, text: &str) -> BTreeSet<String> {
                 || !target.username().is_empty()
                 || target.password().is_some()
                 || !navigation_query(&target)
+                || !document_path(&target)
+                || resources.contains(target.as_str())
                 || target.path().contains(['{', '}', '(', ')', '*'])
                 || target.path().contains("/:")
                 || !crate::browser_session::navigation_safe(&target)
@@ -246,19 +329,42 @@ pub fn published_links(base: &Url, text: &str) -> BTreeSet<String> {
 }
 
 pub fn header_links(base: &Url, value: &str) -> BTreeSet<String> {
-    regex::Regex::new(r"<([^>]+)>[^,]*")
+    let parameters =
+        regex::Regex::new(r#";\s*([A-Za-z][A-Za-z0-9_-]*)\s*=\s*(?:"([^"]*)"|([^;\s,]+))"#)
+            .expect("constant");
+    regex::Regex::new(r#"<([^>]+)>((?:[^",]|"[^"]*")*)"#)
         .expect("constant")
         .captures_iter(value)
         .filter(|capture| {
-            [
-                "llms-txt",
-                "alternate",
-                "service-desc",
-                "describedby",
-                "api-catalog",
-            ]
-            .iter()
-            .any(|rel| capture[0].contains(rel))
+            let mut document = false;
+            for parameter in parameters.captures_iter(&capture[2]) {
+                let name = parameter[1].to_ascii_lowercase();
+                let value = parameter
+                    .get(2)
+                    .or_else(|| parameter.get(3))
+                    .unwrap()
+                    .as_str()
+                    .to_ascii_lowercase();
+                if name == "as" && resource_destination(&value) {
+                    return false;
+                }
+                if name == "rel" {
+                    for rel in value.split_whitespace() {
+                        if resource_relation(rel) {
+                            return false;
+                        }
+                        document |= matches!(
+                            rel,
+                            "llms-txt"
+                                | "alternate"
+                                | "service-desc"
+                                | "describedby"
+                                | "api-catalog"
+                        );
+                    }
+                }
+            }
+            document
         })
         .filter_map(|capture| base.join(&capture[1]).ok())
         .filter(|url| {
@@ -268,6 +374,7 @@ pub fn header_links(base: &Url, value: &str) -> BTreeSet<String> {
                 && url.password().is_none()
                 && policy::safe_read_url(url)
                 && navigation_query(url)
+                && document_path(url)
         })
         .map(|url| url.to_string())
         .collect()

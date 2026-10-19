@@ -55,9 +55,9 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
-      - name: Registry packaging regression tests
+      - name: Registry and fixture regression tests
         shell: bash
-        run: node --test scripts/registry.test.mjs
+        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs
       - name: Rust toolchain
         run: |
           rustup update stable --no-self-update

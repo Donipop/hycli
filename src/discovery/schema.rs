@@ -238,13 +238,76 @@ mod tests {
         );
     }
     #[test]
+    fn document_admission_excludes_resources_across_all_extractors() {
+        let home = Url::parse("https://example.com/").unwrap();
+        let text = r##"<link href='/icon?version=2#icon' rel='shortcut ICON'>
+            <img src='/image?id=1'><link rel='stylesheet' href='/styles?version=2'>
+            <a href='/favicon.SVG?version=2'>Icon</a>
+            <a href='/photo.webp?id=2'>Photo</a>
+            <script src='/assets/app.js'></script>
+            <iframe src='/EntryList.page?blogId=demo'></iframe>
+            <a href='/docs/reference.json?version=2'>API</a>
+            <a href='/docs/manual.pdf'>Manual</a>
+            <a href='/docs/format.svg.html'>HTML</a>
+            [Icon](/icon?version=2) '/styles?version=2' '/image?id=1'
+            '/assets/font.woff2?version=2' '/images/logo.png#brand'
+            '/docs/reference.yaml' '/docs/reference.md' '/llms.txt'"##;
+        assert_eq!(
+            published_links(&home, text),
+            BTreeSet::from([
+                "https://example.com/EntryList.page?blogId=demo".into(),
+                "https://example.com/docs/reference.json?version=2".into(),
+                "https://example.com/docs/manual.pdf".into(),
+                "https://example.com/docs/format.svg.html".into(),
+                "https://example.com/docs/reference.yaml".into(),
+                "https://example.com/docs/reference.md".into(),
+                "https://example.com/llms.txt".into(),
+            ])
+        );
+        assert_eq!(
+            crate::discovery::bundle_urls(&home, text),
+            vec!["https://example.com/assets/app.js"]
+        );
+        assert!(header_links(&home, "</favicon.svg?version=2>; rel=alternate").is_empty());
+    }
+
+    #[test]
+    fn resource_entities_and_header_relations_do_not_become_documents() {
+        let home = Url::parse("https://example.com/").unwrap();
+        assert_eq!(
+            published_links(
+                &home,
+                r#"<link rel='icon' href='/icon?version=2&#38;id=1'>
+            <img src='/&#105;mage'><a href='/docs?version=2&#x26;id=1'>Document</a>
+            [Manual](/manual?version=2&amp;id=1)"#
+            ),
+            BTreeSet::from([
+                "https://example.com/docs?version=2&id=1".into(),
+                "https://example.com/manual?version=2&id=1".into(),
+            ])
+        );
+        assert_eq!(
+            header_links(
+                &home,
+                r#"</icon>; rel="alternate icon",
+            </image>; rel=icon; title="alternate image",
+            </style>; rel=alternate; as=style,
+            </reference>; REL="DESCRIBEDBY"; title="API, reference",
+            </not-doc>; rel=not-alternate,
+            </duplicate>; rel=alternate; rel=icon"#
+            ),
+            BTreeSet::from(["https://example.com/reference".into()])
+        );
+    }
+
+    #[test]
     fn query_addressed_pages_remain_discoverable_without_credentials_or_mutations() {
         let home = Url::parse("https://blog.example.com/").unwrap();
         let links = published_links(
             &home,
-            r##"<iframe id="mainFrame" src="/PostList.naver?blogId=demo&amp;categoryNo=0#posts"></iframe>
-                <a href="/PostView.naver?blogId=demo&amp;logNo=123">Read entry</a>
-                <a href="https://m.blog.example.com/PostView.naver?blogId=demo&amp;logNo=123">Mobile entry</a>
+            r##"<iframe id="mainFrame" src="/EntryList.page?blogId=demo&amp;categoryNo=0#posts"></iframe>
+                <a href="/EntryView.page?blogId=demo&amp;logNo=123">Read entry</a>
+                <a href="https://m.blog.example.com/EntryView.page?blogId=demo&amp;logNo=123">Mobile entry</a>
                 <a href="/entries?entry_id=record-1&amp;page=2&amp;limit=20">Catalogue</a>
                 <a href="/read?access_token=private">Secret</a>
                 <a href="/read?sessionId=private">Session</a>
@@ -261,9 +324,9 @@ mod tests {
             links,
             BTreeSet::from([
                 "https://blog.example.com/entries?entry_id=record-1&page=2&limit=20".into(),
-                "https://blog.example.com/PostList.naver?blogId=demo&categoryNo=0".into(),
-                "https://blog.example.com/PostView.naver?blogId=demo&logNo=123".into(),
-                "https://m.blog.example.com/PostView.naver?blogId=demo&logNo=123".into(),
+                "https://blog.example.com/EntryList.page?blogId=demo&categoryNo=0".into(),
+                "https://blog.example.com/EntryView.page?blogId=demo&logNo=123".into(),
+                "https://m.blog.example.com/EntryView.page?blogId=demo&logNo=123".into(),
             ])
         );
     }
