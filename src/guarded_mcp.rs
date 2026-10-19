@@ -29,7 +29,10 @@ impl Server {
         let language = self.core.state.settings()?.locale;
         self.tools_from_snapshot(self.core.sites(&language)?)
     }
-    pub(crate) fn tools_from_snapshot(&self, sites: Vec<crate::runtime::SiteView>) -> AppResult<Vec<Tool>> {
+    pub(crate) fn tools_from_snapshot(
+        &self,
+        sites: Vec<crate::runtime::SiteView>,
+    ) -> AppResult<Vec<Tool>> {
         let mut out = vec![];
         for site in sites {
             if self.allowed(&site.id).is_err() {
@@ -80,8 +83,12 @@ impl Server {
                         "Runs a website change."
                     }
                 );
-                if definition.as_ref().and_then(|spec| spec.op(&action.id).ok())
-                    .is_some_and(|op| op.pagination.is_some()) && !action.output.is_empty() {
+                if definition
+                    .as_ref()
+                    .and_then(|spec| spec.op(&action.id).ok())
+                    .is_some_and(|op| op.pagination.is_some())
+                    && !action.output.is_empty()
+                {
                     description.push(' ');
                     description.push_str(&action.output);
                 }

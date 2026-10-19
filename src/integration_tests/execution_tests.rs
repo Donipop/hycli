@@ -838,8 +838,17 @@ fn mcp_listing_survives_metadata_removal_after_snapshot() {
             replacement.operations.retain(|op| op.name != "read-items");
             core.install(&replacement).unwrap();
         }
-        let mcp = crate::guarded_mcp::Server { core, sites_only: false, only_site: None };
-        let names: Vec<_> = mcp.tools_from_snapshot(snapshot).unwrap().into_iter().map(|tool| tool.name.to_string()).collect();
+        let mcp = crate::guarded_mcp::Server {
+            core,
+            sites_only: false,
+            only_site: None,
+        };
+        let names: Vec<_> = mcp
+            .tools_from_snapshot(snapshot)
+            .unwrap()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
         assert!(names.contains(&"fixture_read-items".into()));
         assert!(names.contains(&"unrelated_read-items".into()));
         assert!(names.contains(&"hycli_result".into()));
