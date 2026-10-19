@@ -17,6 +17,13 @@ pub enum Effect {
     Unknown,
 }
 impl Effect {
+    pub(crate) fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Write, _) | (_, Self::Write) => Self::Write,
+            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
+            _ => Self::Read,
+        }
+    }
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Read => "read",
@@ -153,44 +160,16 @@ pub fn operation_effect(op: &Operation, args: &BTreeMap<String, String>) -> Effe
     // Conservatively require review for any mutation, subscription or ambiguous document.
     if method == "POST" || method == "GET" {
         if let Some(query) = resolved.get("query") {
-            use graphql_parser::query::{Definition, OperationDefinition};
-            match graphql_parser::parse_query::<&str>(query) {
-                Ok(document) => {
-                    let operations: Vec<_> = document
-                        .definitions
-                        .iter()
-                        .filter_map(|definition| {
-                            if let Definition::Operation(operation) = definition {
-                                Some(operation)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    if operations.iter().any(|operation| {
-                        matches!(
-                            operation,
-                            OperationDefinition::Mutation(_) | OperationDefinition::Subscription(_)
-                        )
-                    }) {
-                        return Effect::Write;
-                    }
-                    if operations.len() == 1 && op.effect == Effect::Read && !op.evidence.is_empty()
-                    {
-                        return Effect::Read;
-                    }
-                    return Effect::Unknown;
-                }
-                Err(_)
-                    if op.path.to_ascii_lowercase().contains("graphql")
-                        || query.trim_start().starts_with(['{', '#'])
-                        || ["query", "mutation", "subscription", "fragment"]
-                            .iter()
-                            .any(|word| query.trim_start().starts_with(word)) =>
+            if let Some(effect) =
+                graphql_document_effect(query, op.path.to_ascii_lowercase().contains("graphql"))
+            {
+                return if effect == Effect::Read
+                    && (op.effect != Effect::Read || op.evidence.is_empty())
                 {
-                    return Effect::Unknown;
-                }
-                Err(_) => {} // A plain search string is not a GraphQL document.
+                    Effect::Unknown
+                } else {
+                    effect
+                };
             }
         } else if op.path.to_ascii_lowercase().contains("graphql") {
             return Effect::Unknown;
@@ -222,9 +201,215 @@ pub fn operation_effect(op: &Operation, args: &BTreeMap<String, String>) -> Effe
     Effect::Unknown
 }
 
+/// Known overrides can change the effective method or target at an intermediary.
+/// Their server-specific interpretation is not evidence of a supported read.
+pub(crate) fn request_headers_effect<'a>(
+    headers: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Effect {
+    if headers.into_iter().any(|(name, _)| {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "x-http-method-override"
+                | "x-http-method"
+                | "x-method-override"
+                | "x-original-url"
+                | "x-rewrite-url"
+        )
+    }) {
+        Effect::Unknown
+    } else {
+        Effect::Read
+    }
+}
+
+/// Classify the request that will actually be sent, not just its declared inputs.
+/// Read evidence never overrides a write or an opaque protocol envelope.
+pub(crate) fn rendered_request_effect(
+    op: &Operation,
+    args: &BTreeMap<String, String>,
+    url: &str,
+    body: Option<&[u8]>,
+) -> Effect {
+    let mut effect = operation_effect(op, args).combine(request_headers_effect(
+        op.headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    ));
+    let Ok(url) = url::Url::parse(url) else {
+        return effect.combine(Effect::Unknown);
+    };
+    if dangerous_intent(url.path()) {
+        return Effect::Write;
+    }
+    let opaque_field = op
+        .pagination
+        .as_ref()
+        .map(|pagination| pagination.query.as_str());
+    let (query, duplicate) =
+        encoded_fields(url.query().unwrap_or_default().as_bytes(), opaque_field);
+    let (query_effect, mut document) = payload_effect(&query);
+    effect = effect.combine(query_effect);
+    if duplicate {
+        effect = effect.combine(Effect::Unknown);
+    }
+    if let Some(body) = body {
+        let value = if op.body.as_ref().is_some_and(|body| !body.form.is_empty()) {
+            let (value, duplicate) = encoded_fields(body, None);
+            if duplicate {
+                effect = effect.combine(Effect::Unknown);
+            }
+            Ok(value)
+        } else {
+            serde_json::from_slice(body)
+        };
+        match value {
+            Ok(value) => {
+                let (body_effect, body_document) = payload_effect(&value);
+                effect = effect.combine(body_effect);
+                document |= body_document;
+            }
+            Err(_) => effect = effect.combine(Effect::Unknown),
+        }
+    }
+    let path = url.path().to_ascii_lowercase();
+    if (path.contains("graphql") || path.ends_with("/gql")) && !document {
+        effect = effect.combine(Effect::Unknown);
+    }
+    effect
+}
+
+fn encoded_fields(encoded: &[u8], opaque_field: Option<&str>) -> (serde_json::Value, bool) {
+    let mut fields = serde_json::Map::new();
+    let mut duplicate = false;
+    for (key, value) in url::form_urlencoded::parse(encoded) {
+        // A continuation is opaque data unless its actual field is a protocol selector.
+        // Query itself is a document/search string, not JSON serialization.
+        let protocol = matches!(
+            key.to_ascii_lowercase().as_str(),
+            "query" | "variables" | "extensions" | "operationname" | "queryid" | "persistedquery"
+        ) || INTENT_KEYS.contains(&key.to_ascii_lowercase().as_str());
+        let value = if key == "query" || (opaque_field == Some(key.as_ref()) && !protocol) {
+            serde_json::Value::String(value.into_owned())
+        } else {
+            serde_json::from_str(&value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.into_owned()))
+        };
+        match fields.entry(key.into_owned()) {
+            serde_json::map::Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+            serde_json::map::Entry::Occupied(mut entry) => {
+                // Repeated ordinary filters are data. Repeated protocol selectors
+                // are ambiguous; retain every value so nested intents are not lost.
+                duplicate |= protocol;
+                let previous = std::mem::replace(entry.get_mut(), serde_json::Value::Null);
+                entry.insert(serde_json::Value::Array(vec![previous, value]));
+            }
+        }
+    }
+    (serde_json::Value::Object(fields), duplicate)
+}
+
+/// Inspect structured request envelopes; arbitrary data strings are not commands.
+/// The boolean identifies a classified GraphQL candidate, not validated read authority.
+pub(crate) fn payload_effect(value: &serde_json::Value) -> (Effect, bool) {
+    use serde_json::Value;
+    if nested_change_intent(value) {
+        return (Effect::Write, false);
+    }
+    match value {
+        Value::Object(fields) => {
+            let envelope = fields.keys().any(|key| {
+                matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "operationname" | "queryid" | "persistedquery"
+                )
+            }) || fields
+                .get("extensions")
+                .and_then(Value::as_object)
+                .is_some_and(|fields| {
+                    fields
+                        .keys()
+                        .any(|key| key.eq_ignore_ascii_case("persistedQuery"))
+                });
+            let query = fields.get("query").and_then(Value::as_str);
+            let query_effect = query.and_then(|query| graphql_document_effect(query, envelope));
+            let mut effect = query_effect.unwrap_or(if envelope {
+                Effect::Unknown
+            } else {
+                Effect::Read
+            });
+            let mut document = query_effect.is_some();
+            for (key, value) in fields {
+                // Variables and extensions belong to this document, not a second
+                // executable GraphQL envelope. Nested change intents were checked above.
+                if query_effect.is_some() && matches!(key.as_str(), "variables" | "extensions") {
+                    continue;
+                }
+                let (nested, nested_document) = payload_effect(value);
+                effect = effect.combine(nested);
+                document |= nested_document;
+            }
+            (effect, document)
+        }
+        Value::Array(values) => {
+            values
+                .iter()
+                .fold((Effect::Read, false), |(effect, document), value| {
+                    let (nested, nested_document) = payload_effect(value);
+                    (effect.combine(nested), document || nested_document)
+                })
+        }
+        _ => (Effect::Read, false),
+    }
+}
+
+fn graphql_document_effect(query: &str, required: bool) -> Option<Effect> {
+    use graphql_parser::query::{Definition, OperationDefinition};
+    match graphql_parser::parse_query::<&str>(query) {
+        Ok(document) => {
+            let operations: Vec<_> = document
+                .definitions
+                .iter()
+                .filter_map(|definition| {
+                    if let Definition::Operation(operation) = definition {
+                        Some(operation)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            Some(
+                if operations.iter().any(|operation| {
+                    matches!(
+                        operation,
+                        OperationDefinition::Mutation(_) | OperationDefinition::Subscription(_)
+                    )
+                }) {
+                    Effect::Write
+                } else if operations.len() == 1 {
+                    Effect::Read
+                } else {
+                    Effect::Unknown
+                },
+            )
+        }
+        Err(_)
+            if required
+                || query.trim_start().starts_with(['{', '#'])
+                || ["query", "mutation", "subscription", "fragment"]
+                    .iter()
+                    .any(|word| query.trim_start().starts_with(word)) =>
+        {
+            Some(Effect::Unknown)
+        }
+        Err(_) => None,
+    }
+}
+
 pub const INTENT_KEYS: &[&str] = &["action", "operation", "op", "method", "command", "mode"];
 
-fn nested_change_intent(value: &serde_json::Value) -> bool {
+pub(crate) fn nested_change_intent(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
             (INTENT_KEYS.contains(&key.to_ascii_lowercase().as_str())
@@ -907,13 +1092,31 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
 
 /// The same semantic check is used for observation URLs and every redirect.
 pub fn safe_read_url(url: &url::Url) -> bool {
-    !dangerous_intent(url.path())
-        && !url.query_pairs().any(|(key, value)| {
+    if dangerous_intent(url.path())
+        || url.query_pairs().any(|(key, value)| {
             util::secret_field(&key)
                 || dangerous_intent(&key)
                 || (INTENT_KEYS.contains(&key.to_ascii_lowercase().as_str())
                     && dangerous_intent(&value))
         })
+    {
+        return false;
+    }
+    // Preflight reads and redirects are separate requests with their own URL
+    // semantics, not covered by the originating operation's effect check.
+    let operation = Operation {
+        name: "bounded-read".into(),
+        method: "GET".into(),
+        path: url.path().into(),
+        effect: Effect::Read,
+        evidence: "bounded GET request contract".into(),
+        ..Default::default()
+    };
+    let inputs = url
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    rendered_request_effect(&operation, &inputs, url.as_str(), None) == Effect::Read
 }
 
 /// Strict URL semantics for bounded manual session diagnostic GETs.
@@ -1002,5 +1205,338 @@ mod session_request_tests {
             &origin,
             "GET"
         ));
+    }
+}
+
+#[cfg(test)]
+mod rendered_request_tests {
+    use super::{Effect, operation_effect, rendered_request_effect};
+    use serde_json::{Value, json};
+    use std::collections::BTreeMap;
+
+    // Pure serialization and policy tests: no runtime, credentials, or network.
+    fn template_spec(body: Value) -> crate::spec::Spec {
+        crate::spec::parse(
+            json!({
+                "spec_version": 2,
+                "site": {"name": "fixture", "base_url": "https://fixture.example.test"},
+                "operations": [{
+                    "name": "read-items", "method": "POST", "path": "/api",
+                    "effect": "read", "evidence": "Synthetic fixture contract",
+                    "body": {"json_template": body}
+                }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    fn effect(spec: &crate::spec::Spec, args: &BTreeMap<String, String>) -> Effect {
+        let op = &spec.operations[0];
+        let (url, body) = spec.build_request(op, args).unwrap();
+        rendered_request_effect(op, args, &url, body.as_deref())
+    }
+
+    #[test]
+    fn rendered_preflight_and_redirect_urls_check_graphql_semantics() {
+        let mut url = url::Url::parse("https://fixture.example.test/context").unwrap();
+        url.query_pairs_mut()
+            .append_pair("query", "mutation { sampleChange }");
+        assert!(!super::safe_read_url(&url));
+        url.set_query(None);
+        url.query_pairs_mut().append_pair(
+            "extensions",
+            r#"{"persistedQuery":{"sha256Hash":"synthetic-reference"}}"#,
+        );
+        assert!(!super::safe_read_url(&url));
+    }
+
+    #[test]
+    fn rendered_preflight_graphql_routes_preserve_visible_read_documents() {
+        for path in ["/graphql", "/gql"] {
+            let mut url = url::Url::parse(&format!("https://fixture.example.test{path}")).unwrap();
+            url.query_pairs_mut()
+                .append_pair("query", "query { items { id } }");
+            assert!(super::safe_read_url(&url), "visible read at {path}");
+            url.set_query(None);
+            url.query_pairs_mut()
+                .append_pair("query", "mutation { sampleChange }");
+            assert!(!super::safe_read_url(&url));
+            url.set_query(None);
+            url.query_pairs_mut().append_pair(
+                "extensions",
+                r#"{"persistedQuery":{"sha256Hash":"synthetic-reference"}}"#,
+            );
+            assert!(!super::safe_read_url(&url));
+        }
+    }
+
+    #[test]
+    fn rendered_preflight_and_redirect_urls_preserve_ordinary_reads() {
+        for path in [
+            "/entry",
+            "/context?format=json",
+            "/items?tag=blue&tag=large",
+        ] {
+            let url = url::Url::parse(&format!("https://fixture.example.test{path}")).unwrap();
+            assert!(super::safe_read_url(&url));
+        }
+        for (key, value) in [
+            ("query", "query { items { id } }"),
+            ("query", "winter coats"),
+            ("search", "mutation { sampleChange }"),
+        ] {
+            let mut url = url::Url::parse("https://fixture.example.test/context").unwrap();
+            url.query_pairs_mut().append_pair(key, value);
+            assert!(super::safe_read_url(&url));
+        }
+    }
+
+    #[test]
+    fn rendered_request_override_headers_require_review() {
+        for name in [
+            "X-HTTP-Method-Override",
+            "x-http-method",
+            "X-Method-Override",
+            "X-Original-URL",
+            "x-Rewrite-uRL",
+        ] {
+            let mut spec = template_spec(json!({"search": "sample item"}));
+            spec.operations[0]
+                .headers
+                .insert(name.into(), "synthetic-selector".into());
+            assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Unknown, "{name}");
+        }
+    }
+
+    #[test]
+    fn rendered_headers_check_merged_and_separate_read_requests() {
+        let defaults = BTreeMap::from([("X-Rewrite-URL".to_owned(), "/other".to_owned())]);
+        let operation = BTreeMap::from([("Accept".to_owned(), "application/json".to_owned())]);
+        let merged: BTreeMap<_, _> = defaults.iter().chain(operation.iter()).collect();
+        let effect = super::request_headers_effect(
+            merged
+                .into_iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        );
+        assert_eq!(effect, Effect::Unknown);
+        assert_eq!(Effect::Write.combine(effect), Effect::Write);
+        // Separate preflight reads use the identical helper, not the operation's headers.
+        assert_eq!(
+            super::request_headers_effect([("x-HTTP-method-OVERRIDE", "{{method}}")]),
+            Effect::Unknown
+        );
+        assert_eq!(
+            super::request_headers_effect([("X-HTTP-Method-Override", "GET")]),
+            Effect::Unknown
+        );
+        assert_eq!(
+            super::request_headers_effect([("Accept", "text/html")]),
+            Effect::Read
+        );
+    }
+
+    #[test]
+    fn rendered_request_ordinary_headers_remain_read_only() {
+        let mut spec = template_spec(json!({"search": "sample item"}));
+        for name in ["Accept", "Content-Type", "X-Request-ID", "X-CSRF-Token"] {
+            spec.operations[0]
+                .headers
+                .insert(name.into(), "mutation-shaped data".into());
+        }
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Read);
+    }
+
+    #[test]
+    fn rendered_request_query_template_preserves_read_control() {
+        let document = "query { items { id } }";
+        let spec = template_spec(json!({"query": document}));
+        let op = &spec.operations[0];
+        let (url, body) = spec.build_request(op, &BTreeMap::new()).unwrap();
+        assert_eq!(url, "https://fixture.example.test/api");
+        let value: Value = serde_json::from_slice(body.as_ref().unwrap()).unwrap();
+        assert_eq!(value, json!({"query": document}));
+        assert_eq!(
+            rendered_request_effect(op, &BTreeMap::new(), &url, body.as_deref()),
+            Effect::Read
+        );
+    }
+
+    #[test]
+    fn rendered_request_mutation_template_requires_review() {
+        let spec = template_spec(json!({"query": "mutation { sampleChange }"}));
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Write);
+    }
+
+    #[test]
+    fn rendered_request_nested_intent_template_requires_review() {
+        let spec = template_spec(json!({"payload": {"operation": "update"}}));
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Write);
+    }
+
+    #[test]
+    fn rendered_request_opaque_graphql_envelope_requires_review() {
+        for template in [
+            json!({"extensions": {"persistedQuery": {"version": 1, "sha256Hash": "synthetic-reference"}}}),
+            json!({"payload": {"queryId": "synthetic-reference"}}),
+            json!({"operationName": "Items"}),
+        ] {
+            assert_eq!(
+                effect(&template_spec(template), &BTreeMap::new()),
+                Effect::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_request_data_strings_and_ordinary_search_remain_read_only() {
+        for template in [
+            json!({"search": "mutation { sampleChange }"}),
+            json!({"text": "{\"operation\":\"update\"}"}),
+            json!({"query": "winter coats", "limit": 20}),
+            json!({"filter": {"query": "blue shoes"}, "extensions": {"theme": "dark"}}),
+            json!({"query": "query { item(search: \"mutation\") { id } }"}),
+            json!({"query": "# mutation is only a comment\n{ items { id } }"}),
+            json!({"query": "query Items($query: String) { items(search: $query) { id } }", "variables": {"query": "mutation { sampleChange }"}}),
+            json!({"query": "query { items { id } }", "extensions": {"persistedQuery": {"version": 1, "sha256Hash": "synthetic-reference"}}}),
+        ] {
+            let spec = template_spec(template.clone());
+            assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Read, "{template}");
+        }
+    }
+
+    #[test]
+    fn rendered_request_nested_and_batched_documents_are_classified() {
+        for template in [
+            json!({"payload": {"query": "mutation { sampleChange }"}}),
+            json!([{"query": "query { items { id } }"}, {"query": "mutation { sampleChange }"}]),
+            json!({"query": "subscription { updates }"}),
+        ] {
+            assert_eq!(
+                effect(&template_spec(template), &BTreeMap::new()),
+                Effect::Write
+            );
+        }
+        assert_eq!(
+            effect(
+                &template_spec(
+                    json!([{"query": "query { items { id } }"}, {"query": "query { count }"}])
+                ),
+                &BTreeMap::new()
+            ),
+            Effect::Read
+        );
+        for document in [
+            "query A { items { id } } query B { count }",
+            "query { items(",
+            "fragment Item on Item { id }",
+        ] {
+            assert_eq!(
+                effect(&template_spec(json!({"query": document})), &BTreeMap::new()),
+                Effect::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_request_interpolated_documents_and_intents_are_rechecked() {
+        let spec = template_spec(json!({"query": "{{document}}"}));
+        for (document, expected) in [
+            ("query { items { id } }", Effect::Read),
+            ("mutation { sampleChange }", Effect::Write),
+        ] {
+            assert_eq!(
+                effect(
+                    &spec,
+                    &BTreeMap::from([("document".into(), document.into())])
+                ),
+                expected
+            );
+        }
+        let spec = template_spec(json!({"payload": {"mode": "{{step.context.mode}}"}}));
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Read);
+        assert_eq!(
+            effect(
+                &spec,
+                &BTreeMap::from([("step.context.mode".into(), "update".into())])
+            ),
+            Effect::Write
+        );
+    }
+
+    #[test]
+    fn rendered_request_form_and_url_values_are_checked_after_interpolation() {
+        let mut spec = template_spec(json!({}));
+        spec.operations[0].body = Some(
+            serde_json::from_value(
+                json!({"form": {"query": {"type": "string", "default": "{{document}}"}}}),
+            )
+            .unwrap(),
+        );
+        let args = BTreeMap::from([("document".into(), "mutation { sampleChange }".into())]);
+        assert_eq!(effect(&spec, &args), Effect::Write);
+        spec.operations[0].method = "GET".into();
+        spec.operations[0].query = spec.operations[0].body.take().unwrap().form;
+        assert_eq!(effect(&spec, &args), Effect::Write);
+        let args = BTreeMap::from([("document".into(), "query { items { id } }".into())]);
+        // The declared unresolved query remains Unknown even when the final document is a read.
+        assert_eq!(effect(&spec, &args), Effect::Unknown);
+        let args = BTreeMap::from([("query".into(), "query { items { id } }".into())]);
+        assert_eq!(effect(&spec, &args), Effect::Read);
+        spec.operations[0].query = serde_json::from_value(json!({"extensions": {"type": "string", "default": "{\"persistedQuery\":{\"sha256Hash\":\"synthetic-reference\"}}"}})).unwrap();
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Unknown);
+    }
+
+    #[test]
+    fn rendered_request_path_and_declared_authority_cannot_be_downgraded() {
+        let mut spec = template_spec(json!({"query": "query { items { id } }"}));
+        spec.operations[0].path = "/{{route}}".into();
+        assert_eq!(
+            effect(&spec, &BTreeMap::from([("route".into(), "update".into())])),
+            Effect::Write
+        );
+        spec.operations[0].path = "/api".into();
+        spec.operations[0].effect = Effect::Write;
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Write);
+        spec.operations[0].effect = Effect::Unknown;
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Unknown);
+        spec.operations[0].effect = Effect::Read;
+        spec.operations[0].evidence.clear();
+        assert_eq!(effect(&spec, &BTreeMap::new()), Effect::Unknown);
+    }
+
+    #[test]
+    fn rendered_request_ambiguous_or_invalid_wire_data_stays_unknown() {
+        let spec = template_spec(json!({}));
+        let op = &spec.operations[0];
+        assert_eq!(
+            rendered_request_effect(
+                op,
+                &BTreeMap::new(),
+                "https://fixture.example.test/api?query=%7Bitems%7D&query=%7Bcount%7D",
+                None
+            ),
+            Effect::Unknown
+        );
+        assert_eq!(
+            rendered_request_effect(
+                op,
+                &BTreeMap::new(),
+                "https://fixture.example.test/gql",
+                None
+            ),
+            Effect::Unknown
+        );
+        assert_eq!(
+            rendered_request_effect(
+                op,
+                &BTreeMap::new(),
+                "https://fixture.example.test/api",
+                Some(b"not JSON")
+            ),
+            Effect::Unknown
+        );
+        assert_eq!(operation_effect(op, &BTreeMap::new()), Effect::Read);
     }
 }

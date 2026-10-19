@@ -237,23 +237,29 @@ impl Runtime {
             request.inputs.clone(),
             Some(&request.account_id),
         )?;
-        let mut effect = policy::operation_effect(op, &request.inputs);
         let mut wire_inputs = request.inputs.clone();
         if let Some(p) = &op.pagination {
             wire_inputs.remove(&p.input);
         }
         let (mut url, mut body) = sp.build_request(op, &wire_inputs)?;
+        let mut effect =
+            policy::rendered_request_effect(op, &request.inputs, &url, body.as_deref());
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
         let (mut headers, mut secrets, credential_snapshot) =
             self.headers_snapshot(sp, op, &url, &request.account_id)?;
+        effect = effect.combine(policy::request_headers_effect(
+            headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        ));
         checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
         let cursor = self.resolve_cursor(&checked, op, &url, &secrets)?;
         if let Some(value) = &cursor {
-            let mut semantic_inputs = wire_inputs.clone();
-            semantic_inputs.insert(op.pagination.as_ref().unwrap().query.clone(), value.clone());
-            if policy::operation_effect(op, &semantic_inputs) != Effect::Read {
+            if super::pagination::continuation_effect(op, &request.inputs, &url, value)
+                != Effect::Read
+            {
                 return Err(AppError::api("unsafe_target", 400));
             }
             secrets.push(value.clone());
@@ -278,15 +284,20 @@ impl Runtime {
                 &mut secrets,
             )
             .await?;
-            let post_effect = policy::operation_effect(op, &effective_inputs);
+            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
+            let post_effect = policy::rendered_request_effect(
+                op,
+                &effective_inputs,
+                &rebuilt_url,
+                rebuilt_body.as_deref(),
+            );
             if post_effect != Effect::Read {
                 if effect == Effect::Read || (op.effect == Effect::Read && approval.is_none()) {
                     return Err(AppError::api("approval_required", 409));
                 }
-                effect = post_effect;
+                effect = effect.combine(post_effect);
                 self.ensure_writes(&sp.site.name)?;
             }
-            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
             if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
                 return Err(AppError::api("unsafe_target", 400));
             }
@@ -303,6 +314,11 @@ impl Runtime {
                 }
             }
         }
+        effect = effect.combine(policy::request_headers_effect(
+            headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        ));
         if effect != Effect::Read || approval.is_some() {
             self.ensure_writes(&sp.site.name)?;
             if let Some(approval_id) = approval {
