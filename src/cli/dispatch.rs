@@ -285,12 +285,14 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
         Cmd::Open { port, no_open } => {
             let instance =
                 crate::desktop::open(port, !no_open, deps.allow_local, deps.kb.as_deref()).await?;
-            emit.data(&serde_json::json!({"running": true, "url": instance.url()}));
+            let url = crate::desktop::launch_url(&crate::platform::data_dir(), &instance);
+            emit.data(&serde_json::json!({"running": true, "url": url}));
             Ok(())
         }
         Cmd::Status => {
-            let instance = crate::desktop::running(&crate::platform::data_dir()).await;
-            emit.data(&serde_json::json!({"running": instance.is_some(), "url": instance.map(|i| i.url())}));
+            let root = crate::platform::data_dir();
+            let instance = crate::desktop::running(&root).await;
+            emit.data(&serde_json::json!({"running": instance.is_some(), "url": instance.map(|i| crate::desktop::launch_url(&root, &i))}));
             Ok(())
         }
         Cmd::Stop => {

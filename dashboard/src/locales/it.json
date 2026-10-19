@@ -503,7 +503,7 @@
   "sites.allowChangesHint": "Disattivato: la tua IA e la CLI possono solo leggere questo sito. Attivato: ogni modifica attende comunque la tua approvazione qui.",
   "sites.changesOff": "modifiche disattivate",
   "errors.writes_disabled": "Le modifiche sono disattivate per questo sito. Attiva Consenti modifiche nei dettagli per usare questa azione.",
-  "errors.launch_required": "Apri Hycli con il comando hycli dashboard per usare questa finestra.",
+  "errors.launch_required": "Apri Hycli con il comando hycli open per usare questa finestra.",
   "activity.note.coverage_incomplete": "{count} operazioni documentate non hanno ancora un'azione. Le aggiungo.",
   "settings.quit": "Esci da Hycli",
   "settings.quitHint": "Hycli continua a funzionare quando chiudi il browser. Esci qui per arrestarlo.",

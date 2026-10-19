@@ -503,7 +503,7 @@
   "sites.allowChangesHint": "Uit: je AI en de CLI kunnen deze website alleen lezen. Aan: elke wijziging wacht nog steeds hier op je goedkeuring.",
   "sites.changesOff": "wijzigingen uit",
   "errors.writes_disabled": "Wijzigingen staan uit voor deze website. Zet Wijzigingen toestaan aan in de details om deze actie te gebruiken.",
-  "errors.launch_required": "Open Hycli met het commando hycli dashboard om dit venster te gebruiken.",
+  "errors.launch_required": "Open Hycli met het commando hycli open om dit venster te gebruiken.",
   "activity.note.coverage_incomplete": "{count} gedocumenteerde bewerkingen hebben nog geen actie. Ze worden toegevoegd.",
   "settings.quit": "Hycli afsluiten",
   "settings.quitHint": "Hycli blijft actief als je de browser sluit. Sluit Hycli hier af om het te stoppen.",

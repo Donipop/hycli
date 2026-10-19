@@ -503,7 +503,7 @@
   "sites.allowChangesHint": "Off: your AI and the CLI can only read this website. On: each change still waits for your approval here.",
   "sites.changesOff": "changes are off",
   "errors.writes_disabled": "Changes are off for this website. Turn on Allow changes in its details to use this action.",
-  "errors.launch_required": "Open Hycli with the hycli dashboard command to use this window.",
+  "errors.launch_required": "Open Hycli with the hycli open command to use this window.",
   "activity.note.coverage_incomplete": "{count} documented operations have no action yet. Adding them.",
   "settings.quit": "Quit Hycli",
   "settings.quitHint": "Closing the browser keeps Hycli running. Quit here to stop it.",
