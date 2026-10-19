@@ -1534,3 +1534,44 @@ async fn explicit_pagination_explains_handles_and_version_mismatches() {
                 .is_some_and(|v| v.contains("spec_version to 3"))
     }));
 }
+
+// Exercise the shipped entry point, not just an async future-size estimate.
+// Linux can reproduce the small default Windows main stack without changing
+// the product's stack reservation or weakening the native Windows contract.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn installed_cli_read_runs_on_a_one_mebibyte_main_stack() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new().route(
+        "/items",
+        get(|| async { Json(json!({"items":["synthetic-item"]})) }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".cache/cli-tests")
+        .join(util::id());
+    let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+    core.install(&spec::parse(json!({"site":{"name":"bounded-stack","base_url":origin},"operations":[{"name":"read-items","method":"GET","path":"/items","effect":"read","evidence":"Owned synthetic fixture"}]}).to_string().as_bytes()).unwrap()).unwrap();
+    let executable = std::env::var_os("HYCLI_TEST_EXECUTABLE")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_hycli").into());
+    let out = tokio::process::Command::new("sh")
+        .args([
+            "-c",
+            "ulimit -c 0; ulimit -s 1024 || exit; exec \"$@\"",
+            "bounded-stack-fixture",
+        ])
+        .arg(executable)
+        .args(["bounded-stack", "read-items", "--allow-local"])
+        .env("HYCLI_DATA_DIR", &root)
+        .env("HYCLI_TEST_DATA", &root)
+        .env("HYCLI_SPECS", root.join("specs"))
+        .env("HYCLI_KB", root.join("kb.db"))
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(ok(out)["items"], json!(["synthetic-item"]));
+    server.abort();
+    drop(core);
+    std::fs::remove_dir_all(root).unwrap();
+}
