@@ -12,7 +12,9 @@ use crate::{
 };
 
 pub async fn run(deps: Deps, cmd: Cmd, emit: &Emitter) -> i32 {
-    match dispatch(deps, cmd, emit).await {
+    // Keep the large, nested command state machine off the entry-point future.
+    // Windows main threads have a smaller stack than typical Unix shells.
+    match Box::pin(dispatch(deps, cmd, emit)).await {
         Ok(()) => 0,
         Err(e) => emit.fail(&e),
     }
@@ -583,5 +585,30 @@ async fn kb_cmd(deps: Deps, cmd: KbCmd, emit: &Emitter) -> Result<(), AppError> 
             emit.data(&serde_json::json!({"status": status, "issues": issues}));
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
+    use super::*;
+
+    #[test]
+    fn root_command_future_does_not_embed_the_full_dispatch_tree() {
+        let emit = Emitter::new(true);
+        let future = run(
+            Deps {
+                kb: None,
+                site: "default".into(),
+                force_json: true,
+                allow_local: false,
+            },
+            Cmd::Version,
+            &emit,
+        );
+        let bytes = std::mem::size_of_val(&future);
+        assert!(
+            bytes <= 4096,
+            "Root command future occupies {bytes} bytes; nested dispatch must remain heap-backed"
+        );
     }
 }
