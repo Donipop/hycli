@@ -84,6 +84,8 @@ pub struct PreflightStep {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Operation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<Pagination>,
     pub name: String,
     #[serde(default)]
     pub desc: String,
@@ -115,6 +117,15 @@ pub struct Operation {
     pub evidence: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<ResponseExpectation>,
+}
+
+/// A private continuation value is never an ordinary public argument.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Pagination {
+    pub input: String,
+    pub query: String,
+    pub next: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

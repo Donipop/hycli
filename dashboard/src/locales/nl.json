@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli is afgesloten",
   "settings.stoppedHint": "Je kunt dit tabblad sluiten. Open Hycli via het toepassingenmenu om terug te keren.",
   "errors.work_in_progress": "Voltooi of annuleer het lopende werk in Activiteit en sluit Hycli daarna opnieuw af.",
-  "errors.shutting_down": "Hycli wordt afgesloten."
+  "errors.shutting_down": "Hycli wordt afgesloten.",
+  "errors.pagination_expired": "Deze paginacursor is verlopen of past niet meer bij dit verzoek. Begin opnieuw bij de eerste pagina.",
+  "errors.pagination_invalid": "De website gaf een niet-ondersteunde paginacursor terug. Minimaal 8 tekens en maximaal 4096 bytes, zonder inloggegevens of korte paginanummers."
 }

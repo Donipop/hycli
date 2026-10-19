@@ -62,4 +62,4 @@ Follow [RELEASING.md](docs/RELEASING.md). Source and native archives use explici
 
 - [@ytw418](https://github.com/ytw418) (윤성준) — AI provider refusal classification (`ai_refused`), partial action preservation across preparation rounds, and `self_qa` prompt hardening.
 - [@jjigmeok-dev](https://github.com/jjigmeok-dev) — feedback/community entry points and environment-aware issue templates ([#15](https://github.com/Hybirdss/Hycli/pull/15)), plus MCP bundles and registry metadata ([#16](https://github.com/Hybirdss/Hycli/pull/16)).
-- [@seungwonme](https://github.com/seungwonme) — reported the aggregate browser-suite failure with an upstream control and isolated-suite comparison ([#24](https://github.com/Hybirdss/Hycli/issues/24)).
+- [@seungwonme](https://github.com/seungwonme) — reported the pagination continuation handling problem ([#21](https://github.com/Hybirdss/Hycli/issues/21)) and the aggregate browser-suite failure with an upstream control and isolated-suite comparison ([#24](https://github.com/Hybirdss/Hycli/issues/24)).

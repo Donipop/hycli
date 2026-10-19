@@ -8,7 +8,7 @@ Validate with `hycli spec validate FILE`, install with `hycli spec install FILE`
 
 ## Requests
 
-The root has `spec_version` (`1` or `2`), `site` (`name`, `title`, `base_url`, optional `source_url`), optional `defaults.headers`, `auth`, and `operations`. Each operation has a unique `name`, `desc`, `method`, `/path`, `effect`, and `evidence`. `effect` is `read`, `write`, or `unknown`; an agent's declaration never overrides the runtime's classification.
+The root has `spec_version` (`1`, `2`, or `3` for private pagination), `site` (`name`, `title`, `base_url`, optional `source_url`), optional `defaults.headers`, `auth`, and `operations`. Each operation has a unique `name`, `desc`, `method`, `/path`, `effect`, and `evidence`. `effect` is `read`, `write`, or `unknown`; an agent's declaration never overrides the runtime's classification.
 
 | Field | Meaning |
 | --- | --- |
@@ -72,3 +72,13 @@ An operation on a different API origin does not inherit the website's cookies or
 JSON expectations use `format: json` and observed JSON pointers in `required_pointers`. Other formats are `text`, `xml`, and `empty`. A non-success HTTP response or a successful response of the wrong expected shape fails the action and CLI exit status. Preparation never verifies a mutation by running it.
 
 The current request contract covers JSON and URL-encoded bodies, typed path/query inputs, HTML extraction and rendered GET reads. Multipart uploads, binary file downloads, arbitrary browser click sequences and automatic streaming are not implemented. Preparation must report a concrete missing capability for those workflows; it must not turn them into a fictitious JSON request or claim completion.
+
+## Private pagination (version 3)
+
+An HTTP GET read operation may declare `pagination: {input: cursor, query: pageToken, next: /nextPageToken}`. Use `spec_version: 3`, so older binaries reject the definition instead of silently losing the privacy contract. Do not also declare `cursor` or `pageToken` in ordinary query inputs. The input name is an optional local handle parameter, `query` is the documented wire parameter, and `next` is an exact JSON pointer. Absent, null or empty continuation fields end pagination. Non-string, shorter than 8 characters, larger than 4096 bytes, credential-shaped or known-secret values are rejected with `pagination_invalid`. Short page-number markers are deliberately unsupported: hiding their literal echoes could silently corrupt ordinary content. This size bound is not an entropy or credential-safety guarantee. A continuation echoed in a JSON key is rejected rather than rewriting keys and corrupting the payload or model paths.
+
+Run the first page through the existing action without `cursor`. Paginated direct CLI/action-job output is `{data, next_cursor}`; `try` and MCP retain their normal result envelope with an additional `next_cursor`. Pass that opaque handle to the same action's `cursor` input for the next page. No new command or automatic page following is involved. Legacy nonpaginated output is unchanged.
+
+The raw continuation stays in the existing private local credential store, using its existing protection level (OS-keyring encryption when available, otherwise private-file protection). It never appears in public action results, mapped output, exported definitions or job inputs. Handles expire after 15 minutes and are bound to the exact site, action, definition, account/credential context, URL and noncursor arguments. Credential or definition changes retire handles; retries may reuse a handle until its original expiry. Restart preserves unexpired handles. Expired records are cleaned on runtime startup/access, and at most 256 bounded records are retained. An expired or mismatched handle requires restarting at the first page.
+
+This initial contract supports direct HTTP GET only. It does not support bodies, preflight steps, browser transports, transformed HTML responses or redirects. Global credential redaction and request policy remain enabled; a pagination declaration cannot turn a mutation into a read or send a handle to another operation/account.

@@ -1,6 +1,7 @@
 //! The single execution boundary used by the dashboard, CLI and MCP.
 mod accounts;
 mod execution;
+mod pagination;
 mod preflight;
 mod recon;
 mod transport;
@@ -88,6 +89,10 @@ pub struct SiteView {
 }
 #[derive(Clone, Serialize)]
 pub struct OpResult {
+    #[serde(skip)]
+    pub paginated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
     pub site: String,
     pub op: String,
     pub status: u16,
@@ -98,6 +103,16 @@ pub struct OpResult {
     pub signal: String,
 }
 impl OpResult {
+    /// Opted-in pagination uses one projection across CLI and persisted jobs.
+    pub fn output(self) -> Option<Value> {
+        let data = self.mapped.or(self.body);
+        if self.paginated {
+            Some(serde_json::json!({"data":data,"next_cursor":self.next_cursor}))
+        } else {
+            data
+        }
+    }
+
     pub fn ensure_success(&self) -> AppResult<()> {
         if self.signal == "query_failed" || self.signal == "action_outcome_unknown" {
             return Err(AppError::api(&self.signal, 502));
@@ -144,7 +159,7 @@ impl Runtime {
         }
         let codex = Arc::new(ai::codex::Codex::new(root.join("provider-workspace")));
         let (events, _) = tokio::sync::broadcast::channel(100);
-        Ok(Arc::new(Self {
+        let core = Arc::new(Self {
             _instance: instance,
             root: root.into(),
             specs_dir,
@@ -156,13 +171,16 @@ impl Runtime {
             kb: Arc::new(Kb::open(&kb_path.unwrap_or_else(|| root.join("kb.db")))?),
             events,
             tasks: Mutex::new(BTreeMap::new()),
-        }))
+        });
+        core.pagination_values()?;
+        Ok(core)
     }
     pub fn changed(&self) {
         let _ = self.events.send(());
     }
     pub fn remove_site(&self, id: &str) -> AppResult<()> {
         self.spec(id)?;
+        self.clear_pagination(id)?;
         for job in self.state.read()?.jobs {
             if job.site_id == id && ["queued", "running"].contains(&job.status.as_str()) {
                 self.cancel_job(&job.id)?;
@@ -251,6 +269,14 @@ impl Runtime {
     }
     pub fn install(&self, sp: &Spec) -> AppResult<()> {
         policy::validate_spec(sp)?;
+        if self
+            .spec(&sp.site.name)
+            .ok()
+            .and_then(|old| Self::spec_hash(&old).ok())
+            != Some(Self::spec_hash(sp)?)
+        {
+            self.clear_pagination(&sp.site.name)?;
+        }
         let bytes = serde_yaml::to_string(sp).map_err(|_| AppError::api("data_invalid", 400))?;
         util::atomic_file(
             &self.specs_dir.join(format!("{}.yaml", sp.site.name)),
@@ -335,10 +361,16 @@ impl Runtime {
 }
 
 pub fn params(op: &Operation) -> Vec<(&String, &spec::Param)> {
+    static CURSOR: std::sync::LazyLock<spec::Param> = std::sync::LazyLock::new(|| spec::Param {
+        kind: "string".into(),
+        required: false,
+        default: None,
+    });
     op.params
         .iter()
         .chain(op.query.iter())
         .chain(op.body.iter().flat_map(|b| b.inputs()))
+        .chain(op.pagination.iter().map(|p| (&p.input, &*CURSOR)))
         .collect()
 }
 pub fn origin(raw: &str) -> AppResult<String> {
