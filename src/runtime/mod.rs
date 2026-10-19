@@ -1,9 +1,13 @@
 //! The single execution boundary used by the dashboard, CLI and MCP.
 mod accounts;
+mod selection;
+pub(crate) use selection::SelectionSnapshot;
 mod execution;
+mod identity;
 mod pagination;
 mod preflight;
 mod recon;
+mod session;
 mod transport;
 mod views;
 
@@ -186,6 +190,7 @@ impl Runtime {
                 self.cancel_job(&job.id)?;
             }
         }
+        let _selection = self.selection_lock()?;
         self.policy.invalidate(Some(id), None)?;
         std::fs::remove_file(self.specs_dir.join(format!("{id}.yaml")))?;
         self.state.update(|d| {
@@ -201,6 +206,7 @@ impl Runtime {
                 self.cancel_job(&job.id)?;
             }
         }
+        let _selection = self.selection_lock()?;
         self.policy.invalidate(None, Some(id))?;
         self.vault
             .lock()
@@ -211,6 +217,8 @@ impl Runtime {
             for m in d.sites.values_mut() {
                 if m.account_id == id {
                     m.account_id.clear();
+                    m.account_binding = None;
+                    m.account_selection_revision = util::id();
                 }
             }
             Ok(())
@@ -268,7 +276,28 @@ impl Runtime {
         Ok(out)
     }
     pub fn install(&self, sp: &Spec) -> AppResult<()> {
+        self.install_selected(sp, None)
+    }
+    pub(crate) fn install_selected(
+        &self,
+        sp: &Spec,
+        selection: Option<&SelectionSnapshot>,
+    ) -> AppResult<()> {
         policy::validate_spec(sp)?;
+        let _guard = self.selection_lock()?;
+        let credential = selection
+            .filter(|s| !s.account_id.is_empty())
+            .map(|s| self.credential(&s.account_id))
+            .transpose()?;
+        // A rejected stale preparation must not invalidate the active selection's cursors.
+        if let Some(selection) = selection {
+            if selection.site_id != sp.site.name
+                || selection.origin != origin(sp.site.source_url())?
+            {
+                return Err(AppError::api("auth_required", 401));
+            }
+            self.validate_selection_data(&self.state.read()?, selection, credential.as_ref())?;
+        }
         if self
             .spec(&sp.site.name)
             .ok()
@@ -278,18 +307,48 @@ impl Runtime {
             self.clear_pagination(&sp.site.name)?;
         }
         let bytes = serde_yaml::to_string(sp).map_err(|_| AppError::api("data_invalid", 400))?;
-        util::atomic_file(
-            &self.specs_dir.join(format!("{}.yaml", sp.site.name)),
-            bytes.as_bytes(),
-        )?;
-        self.state.update(|d| {
+        let path = self.specs_dir.join(format!("{}.yaml", sp.site.name));
+        let previous = if path.exists() {
+            Some(std::fs::read(&path)?)
+        } else {
+            None
+        };
+        let mut published = false;
+        let result = self.state.update(|d| {
+            if let Some(selection) = selection {
+                if selection.site_id != sp.site.name
+                    || selection.origin != origin(sp.site.source_url())?
+                {
+                    return Err(AppError::api("auth_required", 401));
+                }
+                self.validate_selection_data(d, selection, credential.as_ref())?;
+            }
             let m = d.sites.entry(sp.site.name.clone()).or_default();
+            if m.account_binding.as_ref().is_some_and(|binding| {
+                origin(sp.site.source_url()).is_ok_and(|o| o != binding.origin)
+            }) {
+                m.account_binding = None;
+                m.account_id.clear();
+                m.account_selection_revision = util::id();
+            }
             if m.created_at.is_empty() {
                 m.created_at = util::now();
             }
             m.updated_at = util::now();
+            // The state write transaction blocks concurrent account identity updates;
+            // selection and credential writers also hold the cross-process file lock.
+            util::atomic_file(&path, bytes.as_bytes())?;
+            published = true;
             Ok(())
-        })?;
+        });
+        if result.is_err() && published {
+            if let Some(previous) = previous {
+                util::atomic_file(&path, &previous)?;
+            } else if path.exists() {
+                std::fs::remove_file(&path)?;
+            }
+        }
+        result?;
         self.changed();
         Ok(())
     }

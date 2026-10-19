@@ -258,6 +258,116 @@ mod tests {
         }
     }
     #[test]
+    fn rejected_stale_install_preserves_current_pagination_until_authorized_replacement() {
+        let core = core();
+        let origin = "https://example.com";
+        let sp = crate::spec::parse(serde_json::json!({"spec_version":1,"site":{"name":"fixture","title":"Original","base_url":origin},"operations":[{"name":"read-items","method":"GET","path":"/items","effect":"read","evidence":"Synthetic fixture documentation"}]}).to_string().as_bytes()).unwrap();
+        core.install(&sp).unwrap();
+        core.select_account("fixture", "", origin).unwrap();
+        let stale = core.selection_snapshot("fixture", origin).unwrap().unwrap();
+        core.select_account("fixture", "", origin).unwrap();
+        let current = core.selection_snapshot("fixture", origin).unwrap().unwrap();
+        let mut raw = serde_json::json!({"nextPageToken":"opaque-current-page"});
+        core.capture_cursor(
+            &request(),
+            &op(),
+            "https://example.com/items",
+            &mut raw,
+            &mut vec![],
+            true,
+        )
+        .unwrap();
+        let mut replacement = sp.clone();
+        replacement.site.title = "Replacement".into();
+        assert!(core.install_selected(&replacement, Some(&stale)).is_err());
+        assert_eq!(
+            core.pagination_values().unwrap(),
+            vec!["opaque-current-page"]
+        );
+        assert_eq!(
+            Runtime::spec_hash(&core.spec("fixture").unwrap()).unwrap(),
+            Runtime::spec_hash(&sp).unwrap()
+        );
+        core.install_selected(&replacement, Some(&current)).unwrap();
+        assert!(core.pagination_values().unwrap().is_empty());
+    }
+
+    #[test]
+    fn private_identity_publication_and_mutation_invalidate_only_its_account_cursors() {
+        let core = core();
+        let origin = "https://example.com";
+        let cookies = crate::accounts::parse_cookies(&serde_json::json!([{"name":"sid","value":"synthetic-private-session","domain":"example.com","path":"/","secure":true}]).to_string(), origin).unwrap();
+        let account = core
+            .connect_account("", origin, cookies, "Fixture", "Synthetic", "")
+            .unwrap();
+        let mut own = request();
+        own.account_id = account.id.clone();
+        for (request, cursor) in [
+            (&own, "opaque-own-page"),
+            (&request(), "opaque-unrelated-page"),
+        ] {
+            let mut raw = serde_json::json!({"nextPageToken":cursor});
+            core.capture_cursor(
+                request,
+                &op(),
+                "https://example.com/items",
+                &mut raw,
+                &mut vec![],
+                true,
+            )
+            .unwrap();
+        }
+        let expected = core.credential(&account.id).unwrap();
+        let view = core
+            .publish_verified_identity(
+                &account.id,
+                &expected,
+                expected.clone(),
+                crate::accounts::Identity {
+                    user_id: "synthetic-person".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let data = core.state.read().unwrap();
+        assert!(
+            core.credential(&account.id)
+                .unwrap()
+                .proves_identity(&view, &data.identity_generations[&account.id])
+                .unwrap()
+        );
+        assert_eq!(
+            core.pagination_values().unwrap(),
+            vec!["opaque-unrelated-page"]
+        );
+        let mut raw = serde_json::json!({"nextPageToken":"opaque-renewed-page"});
+        core.capture_cursor(
+            &own,
+            &op(),
+            "https://example.com/items",
+            &mut raw,
+            &mut vec![],
+            true,
+        )
+        .unwrap();
+        core.update_credential(&account.id, |credential| {
+            credential.source_profile = "replacement-profile".into();
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            core.credential(&account.id)
+                .unwrap()
+                .identity_proof
+                .is_empty()
+        );
+        assert_eq!(
+            core.pagination_values().unwrap(),
+            vec!["opaque-unrelated-page"]
+        );
+    }
+
+    #[test]
     fn ambiguous_short_values_are_rejected_before_literal_echo_scrubbing() {
         assert!(!safe_value("2", &[]));
         assert!(!safe_value("1234567", &[]));

@@ -224,6 +224,7 @@ impl Runtime {
             .get(&job.site_id)
             .map(|m| m.account_id.clone())
             .unwrap_or_default();
+        job.account_selection = Some(self.preparation_selection_snapshot(&job.site_id, &job.url)?);
         let core = self.clone();
         let workjob = job.clone();
         self.spawn_job(job, async move {
@@ -520,7 +521,7 @@ impl Runtime {
         {
             return Err(AppError::api("cancelled", 409));
         }
-        self.install(&sp)?;
+        self.install_selected(&sp, job.account_selection.as_ref())?;
         description.hash = Self::spec_hash(&sp)?;
         self.state.update(|d| {
             let meta = d.sites.entry(job.site_id.clone()).or_default();

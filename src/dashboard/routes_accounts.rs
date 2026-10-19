@@ -273,6 +273,14 @@ pub(super) async fn browser_select(
     let target = crate::net::website_url(body.get("url").and_then(Value::as_str).unwrap_or(""))?
         .origin()
         .ascii_serialization();
+    if let Some(site) = body
+        .get("site_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        web.core.select_verified_account(site, id, &target)?;
+        return Ok(ok());
+    }
     web.core.state.update(|state| {
         let account = state
             .accounts

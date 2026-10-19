@@ -409,7 +409,16 @@ pub fn documented_routes(text: &str) -> BTreeSet<(String, String)> {
 impl Runtime {
     /// Public documentation can redirect to a published documentation host. Cookies and all
     /// other account material stay on the original origin; every hop still uses Network checks.
+    #[cfg(test)]
     pub(crate) async fn read_evidence_page(&self, raw: &str, account: &str) -> AppResult<Response> {
+        self.read_evidence_page_scoped(raw, account, None).await
+    }
+    pub(crate) async fn read_evidence_page_scoped(
+        &self,
+        raw: &str,
+        account: &str,
+        job: Option<&crate::state::Job>,
+    ) -> AppResult<Response> {
         let original = crate::net::validate_url(raw)?;
         let mut next = original.clone();
         for hop in 0..5 {
@@ -423,7 +432,11 @@ impl Runtime {
             } else {
                 ""
             };
-            let response = self.read_page(next.as_str(), identity).await?;
+            let response = if let Some(job) = job {
+                self.read_page_for_job(job, next.as_str(), identity).await?
+            } else {
+                self.read_page(next.as_str(), identity).await?
+            };
             if !matches!(response.status, 301 | 302 | 303 | 307 | 308) || hop == 4 {
                 return Ok(response);
             }

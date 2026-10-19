@@ -745,6 +745,7 @@ fn resume_auth_exact_scope_and_atomic_credential_update_preserve_isolation() {
         .register_browser_credential(
             "fixture",
             crate::accounts::Credential {
+                identity_proof: String::new(),
                 origin: "https://example.com".into(),
                 cookies: serde_json::from_value(json!([
                     {"name":"sid","value":"v1","domain":"example.com","path":"/"}
@@ -819,6 +820,879 @@ async fn auth_declaration_diagnostics_preserve_intentional_public_writes() {
         "intentional public write must remain supported"
     );
     assert_eq!(seen.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn explicit_binding_is_local_exact_origin_and_invalidated_by_source_context() {
+    let core = runtime();
+    let sp = spec_for("https://example.test");
+    core.install(&sp).unwrap();
+    let account = core.connect_account("", "https://example.test", serde_json::from_value(json!([{"name":"sid","value":"synthetic-only","domain":"example.test","path":"/","secure":true}])).unwrap(), "Fixture", "Profile A", "").unwrap();
+    core.state
+        .update(|d| {
+            let a = d.accounts.get_mut(&account.id).unwrap();
+            a.verified_identity = true;
+            a.user_id = "synthetic-person".into();
+            // Legacy persisted references must not become cross-ID authorization.
+            d.sites.get_mut("fixture").unwrap().account_id = account.id.clone();
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        core.request(&sp, "read-items", BTreeMap::new(), Some(&account.id))
+            .is_err()
+    );
+    assert!(
+        core.select_account("fixture", &account.id, "https://example.test")
+            .is_err(),
+        "legacy verified booleans cannot mint binding"
+    );
+    let expected = core.credential(&account.id).unwrap();
+    core.publish_verified_identity(
+        &account.id,
+        &expected,
+        expected.clone(),
+        crate::accounts::Identity {
+            user_id: "synthetic-person".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    core.select_account("fixture", &account.id, "https://example.test")
+        .unwrap();
+    let request = core
+        .request(&sp, "read-items", BTreeMap::new(), None)
+        .unwrap();
+    assert_eq!(request.account_id, account.id);
+    assert_eq!(
+        core.state.account(&account.id).unwrap().unwrap().site_id,
+        account.site_id
+    );
+    let exported = serde_yaml::to_string(&core.spec("fixture").unwrap()).unwrap();
+    assert!(!exported.contains("account_binding"));
+    assert!(!exported.contains("synthetic-person"));
+    assert!(!exported.contains("synthetic-only"));
+    let mut sibling = sp.clone();
+    sibling.site.base_url = "https://sibling.example.test".into();
+    assert!(
+        core.request(&sibling, "read-items", BTreeMap::new(), Some(&account.id))
+            .is_err()
+    );
+    core.update_credential(&account.id, |c| {
+        c.source_profile = "a-different-profile".into();
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        core.request(&sp, "read-items", BTreeMap::new(), None)
+            .is_err()
+    );
+    assert!(
+        core.browser_account_for("fixture", "https://example.test")
+            .is_err()
+    );
+    core.select_account("fixture", "", "https://example.test")
+        .unwrap();
+    assert_eq!(
+        core.browser_account_for("fixture", "https://example.test")
+            .unwrap(),
+        ""
+    );
+}
+
+#[test]
+fn stale_selected_preparation_cannot_publish_or_overwrite_new_selection() {
+    let core = runtime();
+    let original = spec_for("https://example.test");
+    core.install(&original).unwrap();
+    // Explicit anonymous is also a choice and must be pinned against replacement.
+    core.select_account("fixture", "", "https://example.test")
+        .unwrap();
+    let before = core
+        .selection_snapshot("fixture", "https://example.test")
+        .unwrap()
+        .unwrap();
+    core.select_account("fixture", "", "https://example.test")
+        .unwrap();
+    let newer = core
+        .state
+        .site("fixture")
+        .unwrap()
+        .unwrap()
+        .account_selection_revision;
+    let mut replacement = original.clone();
+    replacement.operations.clear();
+    assert!(core.install_selected(&replacement, Some(&before)).is_err());
+    assert_eq!(
+        core.spec("fixture").unwrap().operations.len(),
+        original.operations.len()
+    );
+    assert_eq!(
+        core.state
+            .site("fixture")
+            .unwrap()
+            .unwrap()
+            .account_selection_revision,
+        newer
+    );
+}
+
+#[test]
+fn verified_identity_publication_is_bound_to_exact_private_snapshot() {
+    let core = runtime();
+    let account = core.connect_account("", "https://example.test", serde_json::from_value(json!([{"name":"sid","value":"synthetic-a","domain":"example.test","path":"/","secure":true}])).unwrap(), "Fixture", "A", "").unwrap();
+    let before = core.credential(&account.id).unwrap();
+    let identity = crate::accounts::Identity {
+        user_id: "person-a".into(),
+        ..Default::default()
+    };
+    let verified = core
+        .publish_verified_identity(&account.id, &before, before.clone(), identity.clone())
+        .unwrap();
+    let proven = core.credential(&account.id).unwrap();
+    assert!(
+        proven
+            .proves_identity(
+                &verified,
+                &core.state.read().unwrap().identity_generations[&account.id]
+            )
+            .unwrap()
+    );
+    assert!(
+        !serde_json::to_string(&verified)
+            .unwrap()
+            .contains("identity_proof")
+    );
+    core.update_credential(&account.id, |c| {
+        c.cookies[0].value = "synthetic-b".into();
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        core.publish_verified_identity(&account.id, &proven, proven.clone(), identity)
+            .is_err()
+    );
+    assert!(
+        core.invalidate_identity_if_current(&account.id, &proven, true)
+            .is_err()
+    );
+    assert_eq!(
+        core.credential(&account.id).unwrap().cookies[0].value,
+        "synthetic-b"
+    );
+    assert!(
+        !core
+            .credential(&account.id)
+            .unwrap()
+            .proves_identity(
+                &verified,
+                &core.state.read().unwrap().identity_generations[&account.id]
+            )
+            .unwrap()
+    );
+}
+
+#[test]
+fn private_identity_proof_rejects_partial_publication_and_rolls_back_state_failure() {
+    let core = runtime();
+    let account = core.connect_account("", "https://example.test", serde_json::from_value(json!([{"name":"sid","value":"synthetic-a","domain":"example.test","path":"/","secure":true}])).unwrap(), "Fixture", "A", "").unwrap();
+    let before = core.credential(&account.id).unwrap();
+    let mut future_view = account.clone();
+    crate::accounts::apply_identity(
+        &mut future_view,
+        crate::accounts::Identity {
+            user_id: "future-person".into(),
+            ..Default::default()
+        },
+    );
+    let mut partial = before.clone();
+    partial.identity_proof = partial
+        .identity_proof_for(&future_view, "future-generation")
+        .unwrap();
+    assert!(
+        !partial.proves_identity(&account, "old-generation").unwrap(),
+        "vault-first crash cannot verify the old state"
+    );
+    assert!(
+        partial
+            .proves_identity(&future_view, "future-generation")
+            .unwrap()
+    );
+    assert!(
+        !partial
+            .proves_identity(&future_view, "old-generation")
+            .unwrap(),
+        "generation alone rejects the same-identity crash window"
+    );
+    let mut private_data = core.state.read().unwrap();
+    private_data
+        .identity_generations
+        .insert(account.id.clone(), "private-generation".into());
+    let encoded = serde_json::to_string(&private_data).unwrap();
+    assert!(!encoded.contains("private-generation"));
+    let decoded: crate::state::Data = serde_json::from_str(&encoded).unwrap();
+    assert!(decoded.identity_generations.is_empty());
+    let sql = rusqlite::Connection::open(core.state.db_path()).unwrap();
+    sql.execute_batch("CREATE TRIGGER reject_identity BEFORE UPDATE ON accounts BEGIN SELECT RAISE(FAIL, 'synthetic failure'); END;").unwrap();
+    assert!(
+        core.publish_verified_identity(
+            &account.id,
+            &before,
+            before.clone(),
+            crate::accounts::Identity {
+                user_id: "future-person".into(),
+                ..Default::default()
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(
+        serde_json::to_vec(&core.credential(&account.id).unwrap()).unwrap(),
+        serde_json::to_vec(&before).unwrap()
+    );
+    assert!(
+        !core
+            .state
+            .account(&account.id)
+            .unwrap()
+            .unwrap()
+            .verified_identity
+    );
+    sql.execute_batch("DROP TRIGGER reject_identity;").unwrap();
+    let mut forged = before;
+    forged.identity_proof = "supplied-claim".into();
+    let imported = core
+        .register_browser_credential("source", forged, "Fixture", "A")
+        .unwrap();
+    assert!(
+        core.credential(&imported.id)
+            .unwrap()
+            .identity_proof
+            .is_empty()
+    );
+}
+
+#[test]
+fn later_explicit_choice_blocks_preparation_started_without_selection() {
+    let core = runtime();
+    let original = spec_for("https://example.test");
+    core.install(&original).unwrap();
+    let before_choice = core
+        .preparation_selection_snapshot("fixture", "https://example.test")
+        .unwrap();
+    core.select_account("fixture", "", "https://example.test")
+        .unwrap();
+    let mut stale = original.clone();
+    stale.site.title = "Stale preparation".into();
+    assert!(core.install_selected(&stale, Some(&before_choice)).is_err());
+    assert_eq!(
+        Runtime::spec_hash(&core.spec("fixture").unwrap()).unwrap(),
+        Runtime::spec_hash(&original).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn refresh_identity_proof_requires_private_snapshot_and_anonymous_baseline() {
+    let (url, server) = host(
+        Router::new()
+            .route(
+                "/account",
+                get(|headers: HeaderMap| async move {
+                    if headers
+                        .get("cookie")
+                        .is_some_and(|v| v == "sid=synthetic-session")
+                    {
+                        (StatusCode::OK, Json(json!({"username":"private-person"})))
+                    } else {
+                        (
+                            StatusCode::UNAUTHORIZED,
+                            Json(json!({"error":"signed_out"})),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/users/me",
+                get(|| async { Json(json!({"username":"public-person"})) }),
+            ),
+    )
+    .await;
+    let core = runtime();
+    let credential: crate::accounts::Credential = serde_json::from_value(json!({"origin":url,"cookies":[{"name":"sid","value":"synthetic-session","domain":"127.0.0.1","path":"/"}],"identity_source":format!("{url}/account")})).unwrap();
+    let account = core
+        .register_browser_credential("fixture", credential, "Fixture", "Synthetic")
+        .unwrap();
+    let view = core.refresh_account(&account.id).await.unwrap();
+    let state = core.state.read().unwrap();
+    assert!(
+        core.credential(&account.id)
+            .unwrap()
+            .proves_identity(
+                &view,
+                state
+                    .identity_generations
+                    .get(&account.id)
+                    .map(String::as_str)
+                    .unwrap_or("")
+            )
+            .unwrap()
+    );
+    core.update_credential(&account.id, |c| {
+        c.identity_source = format!("{url}/users/me");
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        core.refresh_account(&account.id)
+            .await
+            .err()
+            .unwrap()
+            .public_code,
+        "identity_unavailable"
+    );
+    assert!(!core.state.read().unwrap().accounts[&account.id].verified_identity);
+    server.abort();
+}
+
+#[tokio::test]
+async fn stale_dashboard_refresh_cannot_relabel_reconnected_identity() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let entered_handler = entered.clone();
+    let release_handler = release.clone();
+    let (url, server) = host(Router::new().route(
+        "/account",
+        get(move |headers: HeaderMap| {
+            let entered = entered_handler.clone();
+            let release = release_handler.clone();
+            async move {
+                if headers
+                    .get("cookie")
+                    .is_some_and(|v| v == "sid=synthetic-a")
+                {
+                    entered.notify_one();
+                    release.notified().await;
+                    (StatusCode::OK, Json(json!({"username":"person-a"})))
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error":"signed_out"})),
+                    )
+                }
+            }
+        }),
+    ))
+    .await;
+    let core = runtime();
+    let credential: crate::accounts::Credential = serde_json::from_value(json!({"origin":url,"cookies":[{"name":"sid","value":"synthetic-a","domain":"127.0.0.1","path":"/"}],"identity_source":format!("{url}/account")})).unwrap();
+    let account = core
+        .register_browser_credential("fixture", credential, "Fixture", "Synthetic")
+        .unwrap();
+    let pending_core = core.clone();
+    let id = account.id.clone();
+    let pending = tokio::spawn(async move { pending_core.refresh_account(&id).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    core.update_credential(&account.id, |c| {
+        c.cookies[0].value = "synthetic-b".into();
+        Ok(())
+    })
+    .unwrap();
+    let replacement = core.credential(&account.id).unwrap();
+    let current = core
+        .publish_verified_identity(
+            &account.id,
+            &replacement,
+            replacement.clone(),
+            crate::accounts::Identity {
+                user_id: "person-b".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    release.notify_one();
+    assert_eq!(
+        pending.await.unwrap().err().unwrap().public_code,
+        "conflict"
+    );
+    let state = core.state.read().unwrap();
+    assert_eq!(state.accounts[&account.id].user_id, "person-b");
+    assert!(
+        core.credential(&account.id)
+            .unwrap()
+            .proves_identity(&current, &state.identity_generations[&account.id])
+            .unwrap()
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn bound_account_dispatch_uses_selected_snapshot_and_rejects_stale_authority() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
+    let (url, server) = host(Router::new().route(
+        "/items",
+        get(move |headers: HeaderMap| {
+            let calls = counted.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(headers.get("cookie").unwrap(), "sid=synthetic-bound");
+                Json(json!({"items":[]}))
+            }
+        }),
+    ))
+    .await;
+    let core = runtime();
+    let spec = spec_for(&url);
+    core.install(&spec).unwrap();
+    let account = core
+        .connect_account(
+            "",
+            &url,
+            serde_json::from_value(
+                json!([{"name":"sid","value":"synthetic-bound","domain":"127.0.0.1","path":"/"}]),
+            )
+            .unwrap(),
+            "Fixture",
+            "Synthetic",
+            "",
+        )
+        .unwrap();
+    let expected = core.credential(&account.id).unwrap();
+    core.publish_verified_identity(
+        &account.id,
+        &expected,
+        expected.clone(),
+        crate::accounts::Identity {
+            user_id: "synthetic-person".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    core.select_account("fixture", &account.id, &url).unwrap();
+    let stale = core
+        .request(&spec, "read-items", BTreeMap::new(), None)
+        .unwrap();
+    core.select_account("fixture", "", &url).unwrap();
+    assert!(core.execute(stale, None).await.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    core.select_account("fixture", &account.id, &url).unwrap();
+    let response = core
+        .run_op(&spec, "read-items", &BTreeMap::new())
+        .await
+        .unwrap();
+    assert_eq!(response.0.status, 200);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    core.update_credential(&account.id, |c| {
+        c.cookies[0].value = "synthetic-replacement".into();
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        core.run_op(&spec, "read-items", &BTreeMap::new())
+            .await
+            .is_err()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn recon_respects_explicit_anonymous_and_selected_account() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let entry_seen = seen.clone();
+    let bundle_seen = seen.clone();
+    let (url, server) = host(
+        Router::new()
+            .route(
+                "/",
+                get(move |headers: HeaderMap| {
+                    let seen = entry_seen.clone();
+                    async move {
+                        seen.lock().unwrap().push(
+                            headers
+                                .get("cookie")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("")
+                                .into(),
+                        );
+                        axum::response::Html("<html><script src='/bundle.js'></script></html>")
+                    }
+                }),
+            )
+            .route(
+                "/bundle.js",
+                get(move |headers: HeaderMap| {
+                    let seen = bundle_seen.clone();
+                    async move {
+                        seen.lock().unwrap().push(
+                            headers
+                                .get("cookie")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("")
+                                .into(),
+                        );
+                        "fetch('/items')"
+                    }
+                }),
+            ),
+    )
+    .await;
+    let core = runtime();
+    core.install(&spec_for(&url)).unwrap();
+    for value in ["synthetic-a", "synthetic-b"] {
+        let account = core
+            .connect_account(
+                "",
+                &url,
+                serde_json::from_value(
+                    json!([{"name":"sid","value":value,"domain":"127.0.0.1","path":"/"}]),
+                )
+                .unwrap(),
+                "Fixture",
+                value,
+                "",
+            )
+            .unwrap();
+        if value == "synthetic-b" {
+            let expected = core.credential(&account.id).unwrap();
+            core.publish_verified_identity(
+                &account.id,
+                &expected,
+                expected.clone(),
+                crate::accounts::Identity {
+                    user_id: "person-b".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            core.select_account("fixture", &account.id, &url).unwrap();
+        }
+    }
+    let selected = core.state.site("fixture").unwrap().unwrap().account_id;
+    core.select_account("fixture", "", &url).unwrap();
+    core.recon("fixture", &url, 1).await.unwrap();
+    assert!(!seen.lock().unwrap().is_empty());
+    assert!(
+        seen.lock().unwrap().iter().all(String::is_empty),
+        "explicit anonymous recon must not choose another account"
+    );
+    seen.lock().unwrap().clear();
+    core.select_account("fixture", &selected, &url).unwrap();
+    core.recon("fixture", &url, 1).await.unwrap();
+    assert!(seen.lock().unwrap().iter().all(|v| v == "sid=synthetic-b"));
+    server.abort();
+}
+
+#[tokio::test]
+async fn bound_readonly_preparation_tools_preserve_source_ownership() {
+    let (url, server) = host(Router::new().route(
+        "/",
+        get(|headers: HeaderMap| async move {
+            assert_eq!(headers.get("cookie").unwrap(), "sid=synthetic-bound");
+            Json(json!({"ok":true}))
+        }),
+    ))
+    .await;
+    let core = runtime();
+    core.install(&spec_for(&url)).unwrap();
+    let account = core
+        .connect_account(
+            "",
+            &url,
+            serde_json::from_value(
+                json!([{"name":"sid","value":"synthetic-bound","domain":"127.0.0.1","path":"/"}]),
+            )
+            .unwrap(),
+            "Fixture",
+            "Synthetic",
+            "",
+        )
+        .unwrap();
+    let expected = core.credential(&account.id).unwrap();
+    core.publish_verified_identity(
+        &account.id,
+        &expected,
+        expected.clone(),
+        crate::accounts::Identity {
+            user_id: "person".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    core.select_account("fixture", &account.id, &url).unwrap();
+    let before = serde_json::to_vec(&core.credential(&account.id).unwrap()).unwrap();
+    let mut job = crate::state::Job::new("prepare", "en");
+    job.site_id = "fixture".into();
+    job.url = format!("{url}/");
+    job.account_selection = Some(
+        core.preparation_selection_snapshot("fixture", &url)
+            .unwrap(),
+    );
+    let environment = crate::environment::Environment {
+        discovery_pending: false,
+        os: "fixture".into(),
+        architecture: "fixture".into(),
+        browsers: vec![],
+        profiles: vec![],
+        capabilities: vec![],
+    };
+    let context = crate::agent_tools::Context {
+        job: &job,
+        environment: &environment,
+        links: &Default::default(),
+        routes: &Default::default(),
+        prefixes: &Default::default(),
+        documents: &Default::default(),
+    };
+    for tool in ["session.inspect", "session.observe"] {
+        core.preparation_tool(
+            &crate::agent_tools::ToolCall {
+                tool: tool.into(),
+                arguments: json!({"account_id":account.id,"url":job.url}),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        serde_json::to_vec(&core.credential(&account.id).unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(
+        core.state.account(&account.id).unwrap().unwrap().site_id,
+        account.site_id
+    );
+    assert!(
+        core.preparation_tool(
+            &crate::agent_tools::ToolCall {
+                tool: "session.verify".into(),
+                arguments: json!({"account_id":account.id})
+            },
+            &context
+        )
+        .await
+        .is_err()
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn browser_failure_rechecks_binding_before_http_retry() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
+    let (url, server) = host(Router::new().route(
+        "/items",
+        get(move || {
+            let calls = counted.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                "ok"
+            }
+        }),
+    ))
+    .await;
+    let core = runtime();
+    core.install(&spec_for(&url)).unwrap();
+    let account = core
+        .connect_account(
+            "",
+            &url,
+            serde_json::from_value(
+                json!([{"name":"sid","value":"synthetic-bound","domain":"127.0.0.1","path":"/"}]),
+            )
+            .unwrap(),
+            "Fixture",
+            "Synthetic",
+            "",
+        )
+        .unwrap();
+    let expected = core.credential(&account.id).unwrap();
+    core.publish_verified_identity(
+        &account.id,
+        &expected,
+        expected.clone(),
+        crate::accounts::Identity {
+            user_id: "person".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    core.select_account("fixture", &account.id, &url).unwrap();
+    let snapshot = core.credential(&account.id).unwrap();
+    let endpoint = format!("{url}/items");
+    let request = crate::net::Request {
+        url: endpoint.clone(),
+        method: "GET".into(),
+        headers: snapshot.request_headers(&endpoint).unwrap(),
+        body: None,
+        account_id: account.id.clone(),
+        limit: 4096,
+        timeout: std::time::Duration::from_secs(5),
+        read_only: true,
+        follow_redirects: false,
+        tls_profile: "standard".into(),
+    };
+    let response = core
+        .retry_read_after_browser(
+            async {
+                core.select_account("fixture", "", &url).unwrap();
+                Err(crate::apperr::AppError::api("browser_unavailable", 422))
+            },
+            request.clone(),
+            true,
+            || core.ensure_credential_snapshot("fixture", &endpoint, &account.id, Some(&snapshot)),
+        )
+        .await;
+    assert_eq!(response.err().unwrap().public_code, "auth_required");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    core.select_account("fixture", &account.id, &url).unwrap();
+    assert!(
+        core.retry_read_after_browser(
+            async { Err(crate::apperr::AppError::api("browser_unavailable", 422)) },
+            request,
+            true,
+            || core.ensure_credential_snapshot("fixture", &endpoint, &account.id, Some(&snapshot))
+        )
+        .await
+        .unwrap()
+        .successful()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn normal_refresh_rejects_secret_echo_before_identity_publication() {
+    let (url, server) = host(Router::new().route(
+        "/account",
+        get(|headers: HeaderMap| async move {
+            if headers.get("cookie").is_some() {
+                (StatusCode::OK, Json(json!({"username":"abc"})))
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error":"signed_out"})),
+                )
+            }
+        }),
+    ))
+    .await;
+    let core = runtime();
+    let account = core
+        .connect_account(
+            "",
+            &url,
+            serde_json::from_value(
+                json!([{"name":"sid","value":"abc","domain":"127.0.0.1","path":"/"}]),
+            )
+            .unwrap(),
+            "Fixture",
+            "Synthetic",
+            &format!("{url}/account"),
+        )
+        .unwrap();
+    assert_eq!(
+        core.refresh_account(&account.id)
+            .await
+            .err()
+            .unwrap()
+            .public_code,
+        "identity_unavailable"
+    );
+    let state = core.state.read().unwrap();
+    assert!(!state.accounts[&account.id].verified_identity);
+    assert!(state.accounts[&account.id].user_id.is_empty());
+    assert!(!state.identity_generations.contains_key(&account.id));
+    server.abort();
+}
+
+#[tokio::test]
+async fn preparation_recon_stops_before_bundles_after_selection_changes() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let start = entered.clone();
+    let resume = release.clone();
+    let bundles = Arc::new(AtomicUsize::new(0));
+    let counted = bundles.clone();
+    let (url, server) = host(
+        Router::new()
+            .route(
+                "/",
+                get(move |headers: HeaderMap| {
+                    let entered = start.clone();
+                    let release = resume.clone();
+                    async move {
+                        assert_eq!(headers.get("cookie").unwrap(), "sid=synthetic-bound");
+                        entered.notify_one();
+                        release.notified().await;
+                        axum::response::Html("<html><script src='/bundle.js'></script></html>")
+                    }
+                }),
+            )
+            .route(
+                "/bundle.js",
+                get(move || {
+                    let calls = counted.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        "fetch('/items')"
+                    }
+                }),
+            ),
+    )
+    .await;
+    let core = runtime();
+    core.install(&spec_for(&url)).unwrap();
+    let account = core
+        .connect_account(
+            "",
+            &url,
+            serde_json::from_value(
+                json!([{"name":"sid","value":"synthetic-bound","domain":"127.0.0.1","path":"/"}]),
+            )
+            .unwrap(),
+            "Fixture",
+            "Synthetic",
+            "",
+        )
+        .unwrap();
+    let expected = core.credential(&account.id).unwrap();
+    core.publish_verified_identity(
+        &account.id,
+        &expected,
+        expected.clone(),
+        crate::accounts::Identity {
+            user_id: "person".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    core.select_account("fixture", &account.id, &url).unwrap();
+    let mut job = crate::state::Job::new("prepare", "en");
+    job.site_id = "fixture".into();
+    job.url = url.clone();
+    job.account_selection = Some(
+        core.preparation_selection_snapshot("fixture", &url)
+            .unwrap(),
+    );
+    let pending_core = core.clone();
+    let pending_url = url.clone();
+    let pending =
+        tokio::spawn(async move { pending_core.recon_for_job(&job, &pending_url, 1).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    core.select_account("fixture", "", &url).unwrap();
+    release.notify_one();
+    assert_eq!(
+        pending.await.unwrap().err().unwrap().public_code,
+        "auth_required"
+    );
+    assert_eq!(bundles.load(Ordering::SeqCst), 0);
+    server.abort();
 }
 
 #[test]

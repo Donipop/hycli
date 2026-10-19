@@ -107,9 +107,23 @@ pub struct WebsiteWorkflow {
     pub steps: Vec<String>,
     pub success_criteria: String,
 }
+/// Local selection authority. Never part of a portable Spec or a model response.
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct AccountBinding {
+    pub account_id: String,
+    pub source_site_id: String,
+    pub origin: String,
+    pub context: String,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SiteMeta {
+    #[serde(skip)]
+    pub account_selection_revision: String,
+    #[serde(skip)]
+    pub account_binding: Option<AccountBinding>,
     pub workflows_complete: Option<bool>,
     pub pinned: bool,
     pub title: String,
@@ -184,6 +198,8 @@ fn is_zero_pid(pid: &u32) -> bool {
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct Job {
+    #[serde(skip)]
+    pub(crate) account_selection: Option<crate::runtime::SelectionSnapshot>,
     pub id: String,
     pub kind: String,
     pub site_id: String,
@@ -245,6 +261,7 @@ impl Job {
             provider: String::new(),
             locale: locale_or_default(locale).into(),
             account_id: String::new(),
+            account_selection: None,
             status: "queued".into(),
             phase: "queued".into(),
             error_code: String::new(),
@@ -296,6 +313,9 @@ impl Job {
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Data {
+    /// Local commit generations, deliberately excluded from portable/model JSON.
+    #[serde(skip)]
+    pub(crate) identity_generations: BTreeMap<String, String>,
     pub settings: Settings,
     pub providers: BTreeMap<String, ProviderSettings>,
     pub sites: BTreeMap<String, SiteMeta>,

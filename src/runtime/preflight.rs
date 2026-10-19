@@ -14,6 +14,7 @@ impl Runtime {
         sp: &Spec,
         op: &Operation,
         account_id: &str,
+        credential_snapshot: Option<&crate::accounts::Credential>,
         effective_inputs: &mut BTreeMap<String, String>,
         secrets: &mut Vec<String>,
     ) -> AppResult<()> {
@@ -43,8 +44,27 @@ impl Runtime {
             ) {
                 return Err(AppError::api("unsafe_target", 400));
             }
+            self.ensure_credential_snapshot(
+                &sp.site.name,
+                &step_url,
+                account_id,
+                credential_snapshot,
+            )?;
             let r = self
-                .read_page_profile(&step_url, account_id, &sp.defaults.tls_profile)
+                .read_page_checked(
+                    &step_url,
+                    account_id,
+                    &sp.defaults.tls_profile,
+                    credential_snapshot,
+                    || {
+                        self.ensure_credential_snapshot(
+                            &sp.site.name,
+                            &step_url,
+                            account_id,
+                            credential_snapshot,
+                        )
+                    },
+                )
                 .await?;
             if !r.successful() {
                 return Err(AppError::api(
@@ -90,11 +110,11 @@ impl Runtime {
                         if account_id.is_empty() {
                             None
                         } else {
-                            self.credential(account_id).ok().and_then(|c| {
+                            credential_snapshot.and_then(|c| {
                                 c.cookies
-                                    .into_iter()
+                                    .iter()
                                     .find(|ck| ck.name == cookie_name)
-                                    .map(|ck| ck.value)
+                                    .map(|ck| ck.value.clone())
                             })
                         }
                     })

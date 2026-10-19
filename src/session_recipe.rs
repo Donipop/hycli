@@ -3,7 +3,6 @@ use crate::{
     accounts::{AccountView, Credential, Identity},
     apperr::{AppError, AppResult},
     runtime::Runtime,
-    util,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -159,6 +158,12 @@ impl ConnectionRecipe {
     }
 }
 
+/// Account metadata must never become a plaintext copy of a credential echo.
+pub(crate) fn identity_is_safe(identity: &Identity, credential: &Credential) -> bool {
+    let original = json!([identity.user_id, identity.email, identity.name]);
+    crate::runtime::sanitized(original.clone(), &credential.session_redaction_values()) == original
+}
+
 /// Keys and type information only; no leaf values, lengths, hashes or token fragments.
 pub(crate) fn shape(value: &Value, depth: usize) -> Value {
     if depth > 4 {
@@ -193,6 +198,7 @@ pub(crate) fn shape(value: &Value, depth: usize) -> Value {
 }
 
 impl Runtime {
+    #[cfg(test)]
     pub(crate) fn inspect_session_key(
         &self,
         account: &str,
@@ -201,6 +207,16 @@ impl Runtime {
         offset: usize,
     ) -> AppResult<Value> {
         let credential = self.credential(account)?;
+        Self::inspect_session_snapshot(account, &credential, origin, key, offset)
+    }
+
+    pub(crate) fn inspect_session_snapshot(
+        account: &str,
+        credential: &Credential,
+        origin: &str,
+        key: &str,
+        offset: usize,
+    ) -> AppResult<Value> {
         if credential.origin != origin
             && !crate::runtime::same_site_url(&credential.origin, origin).unwrap_or(false)
         {
@@ -245,9 +261,21 @@ impl Runtime {
         account: &str,
         recipe: &ConnectionRecipe,
     ) -> AppResult<AccountView> {
-        let mut credential = self.credential(account)?;
+        self.verify_session_recipe_snapshot(account, recipe, self.credential(account)?)
+            .await
+    }
+
+    pub(crate) async fn verify_session_recipe_snapshot(
+        &self,
+        account: &str,
+        recipe: &ConnectionRecipe,
+        expected: Credential,
+    ) -> AppResult<AccountView> {
+        let mut credential = expected.clone();
         let resolved = recipe.resolve_headers(&credential)?;
         credential.headers.extend(resolved.clone());
+        // Classify explicit sources from this candidate, without persisting it before verification.
+        credential.recipe = Some(recipe.clone());
         self.policy
             .resume_auth(&format!("{}|{account}", credential.origin))?;
         let response = self
@@ -278,6 +306,9 @@ impl Runtime {
         let identity = recipe
             .identity_from_response(&response)
             .ok_or_else(|| AppError::api("identity_unavailable", 422))?;
+        if !identity_is_safe(&identity, &credential) {
+            return Err(AppError::api("identity_unavailable", 422));
+        }
         // Do not label an arbitrary public profile endpoint as the signed-in account.
         let baseline_scope = format!("{account}:identity-baseline");
         // An unauthenticated 401 is the expected baseline result, not a lost user session.
@@ -298,41 +329,216 @@ impl Runtime {
                 tls_profile: "standard".into(),
             })
             .await?;
-        if anonymous.successful() && recipe.identity_from_response(&anonymous).is_some() {
-            return Err(AppError::api("identity_unavailable", 422));
-        }
-        self.update_credential(account, |c| {
-            c.headers.extend(resolved);
-            c.identity_source = recipe.identity_url.clone();
-            c.recipe = Some(recipe.clone());
-            Ok(())
-        })?;
-        let mut view = self
-            .state
-            .read()?
-            .accounts
-            .get(account)
-            .cloned()
-            .ok_or_else(|| AppError::api("not_found", 404))?;
-        crate::accounts::apply_identity(&mut view, identity);
-        view.checked_at = util::now();
-        self.state.update(|data| {
-            data.accounts.insert(account.into(), view.clone());
-            let site = data.sites.entry(view.site_id.clone()).or_default();
-            site.connection_recipe = Some(recipe.clone());
-            if !site.identity_paths.contains(&recipe.identity_url) {
-                site.identity_paths.push(recipe.identity_url.clone());
+        if anonymous.successful() {
+            if recipe.identity_from_response(&anonymous).is_some() {
+                return Err(AppError::api("identity_unavailable", 422));
             }
-            Ok(())
-        })?;
-        self.changed();
-        Ok(view)
+        } else if !matches!(anonymous.status, 401 | 403) {
+            // Redirects, rate limits and server failures are not an anonymous identity baseline.
+            return Err(AppError::api("request_failed", 422));
+        }
+        credential.identity_source = recipe.identity_url.clone();
+        self.publish_verified_identity(account, &expected, credential, identity)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util;
+    #[tokio::test]
+    async fn unavailable_anonymous_baseline_cannot_verify_identity() {
+        use axum::{
+            Json, Router,
+            http::{HeaderMap, StatusCode},
+            routing::get,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU16, Ordering},
+        };
+        let status = Arc::new(AtomicU16::new(302));
+        let current = status.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let router = Router::new().route(
+            "/current-context",
+            get(move |headers: HeaderMap| {
+                let current = current.clone();
+                async move {
+                    if headers
+                        .get("cookie")
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|v| v.contains("sid=synthetic-session"))
+                    {
+                        (
+                            StatusCode::OK,
+                            Json(json!({"id":"person", "name":"Person"})),
+                        )
+                    } else {
+                        (
+                            StatusCode::from_u16(current.load(Ordering::SeqCst)).unwrap(),
+                            Json(json!({"error":"baseline unavailable"})),
+                        )
+                    }
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/tests")
+            .join(util::id());
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        let credential: Credential = serde_json::from_value(json!({"origin":origin,"cookies":[{"name":"sid","value":"synthetic-session","domain":"127.0.0.1","path":"/"}]})).unwrap();
+        let account = core
+            .register_browser_credential("fixture", credential, "Fixture", "Synthetic")
+            .unwrap();
+        let recipe = ConnectionRecipe {
+            identity_url: format!("{origin}/current-context"),
+            identity: IdentityMapping {
+                user_id: "/id".into(),
+                name: "/name".into(),
+                ..Default::default()
+            },
+            evidence: "observed_browser_request".into(),
+            ..Default::default()
+        };
+        let expected = serde_json::to_value(core.credential(&account.id).unwrap()).unwrap();
+        for code in [302, 500, 429] {
+            status.store(code, Ordering::SeqCst);
+            assert!(
+                core.verify_session_recipe(&account.id, &recipe)
+                    .await
+                    .is_err(),
+                "anonymous HTTP {code} does not prove an authenticated identity"
+            );
+            assert_eq!(
+                serde_json::to_value(core.credential(&account.id).unwrap()).unwrap(),
+                expected
+            );
+            assert!(
+                !core
+                    .state
+                    .account(&account.id)
+                    .unwrap()
+                    .unwrap()
+                    .verified_identity
+            );
+        }
+        server.abort();
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stale_recipe_verification_cannot_overwrite_reconnected_account() {
+        use axum::{
+            Json, Router,
+            http::{HeaderMap, StatusCode},
+            routing::get,
+        };
+        use std::sync::Arc;
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let arrived = entered.clone();
+        let resume = release.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let router = Router::new().route(
+            "/current-context",
+            get(move |headers: HeaderMap| {
+                let arrived = arrived.clone();
+                let resume = resume.clone();
+                async move {
+                    if headers
+                        .get("cookie")
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|v| v.contains("sid=synthetic-old-session"))
+                    {
+                        arrived.notify_one();
+                        resume.notified().await;
+                        (
+                            StatusCode::OK,
+                            Json(json!({"id":"old-person", "name":"Old Person"})),
+                        )
+                    } else {
+                        (StatusCode::UNAUTHORIZED, Json(json!({"error":"sign in"})))
+                    }
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/tests")
+            .join(util::id());
+        let core = Arc::new(Runtime::open(&root, None, None, false, true, false).unwrap());
+        let credential: Credential = serde_json::from_value(json!({"origin":origin,"cookies":[{"name":"sid","value":"synthetic-old-session","domain":"127.0.0.1","path":"/"}]})).unwrap();
+        let account = core
+            .register_browser_credential("fixture", credential, "Fixture", "Synthetic")
+            .unwrap();
+        let recipe = ConnectionRecipe {
+            identity_url: format!("{origin}/current-context"),
+            identity: IdentityMapping {
+                user_id: "/id".into(),
+                name: "/name".into(),
+                ..Default::default()
+            },
+            evidence: "observed_browser_request".into(),
+            ..Default::default()
+        };
+        let checking = core.clone();
+        let checking_id = account.id.clone();
+        let pending =
+            tokio::spawn(
+                async move { checking.verify_session_recipe(&checking_id, &recipe).await },
+            );
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        core.update_credential(&account.id, |saved| {
+            saved.cookies[0].value = "synthetic-new-session".into();
+            saved.identity_source = format!("{origin}/new-context");
+            saved
+                .headers
+                .insert("x-csrf-token".into(), "synthetic-new-header".into());
+            Ok(())
+        })
+        .unwrap();
+        core.state
+            .update(|data| {
+                let view = data.accounts.get_mut(&account.id).unwrap();
+                view.user_id = "new-person".into();
+                view.name = "New Person".into();
+                view.verified_identity = true;
+                Ok(())
+            })
+            .unwrap();
+        let expected_credential =
+            serde_json::to_value(core.credential(&account.id).unwrap()).unwrap();
+        let expected_account =
+            serde_json::to_value(core.state.account(&account.id).unwrap()).unwrap();
+        release.notify_one();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            result.is_err(),
+            "old async verification must be rejected after reconnect"
+        );
+        assert_eq!(
+            serde_json::to_value(core.credential(&account.id).unwrap()).unwrap(),
+            expected_credential
+        );
+        assert_eq!(
+            serde_json::to_value(core.state.account(&account.id).unwrap()).unwrap(),
+            expected_account
+        );
+        server.abort();
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn html_session_identity_is_observed_verified_and_rechecked_without_browser_engine() {
         use axum::{Router, http::HeaderMap, response::Html, routing::get};

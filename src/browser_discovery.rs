@@ -2,7 +2,11 @@
 pub use crate::environment::BrowserProfile;
 #[cfg(test)]
 use crate::environment::firefox_profiles;
-use crate::{apperr::AppResult, runtime::Runtime, util};
+use crate::{
+    apperr::{AppError, AppResult},
+    runtime::Runtime,
+    util,
+};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -361,6 +365,7 @@ impl Runtime {
                 let account = self.register_browser_credential(
                     &effective_id,
                     crate::accounts::Credential {
+                        identity_proof: String::new(),
                         origin: target.origin().ascii_serialization(),
                         cookies: session.cookies,
                         local_storage: session.storage,
@@ -377,7 +382,10 @@ impl Runtime {
                 )?;
                 // Defer selecting until all profiles have been considered.
                 self.state.update(|d| {
-                    d.sites.entry(effective_id.clone()).or_default().account_id = before;
+                    let meta = d.sites.entry(effective_id.clone()).or_default();
+                    if meta.account_selection_revision.is_empty() && meta.account_id == account.id {
+                        meta.account_id = before;
+                    }
                     Ok(())
                 })?;
                 self.update_credential(&account.id, |credential| {
@@ -537,6 +545,9 @@ pub fn published_login(target: &url::Url, html: &str) -> Option<String> {
 impl Runtime {
     /// Reuse the user's selected account first. Never silently choose between different accounts.
     pub(crate) fn browser_account_for(&self, site_id: &str, url: &str) -> AppResult<String> {
+        if let Some(snapshot) = self.selection_snapshot(site_id, url)? {
+            return Ok(snapshot.account_id);
+        }
         let target_url = crate::net::validate_url(url)?;
         let data = self.state.read()?;
         let usable = |id: &str| {
@@ -579,7 +590,11 @@ impl Runtime {
         }
         let id = accounts[0].id.clone();
         self.state.update(|state| {
-            state.sites.entry(site_id.into()).or_default().account_id = id.clone();
+            let meta = state.sites.entry(site_id.into()).or_default();
+            if !meta.account_selection_revision.is_empty() {
+                return Err(AppError::api("auth_required", 401));
+            }
+            meta.account_id = id.clone();
             Ok(())
         })?;
         Ok(id)
