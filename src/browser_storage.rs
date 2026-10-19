@@ -44,37 +44,126 @@ fn chromium_string(bytes: &[u8]) -> Option<String> {
     }
 }
 
+// Emit only a fixed operation and an OS/library error code in synthetic unit tests.
+// Never log paths, LevelDB error messages, keys, values, or browser credentials.
+fn snapshot_failure(stage: &'static str, code: impl std::fmt::Debug) {
+    #[cfg(test)]
+    eprintln!("browser snapshot failure: stage={stage}, code={code:?}");
+    #[cfg(not(test))]
+    let _ = (stage, code);
+}
+
+type FileStamp = BTreeMap<std::ffi::OsString, (u64, std::time::SystemTime)>;
+type FileDigests = BTreeMap<std::ffi::OsString, String>;
+
+fn leveldb_entry_metadata(entry: &std::fs::DirEntry) -> Result<std::fs::Metadata, ()> {
+    // DirEntry metadata is cached enumeration data on Windows. Query a read-only
+    // handle instead: an open writer can have a newer size than the directory entry.
+    if !entry
+        .file_type()
+        .map_err(|error| snapshot_failure("type", error.raw_os_error()))?
+        .is_file()
+    {
+        return Err(snapshot_failure("bounds", "unsupported"));
+    }
+    let file = std::fs::File::open(entry.path())
+        .map_err(|error| snapshot_failure("metadata_open", error.raw_os_error()))?;
+    let meta = file
+        .metadata()
+        .map_err(|error| snapshot_failure("metadata", error.raw_os_error()))?;
+    if !meta.is_file() {
+        return Err(snapshot_failure("bounds", "unsupported"));
+    }
+    Ok(meta)
+}
+
+fn leveldb_stamp(source: &Path) -> Result<FileStamp, ()> {
+    let mut stamp = FileStamp::new();
+    for entry in std::fs::read_dir(source)
+        .map_err(|error| snapshot_failure("enumerate", error.raw_os_error()))?
+    {
+        let entry = entry.map_err(|error| snapshot_failure("entry", error.raw_os_error()))?;
+        if entry.file_name() == "LOCK" {
+            continue;
+        }
+        let meta = leveldb_entry_metadata(&entry)?;
+        if meta.len() > 128 * 1024 * 1024 || stamp.len() >= 1024 {
+            return Err(snapshot_failure("bounds", "unsupported"));
+        }
+        stamp.insert(
+            entry.file_name(),
+            (
+                meta.len(),
+                meta.modified()
+                    .map_err(|error| snapshot_failure("mtime", error.raw_os_error()))?,
+            ),
+        );
+    }
+    if stamp.values().map(|(n, _)| n).sum::<u64>() > 512 * 1024 * 1024 {
+        return Err(snapshot_failure("bounds", "unsupported"));
+    }
+    Ok(stamp)
+}
+
+fn copy_leveldb_files(source: &Path, destination: &Path) -> Result<(FileStamp, FileDigests), ()> {
+    let before = leveldb_stamp(source)?;
+    let mut digests = FileDigests::new();
+    for (name, (size, _)) in &before {
+        let bytes = util::read_bounded(&source.join(name), 128 * 1024 * 1024)
+            .map_err(|error| snapshot_failure("read", error.public_code))?;
+        if bytes.len() as u64 != *size {
+            return Err(snapshot_failure("consistency", "size_changed"));
+        }
+        digests.insert(name.clone(), util::hash(&bytes));
+        util::atomic_file(&destination.join(name), &bytes)
+            .map_err(|error| snapshot_failure("copy", error.public_code))?;
+    }
+    Ok((before, digests))
+}
+
+fn validate_leveldb_contents(
+    source: &Path,
+    copied: &FileStamp,
+    digests: &FileDigests,
+) -> Result<FileStamp, ()> {
+    let before = leveldb_stamp(source)?;
+    // Windows may publish a live writer's last-write timestamp only when a
+    // handle closes. Timestamp churn alone does not establish changed contents.
+    // Require the exact file set/types/sizes and re-read every copied byte instead.
+    if before.len() != copied.len()
+        || before.iter().any(|(name, (size, _))| {
+            copied
+                .get(name)
+                .is_none_or(|(old_size, _)| old_size != size)
+        })
+    {
+        return Err(snapshot_failure("consistency", "file_set_or_size_changed"));
+    }
+    for (name, (size, _)) in &before {
+        let bytes = util::read_bounded(&source.join(name), 128 * 1024 * 1024)
+            .map_err(|error| snapshot_failure("validate_read", error.public_code))?;
+        if bytes.len() as u64 != *size || digests.get(name) != Some(&util::hash(&bytes)) {
+            return Err(snapshot_failure("consistency", "content_changed"));
+        }
+    }
+    Ok(before)
+}
+
+fn finish_leveldb_validation(source: &Path, before: &FileStamp) -> Result<(), ()> {
+    if &leveldb_stamp(source)? != before {
+        return Err(snapshot_failure("consistency", "unstable_validation"));
+    }
+    Ok(())
+}
+
 fn open_chromium_leveldb(source: &Path) -> Result<(Snapshot, rusty_leveldb::DB), ()> {
     use rusty_leveldb::{DB, Options};
-    let snapshot = Snapshot::new()?;
-    let stamp = |path: &Path| -> Result<BTreeMap<String, (u64, std::time::SystemTime)>, ()> {
-        std::fs::read_dir(path)
-            .map_err(|_| ())?
-            .filter_map(Result::ok)
-            .filter(|e| e.file_name() != "LOCK")
-            .map(|e| {
-                let m = e.metadata().map_err(|_| ())?;
-                if !m.is_file() || m.len() > 128 * 1024 * 1024 {
-                    return Err(());
-                }
-                Ok((
-                    e.file_name().to_string_lossy().into_owned(),
-                    (m.len(), m.modified().map_err(|_| ())?),
-                ))
-            })
-            .collect()
-    };
-    let before = stamp(source)?;
-    if before.len() > 1024 || before.values().map(|(n, _)| n).sum::<u64>() > 512 * 1024 * 1024 {
-        return Err(());
-    }
-    for name in before.keys() {
-        let bytes = util::read_bounded(&source.join(name), 128 * 1024 * 1024).map_err(|_| ())?;
-        util::atomic_file(&snapshot.0.join(name), &bytes).map_err(|_| ())?;
-    }
-    if before != stamp(source)? {
-        return Err(());
-    }
+    let snapshot = Snapshot::new().map_err(|_| snapshot_failure("workspace", "unavailable"))?;
+    // This is bounded read-only consistency validation, not an atomic filesystem
+    // snapshot against arbitrary concurrent/ABA writes. Never retry a failed check.
+    let (copied, digests) = copy_leveldb_files(source, &snapshot.0)?;
+    let validated = validate_leveldb_contents(source, &copied, &digests)?;
+    finish_leveldb_validation(source, &validated)?;
     let db = DB::open(
         &snapshot.0,
         Options {
@@ -82,7 +171,7 @@ fn open_chromium_leveldb(source: &Path) -> Result<(Snapshot, rusty_leveldb::DB),
             ..Default::default()
         },
     )
-    .map_err(|_| ())?;
+    .map_err(|error| snapshot_failure("leveldb_open", error.code))?;
     Ok((snapshot, db))
 }
 
@@ -101,7 +190,9 @@ fn chromium_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
     let local_source = profile.join("Local Storage/leveldb");
     if local_source.is_dir() {
         let (_snapshot, mut db) = open_chromium_leveldb(&local_source)?;
-        let mut iter = db.new_iter().map_err(|_| ())?;
+        let mut iter = db
+            .new_iter()
+            .map_err(|error| snapshot_failure("leveldb_iterator", error.code))?;
         let prefix = format!("_{origin}\0").into_bytes();
         iter.seek(&prefix);
         loop {
@@ -273,6 +364,118 @@ fn firefox_storage(profile: &Path, origin: &str) -> Result<Storage, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn owned_snapshot_fixture() -> (Snapshot, PathBuf, PathBuf) {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/tests")
+            .join(util::id());
+        let source = root.join("source");
+        let destination = root.join("snapshot");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(source.join("000001.log"), b"synthetic-a").unwrap();
+        (Snapshot(root), source, destination)
+    }
+
+    #[test]
+    fn snapshot_queries_current_handle_after_directory_entry_was_cached() {
+        use std::io::Write;
+        let (_root, source, destination) = owned_snapshot_fixture();
+        let path = source.join("000001.log");
+        let entry = std::fs::read_dir(&source).unwrap().next().unwrap().unwrap();
+        let mut writer = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writer.write_all(b"-grown-after-enumeration").unwrap();
+        writer.flush().unwrap();
+        // Keep both writer and old directory entry alive. Windows DirEntry caches
+        // the old length, while the read-only handle must see the actual bytes.
+        let expected = std::fs::read(&path).unwrap();
+        #[cfg(windows)]
+        assert_ne!(
+            entry.metadata().unwrap().len(),
+            expected.len() as u64,
+            "Owned fixture must reproduce cached Windows enumeration length"
+        );
+        assert_eq!(
+            leveldb_entry_metadata(&entry).unwrap().len(),
+            expected.len() as u64
+        );
+        let (stamp, digests) = copy_leveldb_files(&source, &destination).unwrap();
+        let validated = validate_leveldb_contents(&source, &stamp, &digests).unwrap();
+        finish_leveldb_validation(&source, &validated).unwrap();
+        assert_eq!(
+            std::fs::read(destination.join("000001.log")).unwrap(),
+            expected
+        );
+        writer.write_all(b"-writer-still-owned").unwrap();
+        writer.flush().unwrap();
+        assert!(validate_leveldb_contents(&source, &stamp, &digests).is_err());
+    }
+
+    #[test]
+    fn snapshot_accepts_metadata_only_change_after_copy() {
+        let (_root, source, destination) = owned_snapshot_fixture();
+        let (stamp, digests) = copy_leveldb_files(&source, &destination).unwrap();
+        let path = source.join("000001.log");
+        let changed = stamp.values().next().unwrap().1 + std::time::Duration::from_secs(10);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(changed))
+            .unwrap();
+        assert_ne!(leveldb_stamp(&source).unwrap(), stamp);
+        let validated = validate_leveldb_contents(&source, &stamp, &digests).unwrap();
+        finish_leveldb_validation(&source, &validated).unwrap();
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            std::fs::read(destination.join("000001.log")).unwrap()
+        );
+    }
+
+    #[test]
+    fn snapshot_rejects_changed_content_even_with_same_size_and_timestamp() {
+        let (_root, source, destination) = owned_snapshot_fixture();
+        let (stamp, digests) = copy_leveldb_files(&source, &destination).unwrap();
+        let path = source.join("000001.log");
+        std::fs::write(&path, b"synthetic-b").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(stamp.values().next().unwrap().1))
+            .unwrap();
+        assert_eq!(leveldb_stamp(&source).unwrap(), stamp);
+        assert!(validate_leveldb_contents(&source, &stamp, &digests).is_err());
+    }
+
+    #[test]
+    fn snapshot_rejects_added_removed_or_retyped_files() {
+        for change in ["added", "removed", "retyped"] {
+            let (_root, source, destination) = owned_snapshot_fixture();
+            let (stamp, digests) = copy_leveldb_files(&source, &destination).unwrap();
+            match change {
+                "added" => std::fs::write(source.join("000002.log"), b"new").unwrap(),
+                "removed" => std::fs::remove_file(source.join("000001.log")).unwrap(),
+                _ => {
+                    std::fs::remove_file(source.join("000001.log")).unwrap();
+                    std::fs::create_dir(source.join("000001.log")).unwrap();
+                }
+            }
+            assert!(validate_leveldb_contents(&source, &stamp, &digests).is_err());
+        }
+    }
+
+    #[test]
+    fn snapshot_rejects_source_changing_during_validation() {
+        let (_root, source, destination) = owned_snapshot_fixture();
+        let (stamp, digests) = copy_leveldb_files(&source, &destination).unwrap();
+        let validated = validate_leveldb_contents(&source, &stamp, &digests).unwrap();
+        std::fs::write(source.join("000002.log"), b"new").unwrap();
+        assert!(finish_leveldb_validation(&source, &validated).is_err());
+    }
+
     #[test]
     fn decodes_chromium_latin1_and_utf16_without_treating_latin1_as_utf8() {
         assert_eq!(chromium_string(&[1, 0xe9]), Some("é".into()));
