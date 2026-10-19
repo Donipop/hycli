@@ -29,10 +29,11 @@ try{
  assert.equal((await json(['status'])).running,false);
  // Concurrent opens converge; an occupied preferred port is never reused as if it were Hycli.
  const instances=await Promise.all(Array.from({length:3},()=>json(['open','--no-open','--port',String(occupied)])));
- const base=instances[0].url;assert(instances.every(i=>i.url===base));assert.notEqual(new URL(base).port,String(occupied));
- assert.equal((await json(['status'])).url,base);
+ const printed=instances[0].url;assert(instances.every(i=>i.url===printed));const base=new URL(printed).origin;assert.notEqual(new URL(base).port,String(occupied));
+ assert.equal((await json(['status'])).url,printed);
  const descriptor=JSON.parse(await fs.readFile(path.join(data,'dashboard-instance.json'),'utf8'));
  const {launch}=JSON.parse(await fs.readFile(path.join(data,'dashboard-session.json'),'utf8'));
+ assert.equal(new URL(printed).searchParams.get('launch'),launch);
  const response=await fetch(base+'/api/session?launch='+launch),cookie=response.headers.get('set-cookie').split(';')[0];const session=await response.json();
  assert.equal(session.instance_id,descriptor.id);
  assert.equal((await fetch(base+'/api/shutdown',{method:'POST'})).status,401);
@@ -45,14 +46,14 @@ try{
  assert.equal((await json(['status'])).running,false);await run(['stop']);assert.equal(blocker.listening,true);
  const launcher=path.join(path.dirname(executable),process.platform==='win32'?'hycli-desktop.exe':'hycli-desktop');
  await run(['open','--no-open','--port','0'],{executable:launcher});
- const restarted=await json(['status']);assert.equal(restarted.running,true);
- const renewed=await fetch(restarted.url+'/api/session?launch='+launch),renewedCookie=renewed.headers.get('set-cookie').split(';')[0];
- const state=await (await fetch(restarted.url+'/api/state',{headers:{cookie:renewedCookie}})).json();
+ const restarted=await json(['status']);assert.equal(restarted.running,true);const restartedBase=new URL(restarted.url).origin;
+ const renewed=await fetch(restartedBase+'/api/session?launch='+launch),renewedCookie=renewed.headers.get('set-cookie').split(';')[0];
+ const state=await (await fetch(restartedBase+'/api/state',{headers:{cookie:renewedCookie}})).json();
  assert.equal(state.settings.locale,'ko');assert.equal(state.sites.length,0);assert.equal(state.accounts.length,0);
  if(process.argv.includes('--browser')){
   const {chromium}=await import('../dashboard/node_modules/playwright-core/index.mjs');
   browser=await chromium.launch({headless:true,...(process.env.BROWSER_BIN?{executablePath:process.env.BROWSER_BIN}:{})});
-  const page=await browser.newPage();await page.goto(restarted.url+'/?launch='+launch+'#settings');
+  const page=await browser.newPage();await page.goto(restarted.url+'#settings');
   await page.getByRole('button',{name:'Hycli 종료',exact:true}).click();
   await page.getByRole('button',{name:'확인',exact:true}).click();
   await page.getByRole('heading',{name:'Hycli가 종료되었습니다',exact:true}).waitFor();
