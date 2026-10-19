@@ -135,19 +135,12 @@ pub async fn connect(
         &source,
     )?;
     let session_token = format!("{}{}", util::id(), util::id());
-    let mut credential = web.core.credential(&account.id)?;
-    credential.browser_session = session_token.clone();
-    credential.extension_origin = origin.clone();
-    credential.browser_session_expires_ms = util::unix_ms() + 7 * 24 * 60 * 60 * 1000;
-    web.core
-        .vault
-        .lock()
-        .map_err(|_| AppError::api("internal", 500))?
-        .set(
-            "accounts",
-            &account.id,
-            &serde_json::to_string(&credential)?,
-        )?;
+    web.core.update_credential(&account.id, |credential| {
+        credential.browser_session = session_token.clone();
+        credential.extension_origin = origin.clone();
+        credential.browser_session_expires_ms = util::unix_ms() + 7 * 24 * 60 * 60 * 1000;
+        Ok(())
+    })?;
     let core = web.core.clone();
     let id = account.id.clone();
     if !source.is_empty() {
@@ -347,31 +340,30 @@ pub async fn refresh(
             break;
         }
     }
-    let (account, mut credential) = matched.ok_or_else(|| AppError::api("forbidden", 403))?;
+    let (account, credential) = matched.ok_or_else(|| AppError::api("forbidden", 403))?;
     let url = crate::net::validate_url(&credential.origin)?;
     let normalized = if body.cookies.is_empty() {
         vec![]
     } else {
         crate::accounts::normalize(body.cookies, &url)?
     };
-    let changed = serde_json::to_vec(&normalized)? != serde_json::to_vec(&credential.cookies)?;
-    credential.cookies = normalized;
-    if !body.identity_source.is_empty() {
+    let validated_source = if !body.identity_source.is_empty() {
         let source = crate::net::validate_url(&body.identity_source)?;
         if source.origin() != url.origin() || !crate::accounts::identity_endpoint(&source) {
             return Err(AppError::api("data_invalid", 400));
         }
-        credential.identity_source = source.to_string();
-    }
-    web.core
-        .vault
-        .lock()
-        .map_err(|_| AppError::api("internal", 500))?
-        .set(
-            "accounts",
-            &account.id,
-            &serde_json::to_string(&credential)?,
-        )?;
+        Some(source.to_string())
+    } else {
+        None
+    };
+    let (credential, changed) = web.core.update_credential(&account.id, |credential| {
+        let changed = serde_json::to_vec(&normalized)? != serde_json::to_vec(&credential.cookies)?;
+        credential.cookies = normalized;
+        if let Some(source) = validated_source {
+            credential.identity_source = source;
+        }
+        Ok(changed)
+    })?;
     web.core.state.update(|state| {
         if let Some(account) = state.accounts.get_mut(&account.id) {
             account.cookie_count = credential.cookies.len();

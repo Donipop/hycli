@@ -1294,6 +1294,25 @@ impl Runtime {
         )
         .map_err(Into::into)
     }
+    pub fn update_credential<R>(
+        &self,
+        id: &str,
+        mutate: impl FnOnce(&mut Credential) -> AppResult<R>,
+    ) -> AppResult<(Credential, R)> {
+        let mut vault = self
+            .vault
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        vault.reload()?;
+        let mut credential: Credential = serde_json::from_str(
+            vault
+                .get("accounts", id)
+                .ok_or_else(|| AppError::api("auth_required", 401))?,
+        )?;
+        let out = mutate(&mut credential)?;
+        vault.set("accounts", id, &serde_json::to_string(&credential)?)?;
+        Ok((credential, out))
+    }
     pub async fn read_page(&self, url: &str, account: &str) -> AppResult<Response> {
         self.read_page_profile(url, account, "go").await
     }
@@ -2254,14 +2273,12 @@ impl Runtime {
             .get(id)
             .cloned()
             .ok_or_else(|| AppError::api("not_found", 404))?;
-        let mut c = self.credential(id)?;
-        if let Some(recipe) = &c.recipe {
-            c.headers.extend(recipe.resolve_headers(&c)?);
-            self.vault
-                .lock()
-                .map_err(|_| AppError::api("internal", 500))?
-                .set("accounts", id, &serde_json::to_string(&c)?)?;
-        }
+        let (c, _) = self.update_credential(id, |c| {
+            if let Some(recipe) = &c.recipe {
+                c.headers.extend(recipe.resolve_headers(c)?);
+            }
+            Ok(())
+        })?;
         self.policy.resume_auth(&format!("{}|{id}", c.origin))?;
         // Only a URL actually observed in this user's browser or a verified read operation.
         let source = if !c.identity_source.is_empty() {

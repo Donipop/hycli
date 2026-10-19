@@ -53,18 +53,15 @@ pub async fn stealth_probe(url: &str) -> Result<Observation, AppError> {
         .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
     let force_headed = std::env::var_os("HYCLI_HEADED").is_some();
     let first = run_probe_with_mode(engine, url, force_headed).await?;
-    if !force_headed
-        && matches!(
-            first.defense.as_str(),
-            "cloudflare_challenge" | "bot_manager" | "captcha"
+    let is_challenged = |defense: &str| {
+        matches!(
+            defense,
+            "cloudflare" | "bot-manager" | "captcha" | "cloudflare_challenge" | "bot_manager"
         )
-        && crate::browser_session::can_run_headed()
-    {
+    };
+    if !force_headed && is_challenged(&first.defense) && crate::browser_session::can_run_headed() {
         if let Ok(escalated) = run_probe_with_mode(engine, url, true).await {
-            if !matches!(
-                escalated.defense.as_str(),
-                "cloudflare_challenge" | "bot_manager" | "captcha"
-            ) {
+            if !is_challenged(&escalated.defense) {
                 return Ok(escalated);
             }
         }

@@ -321,7 +321,7 @@ impl Runtime {
                     .find(|b| b.id == engine_id && b.protocol == "chromium-cdp")
                     .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
                 let account_id = argument(call, "account_id");
-                let mut credential = if account_id.is_empty() {
+                let credential = if account_id.is_empty() {
                     serde_json::from_value(
                         json!({"origin":entry.origin().ascii_serialization(),"cookies":[]}),
                     )?
@@ -355,14 +355,18 @@ impl Runtime {
                         .insert(("GET".into(), final_url.path().into()));
                 }
                 if !account_id.is_empty() {
-                    credential.headers.extend(capture.headers.clone());
-                    if capture.identity.is_some() {
-                        credential.identity_source = capture.identity_url.clone();
-                    }
-                    self.vault
-                        .lock()
-                        .map_err(|_| AppError::api("internal", 500))?
-                        .set("accounts", account_id, &serde_json::to_string(&credential)?)?;
+                    let captured_headers = capture.headers.clone();
+                    let identity_url = capture
+                        .identity
+                        .as_ref()
+                        .map(|_| capture.identity_url.clone());
+                    self.update_credential(account_id, |c| {
+                        c.headers.extend(captured_headers);
+                        if let Some(url) = identity_url {
+                            c.identity_source = url;
+                        }
+                        Ok(())
+                    })?;
                     self.state.update(|data| {
                         let meta = data.sites.entry(context.job.site_id.clone()).or_default();
                         for observation in &capture.observations {

@@ -113,8 +113,10 @@ impl Network {
             .build()
             .map_err(|_| AppError::api("internal", 500))?;
         if let Ok(mut guard) = self.clients.lock() {
-            if guard.len() >= 64 {
-                guard.clear();
+            if guard.len() >= 64
+                && let Some(first_key) = guard.keys().next().cloned()
+            {
+                guard.remove(&first_key);
             }
             guard.insert(pool_key, client.clone());
         }
