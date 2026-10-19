@@ -915,3 +915,92 @@ pub fn safe_read_url(url: &url::Url) -> bool {
                     && dangerous_intent(&value))
         })
 }
+
+/// Strict URL semantics for bounded manual session diagnostic GETs.
+/// Opaque persisted GraphQL operations need a separate, evidenced execution contract.
+pub(crate) fn safe_session_read_url(url: &url::Url) -> bool {
+    if !safe_read_url(url) {
+        return false;
+    }
+    let mut args = BTreeMap::new();
+    for (key, value) in url.query_pairs() {
+        if args.insert(key.into_owned(), value.into_owned()).is_some() {
+            return false;
+        }
+    }
+    let path = url.path().to_ascii_lowercase();
+    let graphql = path.contains("graphql")
+        || path.ends_with("/gql")
+        || args.keys().any(|key| {
+            matches!(
+                key.to_ascii_lowercase().as_str(),
+                "operationname" | "queryid" | "extensions"
+            )
+        });
+    fn graphql_envelope(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
+                matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "query" | "operationname" | "queryid" | "extensions" | "persistedquery"
+                ) || graphql_envelope(value)
+            }),
+            serde_json::Value::Array(values) => values.iter().any(graphql_envelope),
+            _ => false,
+        }
+    }
+    let visible_document = args
+        .get("query")
+        .is_some_and(|query| graphql_parser::parse_query::<&str>(query).is_ok());
+    if (graphql && !visible_document)
+        || args.values().any(|value| {
+            serde_json::from_str::<serde_json::Value>(value)
+                .ok()
+                .is_some_and(|value| graphql_envelope(&value))
+        })
+    {
+        return false;
+    }
+    let operation = Operation {
+        name: "session-diagnostic".into(),
+        method: "GET".into(),
+        path: url.path().into(),
+        effect: Effect::Read,
+        evidence: "explicit diagnostic GET".into(),
+        ..Default::default()
+    };
+    operation_effect(&operation, &args) == Effect::Read
+}
+
+/// A manual session diagnostic cannot acquire authority over sibling origins.
+pub(crate) fn safe_session_request(url: &url::Url, origin: &url::Url, method: &str) -> bool {
+    url.origin() == origin.origin()
+        && ["GET", "HEAD", "OPTIONS"].contains(&method)
+        && safe_session_read_url(url)
+}
+
+#[cfg(test)]
+mod session_request_tests {
+    #[test]
+    fn diagnostics_reject_sibling_origins_redirect_targets_and_writes() {
+        let origin = url::Url::parse("https://app.example.test").unwrap();
+        for target in [
+            "https://api.example.test/profile",
+            "http://app.example.test/profile",
+            "https://app.example.test:444/profile",
+            "https://app.example.test/profile?action=delete",
+        ] {
+            assert!(!super::safe_session_request(
+                &url::Url::parse(target).unwrap(),
+                &origin,
+                "GET"
+            ));
+        }
+        assert!(!super::safe_session_request(&origin, &origin, "POST"));
+        assert!(super::safe_session_request(
+            &origin.join("profile").unwrap(),
+            &origin,
+            "GET"
+        ));
+    }
+}

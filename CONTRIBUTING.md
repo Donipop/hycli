@@ -52,7 +52,7 @@ Browser setup and platform prerequisites are in [BUILD.md](docs/BUILD.md). Use s
 
 For a pull request, include the problem, the resulting behavior and the checks you ran. Flag any checks you could not run. Keep account data, credentials, browser profiles, private logs and generated site definitions out of commits and attachments.
 
-External pull requests are not merged directly. Maintainers review and verify proposed changes, land them through a new maintainer-authored commit and pull request, and credit the contributor (`Co-authored-by:` and contributor attribution).
+Maintainers may merge an original contribution after independent review and complete verification. Separate improvements belong in follow-up pull requests. Known correctness or security defects, failing checks, and required checks that have not run must be resolved before merging. Preserve original authorship and reporter credit; adaptations should retain verified `Co-authored-by:` metadata and contributor attribution.
 
 ## Package a release
 
@@ -62,4 +62,4 @@ Follow [RELEASING.md](docs/RELEASING.md). Source and native archives use explici
 
 - [@ytw418](https://github.com/ytw418) (윤성준) — AI provider refusal classification (`ai_refused`), partial action preservation across preparation rounds, and `self_qa` prompt hardening.
 - [@jjigmeok-dev](https://github.com/jjigmeok-dev) — feedback/community entry points and environment-aware issue templates ([#15](https://github.com/Hybirdss/Hycli/pull/15)), plus MCP bundles and registry metadata ([#16](https://github.com/Hybirdss/Hycli/pull/16)).
-- [@seungwonme](https://github.com/seungwonme) — reported the pagination continuation handling problem ([#21](https://github.com/Hybirdss/Hycli/issues/21)) and the aggregate browser-suite failure with an upstream control and isolated-suite comparison ([#24](https://github.com/Hybirdss/Hycli/issues/24)).
+- [@seungwonme](https://github.com/seungwonme) — reported pagination continuation, browser-session import and aggregate browser-suite failures ([#21](https://github.com/Hybirdss/Hycli/issues/21), [#22](https://github.com/Hybirdss/Hycli/issues/22), [#24](https://github.com/Hybirdss/Hycli/issues/24)); contributed bounded session diagnostics, identity verification and credential-echo regression tests ([#26](https://github.com/Hybirdss/Hycli/pull/26)).

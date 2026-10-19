@@ -6,6 +6,8 @@ use super::models::{DispatchPhase, Job, JobAgent, JobNote, SiteMeta};
 
 #[derive(PartialEq, Eq)]
 pub(super) struct SiteRow {
+    pub(super) account_binding_json: String,
+    pub(super) account_selection_revision: String,
     pub(super) workflows_complete: Option<i64>,
     pub(super) pinned: i64,
     pub(super) title: String,
@@ -44,6 +46,8 @@ impl SiteRow {
             icon_source: r.get(offset + 14)?,
             writes: r.get(offset + 15)?,
             smoke_json: r.get(offset + 16)?,
+            account_binding_json: r.get(offset + 17)?,
+            account_selection_revision: r.get(offset + 18)?,
         })
     }
     pub(super) fn from_meta(meta: &SiteMeta) -> AppResult<Self> {
@@ -73,10 +77,14 @@ impl SiteRow {
             icon_source: meta.icon_source.clone(),
             writes: i64::from(meta.writes),
             smoke_json: serde_json::to_string(&meta.smoke)?,
+            account_binding_json: serde_json::to_string(&meta.account_binding)?,
+            account_selection_revision: meta.account_selection_revision.clone(),
         })
     }
     pub(super) fn into_meta(self) -> AppResult<SiteMeta> {
         Ok(SiteMeta {
+            account_binding: serde_json::from_str(&self.account_binding_json)?,
+            account_selection_revision: self.account_selection_revision,
             workflows_complete: self.workflows_complete.map(|v| v != 0),
             pinned: self.pinned != 0,
             title: self.title,
@@ -179,6 +187,7 @@ impl JobRow {
             _ => crate::policy::Effect::Read,
         };
         Ok(Job {
+            account_selection: None,
             id: self.id,
             kind: self.kind,
             site_id: self.site_id,
@@ -335,7 +344,10 @@ pub(super) fn init_schema(conn: &Connection) -> AppResult<()> {
              result_json BLOB NOT NULL
          );",
     )?;
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS identity_generations (account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE, generation TEXT NOT NULL);")?;
     for ddl in [
+        "ALTER TABLE sites ADD COLUMN account_binding_json TEXT NOT NULL DEFAULT 'null'",
+        "ALTER TABLE sites ADD COLUMN account_selection_revision TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE jobs ADD COLUMN effect TEXT NOT NULL DEFAULT 'read'",
         "ALTER TABLE jobs ADD COLUMN dispatch_phase TEXT NOT NULL DEFAULT 'pending'",
         "ALTER TABLE jobs ADD COLUMN owner_pid INTEGER NOT NULL DEFAULT 0",

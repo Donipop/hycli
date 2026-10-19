@@ -16,6 +16,17 @@ impl Runtime {
         url: &str,
         account: &str,
     ) -> AppResult<(Vec<(String, String)>, Vec<String>)> {
+        let (headers, secrets, _) = self.headers_snapshot(sp, op, url, account)?;
+        Ok((headers, secrets))
+    }
+    pub(crate) fn headers_snapshot(
+        &self,
+        sp: &Spec,
+        op: &Operation,
+        url: &str,
+        account: &str,
+    ) -> AppResult<(Vec<(String, String)>, Vec<String>, Option<Credential>)> {
+        let _selection = self.selection_lock()?;
         let strategy = sp.find_auth(&op.auth);
         if strategy.is_some_and(|auth| auth.kind == "header") {
             let auth = strategy.unwrap();
@@ -64,6 +75,7 @@ impl Runtime {
                     .get("accounts", account)
                     .ok_or_else(|| AppError::api("auth_required", 401))?,
             )?;
+            self.authorize_account_snapshot(&sp.site.name, url, account, &credential)?;
             let session_headers = credential.request_headers(url)?;
             if session_headers.is_empty() && !strategy.is_some_and(|a| a.kind == "derived") {
                 return Err(AppError::api("auth_required", 401));
@@ -103,7 +115,7 @@ impl Runtime {
             headers.retain(|key, _| !key.eq_ignore_ascii_case("content-type"));
             headers.insert("content-type".into(), body.content_type().into());
         }
-        Ok((headers.into_iter().collect(), secrets))
+        Ok((headers.into_iter().collect(), secrets, loaded_credential))
     }
     pub fn set_website_credential(
         &self,
@@ -175,6 +187,7 @@ impl Runtime {
         id: &str,
         mutate: impl FnOnce(&mut Credential) -> AppResult<R>,
     ) -> AppResult<(Credential, R)> {
+        let _selection = self.selection_lock()?;
         let mut vault = self
             .vault
             .lock()
@@ -185,7 +198,11 @@ impl Runtime {
                 .get("accounts", id)
                 .ok_or_else(|| AppError::api("auth_required", 401))?,
         )?;
+        let before = serde_json::to_vec(&credential)?;
         let out = mutate(&mut credential)?;
+        if serde_json::to_vec(&credential)? != before {
+            credential.identity_proof.clear();
+        }
         vault.set("accounts", id, &serde_json::to_string(&credential)?)?;
         Ok((credential, out))
     }
@@ -210,6 +227,7 @@ impl Runtime {
             site_id.into()
         };
         let credential = Credential {
+            identity_proof: String::new(),
             origin: url.origin().ascii_serialization(),
             cookies,
             identity_source: identity_source.into(),
@@ -232,6 +250,8 @@ impl Runtime {
     ) -> AppResult<AccountView> {
         let id = util::id();
         let site_id = site_id.to_string();
+        let mut credential = credential;
+        credential.identity_proof.clear();
         let view = AccountView {
             id: id.clone(),
             site_id: site_id.clone(),
@@ -252,7 +272,7 @@ impl Runtime {
         self.state.update(|d| {
             d.accounts.insert(id.clone(), view.clone());
             let m = d.sites.entry(site_id).or_default();
-            if m.account_id.is_empty() {
+            if m.account_id.is_empty() && m.account_selection_revision.is_empty() {
                 m.account_id = id;
             }
             Ok(())
@@ -261,27 +281,22 @@ impl Runtime {
         Ok(view)
     }
     pub async fn refresh_account(&self, id: &str) -> AppResult<AccountView> {
-        let mut view = self
-            .state
-            .read()?
+        let data = self.state.read()?;
+        let view = data
             .accounts
             .get(id)
-            .cloned()
             .ok_or_else(|| AppError::api("not_found", 404))?;
-        let (c, _) = self.update_credential(id, |c| {
-            if let Some(recipe) = &c.recipe {
-                c.headers.extend(recipe.resolve_headers(c)?);
-            }
-            Ok(())
-        })?;
-        self.policy.resume_auth(&format!("{}|{id}", c.origin))?;
-        // Only a URL actually observed in this user's browser or a verified read operation.
-        let source = if !c.identity_source.is_empty() {
-            c.identity_source.clone()
+        let expected = self.credential(id)?;
+        let mut candidate = expected.clone();
+        if let Some(recipe) = &candidate.recipe {
+            candidate
+                .headers
+                .extend(recipe.resolve_headers(&candidate)?);
+        }
+        let source = if !candidate.identity_source.is_empty() {
+            candidate.identity_source.clone()
         } else {
-            self.state
-                .read()?
-                .sites
+            data.sites
                 .get(&view.site_id)
                 .and_then(|m| m.identity_paths.first())
                 .cloned()
@@ -290,43 +305,77 @@ impl Runtime {
         if source.is_empty() {
             return Err(AppError::api("identity_unavailable", 422));
         }
-        if !source.is_empty() {
-            let parsed = crate::net::validate_url(&source)?;
-            if parsed.origin().ascii_serialization() != c.origin
-                || (c.recipe.is_none() && !accounts::identity_endpoint(&parsed))
-            {
-                return Err(AppError::api("data_invalid", 400));
-            }
-            let r = self.read_page(&source, id).await?;
-            if r.successful() {
-                let identity = if let Some(recipe) = &c.recipe {
-                    recipe.identity_from_response(&r)
-                } else {
-                    r.json().as_ref().and_then(accounts::extract_identity)
-                };
-                if let Some(identity) = identity {
-                    accounts::apply_identity(&mut view, identity);
-                } else {
-                    view.email.clear();
-                    view.user_id.clear();
-                    view.name.clear();
-                    view.label.clear();
-                    view.verified_identity = false;
-                }
-            } else if r.status == 401 || r.status == 403 {
-                view.status = "expired".into();
-                view.verified_identity = false;
-            }
+        let parsed = crate::net::validate_url(&source)?;
+        if parsed.origin().ascii_serialization() != candidate.origin
+            || view.site_url != candidate.origin
+            || !crate::policy::safe_read_url(&parsed)
+            || (candidate.recipe.is_none() && !accounts::identity_endpoint(&parsed))
+        {
+            return Err(AppError::api("data_invalid", 400));
         }
-        view.checked_at = util::now();
-        self.state.update(|d| {
-            d.accounts.insert(id.into(), view.clone());
-            Ok(())
-        })?;
-        self.changed();
-        if !view.verified_identity && view.status == "connected" {
+        self.policy
+            .resume_auth(&format!("{}|{id}", candidate.origin))?;
+        let request = crate::net::Request {
+            url: source.clone(),
+            method: "GET".into(),
+            headers: candidate.request_headers(&source)?,
+            body: None,
+            account_id: id.into(),
+            limit: 2 * 1024 * 1024,
+            timeout: std::time::Duration::from_secs(30),
+            read_only: true,
+            follow_redirects: false,
+            tls_profile: "standard".into(),
+        };
+        let response = self.network.fetch(request.clone()).await?;
+        if response.status == 401 || response.status == 403 {
+            self.invalidate_identity_if_current(id, &expected, true)?;
+            return self
+                .state
+                .account(id)?
+                .ok_or_else(|| AppError::api("not_found", 404));
+        }
+        if !response.successful() {
+            return Err(AppError::api("request_failed", 422));
+        }
+        let extract = |response: &crate::net::Response| {
+            if let Some(recipe) = &candidate.recipe {
+                recipe.identity_from_response(response)
+            } else {
+                response
+                    .json()
+                    .as_ref()
+                    .and_then(accounts::extract_identity)
+            }
+        };
+        let Some(identity) = extract(&response) else {
+            self.invalidate_identity_if_current(id, &expected, false)?;
+            return Err(AppError::api("identity_unavailable", 422));
+        };
+        // A public profile, redirect or failed anonymous probe is not proof of a signed-in identity.
+        let baseline_scope = format!("{id}:identity-baseline");
+        self.policy
+            .resume_auth(&format!("{}|{baseline_scope}", candidate.origin))?;
+        let anonymous = self
+            .network
+            .fetch(crate::net::Request {
+                headers: vec![],
+                account_id: baseline_scope,
+                ..request
+            })
+            .await?;
+        if !anonymous.successful() && anonymous.status != 401 && anonymous.status != 403 {
             return Err(AppError::api("identity_unavailable", 422));
         }
-        Ok(view)
+        if anonymous.successful() && extract(&anonymous).is_some() {
+            self.invalidate_identity_if_current(id, &expected, false)?;
+            return Err(AppError::api("identity_unavailable", 422));
+        }
+        if !crate::session_recipe::identity_is_safe(&identity, &candidate) {
+            self.invalidate_identity_if_current(id, &expected, false)?;
+            return Err(AppError::api("identity_unavailable", 422));
+        }
+        candidate.identity_source = source;
+        self.publish_verified_identity(id, &expected, candidate, identity)
     }
 }

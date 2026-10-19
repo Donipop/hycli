@@ -52,7 +52,9 @@ impl Runtime {
                 ""
             };
             self.job_note(&job.id, "reading", "", 0, "")?;
-            let response = self.read_evidence_page(&raw, account).await;
+            let response = self
+                .read_evidence_page_scoped(&raw, account, Some(job))
+                .await;
             let response = match response {
                 Ok(r) => r,
                 Err(e) => {

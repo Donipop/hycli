@@ -57,7 +57,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Registry, fixture and companion boundary tests
         shell: bash
-        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs
+        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs dashboard/e2e-screenshots.test.mjs
       - name: Rust toolchain
         run: |
           rustup update stable --no-self-update
@@ -107,7 +107,7 @@ jobs:
         run: |
           cargo fmt --all --check
           cargo test --all-targets --locked
-          cargo build --locked --bin hycli --example dashboard_fixture
+          cargo build --locked --bin hycli --example dashboard_fixture --example binding_dashboard_fixture
       - name: Private pagination CLI and MCP
         run: node scripts/test-pagination.mjs
       - name: Native companion popup dependencies
@@ -138,7 +138,10 @@ jobs:
           : "${CHROME_BIN:?The browser-test runner must provide installed Chrome}"
           "$CHROME_BIN" --version
           BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
+          BROWSER_BIN="$CHROME_BIN" node dashboard/binding-e2e.mjs
           node scripts/test-e2e.mjs --full
+          # Verification must preserve reviewed screenshots before source packaging.
+          git diff --exit-code -- docs/images docs/design
       - name: Embedded release
         run: node scripts/build.mjs --skip-dependencies
       - name: Package public files

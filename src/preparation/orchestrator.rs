@@ -38,7 +38,18 @@ impl Runtime {
             environment.browsers.len(),
             "",
         )?;
-        let mut account_id = self.browser_account_for(&job.site_id, &job.url)?;
+        let mut account_id = if let Some(selection) = job
+            .account_selection
+            .as_ref()
+            .filter(|s| !s.revision.is_empty())
+        {
+            if !selection.account_id.is_empty() {
+                self.job_credential(job, &selection.account_id, &job.url)?;
+            }
+            selection.account_id.clone()
+        } else {
+            self.browser_account_for(&job.site_id, &job.url)?
+        };
         self.state
             .update_job(&job.id, |work| work.account_id = account_id.clone())?;
         self.job_progress(&job.id, "connect", 1)?;
@@ -546,7 +557,18 @@ impl Runtime {
                     kind: "Actual agent tool result".into(),
                     content: json!({"tool":call.tool,"arguments":call.arguments,"result":content}),
                 });
-                let selected = self.browser_account_for(&job.site_id, &job.url)?;
+                let selected = if let Some(selection) = job
+                    .account_selection
+                    .as_ref()
+                    .filter(|s| !s.revision.is_empty())
+                {
+                    if !selection.account_id.is_empty() {
+                        self.job_credential(job, &selection.account_id, &job.url)?;
+                    }
+                    selection.account_id.clone()
+                } else {
+                    self.browser_account_for(&job.site_id, &job.url)?
+                };
                 if selected != account_id {
                     account_id = selected;
                     self.state

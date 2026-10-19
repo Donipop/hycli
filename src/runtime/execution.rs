@@ -10,7 +10,7 @@ use crate::{
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, time::Duration};
 
-use super::{OpResult, Runtime, humanize, origin, params, same_site_url, sanitized, visible_text};
+use super::{OpResult, Runtime, humanize, origin, params, sanitized, visible_text};
 
 impl Runtime {
     pub fn request(
@@ -44,12 +44,16 @@ impl Runtime {
                 .unwrap_or_default(),
         };
         if !account.is_empty() {
-            let a = self
-                .state
-                .account(&account)?
-                .ok_or_else(|| AppError::api("auth_required", 401))?;
-            if a.site_id != sp.site.name || !same_site_url(&a.site_url, &url)? {
-                if explicit_account {
+            if self
+                .selected_credential(&sp.site.name, &url, &account)
+                .is_err()
+            {
+                if explicit_account
+                    || self
+                        .state
+                        .site(&sp.site.name)?
+                        .is_some_and(|m| m.account_binding.is_some())
+                {
                     return Err(AppError::api("auth_required", 401));
                 }
                 account.clear();
@@ -242,7 +246,8 @@ impl Runtime {
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
-        let (mut headers, mut secrets) = self.headers(sp, op, &url, &request.account_id)?;
+        let (mut headers, mut secrets, credential_snapshot) =
+            self.headers_snapshot(sp, op, &url, &request.account_id)?;
         checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
         let cursor = self.resolve_cursor(&checked, op, &url, &secrets)?;
         if let Some(value) = &cursor {
@@ -268,6 +273,7 @@ impl Runtime {
                 sp,
                 op,
                 &request.account_id,
+                credential_snapshot.as_ref(),
                 &mut effective_inputs,
                 &mut secrets,
             )
@@ -306,6 +312,12 @@ impl Runtime {
                 self.state.mark_job_dispatched(id)?;
             }
         }
+        self.ensure_credential_snapshot(
+            &sp.site.name,
+            &url,
+            &request.account_id,
+            credential_snapshot.as_ref(),
+        )?;
         let req_origin = origin(&url)?;
         let is_local_url =
             url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
@@ -350,24 +362,35 @@ impl Runtime {
                     ..Default::default()
                 }
             } else {
-                self.credential(&request.account_id)?
+                credential_snapshot
+                    .clone()
+                    .ok_or_else(|| AppError::api("auth_required", 401))?
             };
             self.network
                 .fetch_rendered(&credential, &url, &request.account_id)
                 .await
         } else if prefer_browser_fetch {
-            let credential = self.fallback_credential(&request.account_id, &req_origin);
-            match self
-                .network
-                .fetch_browser_in_page(&credential, &req_input)
-                .await
-            {
-                Ok(r) => Ok(r),
-                Err(_) if op.transport != "browser-fetch" && effect == Effect::Read => {
-                    self.network.fetch(req_input).await
-                }
-                Err(e) => Err(e),
-            }
+            let credential =
+                credential_snapshot
+                    .clone()
+                    .unwrap_or_else(|| crate::accounts::Credential {
+                        origin: req_origin.clone(),
+                        ..Default::default()
+                    });
+            self.retry_read_after_browser(
+                self.network.fetch_browser_in_page(&credential, &req_input),
+                req_input.clone(),
+                op.transport != "browser-fetch" && effect == Effect::Read,
+                || {
+                    self.ensure_credential_snapshot(
+                        &sp.site.name,
+                        &url,
+                        &request.account_id,
+                        credential_snapshot.as_ref(),
+                    )
+                },
+            )
+            .await
         } else {
             let fetched = self.network.fetch(req_input.clone()).await;
             match fetched {
@@ -377,10 +400,28 @@ impl Runtime {
                         && !op.matches_response(&r)
                         && !is_local_url =>
                 {
+                    self.ensure_credential_snapshot(
+                        &sp.site.name,
+                        &url,
+                        &request.account_id,
+                        credential_snapshot.as_ref(),
+                    )?;
                     Ok(self
-                        .escalate_challenged_read(&req_input, r, true, |resp| {
-                            op.matches_response(resp)
-                        })
+                        .escalate_challenged_read_snapshot(
+                            &req_input,
+                            r,
+                            true,
+                            credential_snapshot.as_ref(),
+                            || {
+                                self.ensure_credential_snapshot(
+                                    &sp.site.name,
+                                    &url,
+                                    &request.account_id,
+                                    credential_snapshot.as_ref(),
+                                )
+                            },
+                            |resp| op.matches_response(resp),
+                        )
                         .await)
                 }
                 other => other,

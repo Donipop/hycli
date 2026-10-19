@@ -1,6 +1,6 @@
 use super::{
     actions,
-    args::{Cmd, Deps, JobsCmd, KbCmd},
+    args::{AccountsCmd, Cmd, Deps, JobsCmd, KbCmd},
     site_cmd::{
         auth_cmd, capture_run, check_run, find_spec, hycli_sites, job_outcome, site_run, spec_cmd,
         try_run, wait_preparation,
@@ -12,7 +12,9 @@ use crate::{
 };
 
 pub async fn run(deps: Deps, cmd: Cmd, emit: &Emitter) -> i32 {
-    match dispatch(deps, cmd, emit).await {
+    // Keep the large, nested command state machine off the entry-point future.
+    // Windows main threads have a smaller stack than typical Unix shells.
+    match Box::pin(dispatch(deps, cmd, emit)).await {
         Ok(()) => 0,
         Err(e) => emit.fail(&e),
     }
@@ -181,7 +183,10 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             }));
             Ok(())
         }
-        Cmd::Accounts { site } => {
+        Cmd::Accounts { site, cmd } => {
+            if let Some(cmd) = cmd {
+                return accounts_cmd(&deps, cmd, site.as_deref(), emit).await;
+            }
             let accounts: Vec<_> = runner(&deps)?
                 .state
                 .accounts()?
@@ -425,6 +430,58 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
     }
 }
 
+async fn accounts_cmd(
+    deps: &Deps,
+    cmd: AccountsCmd,
+    site: Option<&str>,
+    emit: &Emitter,
+) -> Result<(), AppError> {
+    let core = runner(deps)?;
+    if let Some(site) = site {
+        let id = match &cmd {
+            AccountsCmd::Inspect { account }
+            | AccountsCmd::Observe { account, .. }
+            | AccountsCmd::Verify { account, .. }
+            | AccountsCmd::Refresh { account } => account,
+        };
+        if !core
+            .state
+            .account(id)?
+            .is_some_and(|account| account.site_id == site)
+        {
+            return Err(AppError::api("not_found", 404));
+        }
+    }
+    match cmd {
+        AccountsCmd::Inspect { account } => {
+            emit.data(&core.inspect_account_session(&account)?);
+        }
+        AccountsCmd::Observe {
+            account,
+            url,
+            browser,
+        } => {
+            emit.data(
+                &core
+                    .observe_account_session(&account, &url, browser)
+                    .await?,
+            );
+        }
+        AccountsCmd::Verify { account, recipe } => {
+            let recipe: crate::session_recipe::ConnectionRecipe = serde_json::from_slice(
+                &crate::util::read_bounded(std::path::Path::new(&recipe), 128 * 1024)
+                    .map_err(|_| AppError::api("data_invalid", 400))?,
+            )
+            .map_err(|_| AppError::api("data_invalid", 400))?;
+            emit.data(&core.verify_observed_session(&account, &recipe).await?);
+        }
+        AccountsCmd::Refresh { account } => {
+            emit.data(&core.refresh_account_session(&account).await?)
+        }
+    }
+    Ok(())
+}
+
 async fn kb_cmd(deps: Deps, cmd: KbCmd, emit: &Emitter) -> Result<(), AppError> {
     let kb = open_kb(&deps)?;
     use crate::kb::AttemptInput;
@@ -528,5 +585,30 @@ async fn kb_cmd(deps: Deps, cmd: KbCmd, emit: &Emitter) -> Result<(), AppError> 
             emit.data(&serde_json::json!({"status": status, "issues": issues}));
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
+    use super::*;
+
+    #[test]
+    fn root_command_future_does_not_embed_the_full_dispatch_tree() {
+        let emit = Emitter::new(true);
+        let future = run(
+            Deps {
+                kb: None,
+                site: "default".into(),
+                force_json: true,
+                allow_local: false,
+            },
+            Cmd::Version,
+            &emit,
+        );
+        let bytes = std::mem::size_of_val(&future);
+        assert!(
+            bytes <= 4096,
+            "Root command future occupies {bytes} bytes; nested dispatch must remain heap-backed"
+        );
     }
 }

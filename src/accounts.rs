@@ -66,6 +66,9 @@ fn cookie_path() -> String {
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Credential {
+    /// Private vault proof tying a verified identity to this exact credential snapshot.
+    #[serde(default)]
+    pub(crate) identity_proof: String,
     pub origin: String,
     pub cookies: Vec<Cookie>,
     #[serde(default)]
@@ -104,6 +107,44 @@ impl Credential {
             .collect::<Vec<_>>()
             .join("; "))
     }
+    /// Short, unreferenced preference cookies are not authentication material.
+    /// Keep opaque session values, named auth material and explicit recipe sources;
+    /// public identifier cookies do not make their matching account identifiers secret.
+    pub(crate) fn session_redaction_values(&self) -> Vec<String> {
+        let referenced = |source: &str, key: &str| {
+            self.recipe.as_ref().is_some_and(|recipe| {
+                recipe.headers.iter().any(|rule| {
+                    rule.source == source
+                        && (rule.key == key
+                            || (source == "captured_header" && rule.key.eq_ignore_ascii_case(key)))
+                })
+            })
+        };
+        let mut metadata = self.clone();
+        metadata.cookies.retain(|cookie| {
+            let name = cookie.name.to_ascii_lowercase();
+            let identifier = name.replace(['-', '_'], "");
+            let public_identifier = matches!(
+                identifier.as_str(),
+                "uid" | "userid" | "user" | "username" | "profileid" | "email"
+            );
+            crate::util::secret_field(&name)
+                || name.contains("session")
+                || name.contains("auth")
+                || name.contains("token")
+                || matches!(name.as_str(), "sid" | "ssid")
+                || referenced("cookie", &cookie.name)
+                || crate::util::redact_text(&cookie.value) != cookie.value
+                || (cookie.value.chars().count() >= 8 && !public_identifier)
+        });
+        metadata.headers.retain(|name, value| {
+            value.chars().count() >= 8
+                || crate::util::secret_field(name)
+                || referenced("captured_header", name)
+        });
+        metadata.redaction_values()
+    }
+
     pub fn redaction_values(&self) -> Vec<String> {
         let mut values: Vec<_> = self
             .cookies

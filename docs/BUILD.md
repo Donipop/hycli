@@ -57,6 +57,31 @@ For websites, Hycli inventories the current environment and gives the AI scoped 
 
 The browser companion remains an optional fallback for browsers whose protected sign-ins cannot be read locally. Companion archives and setup instructions are available in **Accounts**. Store publication/signing is separate from local unpacked or temporary installation.
 
+### Verify a browser session from the CLI
+
+`hycli accounts` still lists saved accounts. When automatic current-account discovery is insufficient, the CLI can inspect and verify an evidence-backed connection without an AI preparation loop:
+
+```sh
+hycli accounts inspect ACCOUNT_ID
+hycli accounts observe ACCOUNT_ID https://website.example/current-context
+hycli accounts verify ACCOUNT_ID --recipe connection.json
+hycli accounts refresh ACCOUNT_ID
+```
+
+Inspection and observation return key names, request shapes and response types, never cookies, authentication headers or private response values. Known credential values are also redacted from metadata and recipe references. Identity fields that echo those values are rejected before account metadata is saved. Observation alone does not verify identity. The JSON connection recipe uses the same `identity_url`, local `headers` references, `identity` or `identity_html` mapping, and `evidence` fields used during preparation; it must not contain secret values. Verification requires a GET path already observed for this account's website, enforces an exact match to its saved credential origin (not sibling subdomains) and the read-only URL policy, and rejects identities also returned without authentication. Anonymous redirects, rate limits and server errors are inconclusive and never establish verification. Use an actual current-account response, not a public profile. A failed verification preserves the previously verified recipe. Refresh reuses that recipe with the same single-request verification and anonymous baseline; an expired or credential-echo identity is not reported as verified.
+
+For a JSON current-account endpoint, `connection.json` can start with:
+
+```json
+{
+  "identity_url": "https://website.example/current-context",
+  "identity": {"user_id": "/id", "name": "/name"},
+  "evidence": "observed_browser_request"
+}
+```
+
+If the endpoint requires an authentication header, add a `headers` entry such as `{"header":"X-Csrf-Token","source":"cookie","key":"csrf","prefix":""}` using names returned by inspection. Header rules may reference `cookie`, `local_storage` or `captured_header` sources; copy key names, never their values. HTTP observation makes one bounded request and does not follow redirects or automatically start a browser. Browser observation (`--browser`) currently returns `browser_diagnostic_unsupported` before browser launch, network activity or credential updates. Page-level interception alone does not establish read-only, exact-origin enforcement for workers, subframes and WebSockets, so this mode intentionally fails closed. Observe a known exact-origin endpoint over HTTP instead. Diagnostics never automatically expand origin permissions. This is a diagnostic surface; useful data execution remains in the generated website actions.
+
 ## Reproducible verification
 
 ```sh
@@ -71,6 +96,8 @@ node scripts/test-e2e.mjs --full
 Install the test browser with `cd dashboard && npx playwright install chromium`, or set `BROWSER_BIN` to an installed Chromium executable. When a distribution launcher adds personal graphics/session flags, use the browser binary directly for isolated tests.
 
 `HYCLI_TEST_DATA` can select a different parent directory for isolated test data and browser profiles; the default is `.cache/` inside the project.
+
+The aggregate browser runner skips documentation screenshots so verification does not change reviewed source assets. Set `HYCLI_NO_SCREENSHOTS=0` to deliberately regenerate them from the synthetic fixtures. Direct browser suites generate screenshots by default; set `HYCLI_NO_SCREENSHOTS=1` to skip them. Failure diagnostics under `.cache/` remain available.
 
 The browser tests run real Rust dashboard and MCP APIs against synthetic local website/provider servers. They cover exact approval, secret redaction, account resume, website-key setup and rotation, summary failure/retry, duplicate jobs, cancellation, management and server-session reconnection. Mutations stay in those fixtures. Live paid provider accounts and every external website are not prerequisites for the fixture suite.
 

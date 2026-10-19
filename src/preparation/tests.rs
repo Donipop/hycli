@@ -415,6 +415,7 @@ async fn authenticated_document_discovery_leaves_icons_to_anonymous_image_cache(
         .connect_account("", initial.as_str(), cookies, "Test", "Test", "")
         .unwrap();
     let mut job = Job::new("prepare", "en");
+    job.site_id = account.site_id.clone();
     job.url = initial.to_string();
     core.state.add_job(job.clone()).unwrap();
     let mut icons = vec![];

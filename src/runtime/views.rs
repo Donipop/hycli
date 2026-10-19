@@ -128,8 +128,24 @@ impl Runtime {
                 summary: chosen.map(|d| d.summary.clone()).unwrap_or_default(),
                 status: if running {
                     "preparing"
-                } else if (credentials.iter().any(|credential| !credential.configured)
-                    && !has_verified_read)
+                } else if (m.account_binding.is_some()
+                    && !vault
+                        .get("accounts", &m.account_id)
+                        .and_then(|raw| {
+                            serde_json::from_str::<crate::accounts::Credential>(raw).ok()
+                        })
+                        .is_some_and(|credential| {
+                            super::selection::validate_binding(
+                                &data,
+                                &sp.site.name,
+                                sp.site.source_url(),
+                                &m.account_id,
+                                &credential,
+                            )
+                            .is_ok()
+                        }))
+                    || (credentials.iter().any(|credential| !credential.configured)
+                        && !has_verified_read)
                     || data
                         .accounts
                         .get(&m.account_id)

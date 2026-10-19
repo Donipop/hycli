@@ -1,4 +1,5 @@
 import {selectPersistedLocale} from './e2e-settings.mjs';
+import {documentationScreenshot} from './e2e-screenshots.mjs';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import fs from 'node:fs/promises';
@@ -13,7 +14,7 @@ const poll=async(fn,timeout=90000)=>{const start=Date.now();while(Date.now()-sta
 const fixtureStatus=()=>fetch(ports.website+'/fixture/status').then(r=>r.json());
 const button=(parent,key)=>parent.getByRole('button',{name:en[key],exact:true});
 const dialog=()=>page.getByRole('dialog');
-const screenshot=async options=>{if(process.env.HYCLI_NO_SCREENSHOTS==='1')return;await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode().catch(()=>{}))));return page.screenshot({animations:'disabled',...options});};
+const screenshot=options=>documentationScreenshot(page,async()=>{await page.locator('img').evaluateAll(images=>Promise.all(images.map(image=>image.decode().catch(()=>{}))));return options;});
 const openLibrary=()=>button(page.locator('.site-card').filter({hasText:'Research library'}).first(),'sites.openActions').click();
 try {
  const baseline=(await fixtureStatus()).writes;
