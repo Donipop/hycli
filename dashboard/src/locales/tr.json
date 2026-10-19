@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli kapatıldı",
   "settings.stoppedHint": "Bu sekmeyi kapatabilirsiniz. Geri dönmek için uygulama menüsünden Hycli’yi açın.",
   "errors.work_in_progress": "Etkinlik bölümünde devam eden işleri tamamlayın veya iptal edin, ardından yeniden çıkın.",
-  "errors.shutting_down": "Hycli kapatılıyor."
+  "errors.shutting_down": "Hycli kapatılıyor.",
+  "errors.pagination_expired": "Bu sayfa imlecinin süresi doldu veya istekle artık eşleşmiyor. İlk sayfadan yeniden başlayın.",
+  "errors.pagination_invalid": "Site desteklenmeyen bir sayfa imleci döndürdü. En az 8 karakter, en fazla 4096 bayt gerekir; kimlik bilgileri veya kısa sayfa numaraları kabul edilmez."
 }

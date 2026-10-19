@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli è stato chiuso",
   "settings.stoppedHint": "Puoi chiudere questa scheda. Apri Hycli dal menu delle applicazioni per tornare.",
   "errors.work_in_progress": "Completa o annulla le attività in corso in Attività, poi esci di nuovo.",
-  "errors.shutting_down": "Hycli si sta chiudendo."
+  "errors.shutting_down": "Hycli si sta chiudendo.",
+  "errors.pagination_expired": "Il cursore di pagina è scaduto o non corrisponde più alla richiesta. Ricomincia dalla prima pagina.",
+  "errors.pagination_invalid": "Il sito ha restituito un cursore non supportato. Sono richiesti almeno 8 caratteri e al massimo 4096 byte, senza credenziali o numeri di pagina brevi."
 }

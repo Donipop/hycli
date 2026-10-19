@@ -722,6 +722,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
     }
     let mut names = std::collections::HashSet::new();
     for op in &sp.operations {
+        crate::spec::validate_pagination(sp, op)?;
         if !["", "http", "browser-fetch", "browser"].contains(&op.transport.as_str())
             || (op.transport == "browser"
                 && (op.method != "GET"

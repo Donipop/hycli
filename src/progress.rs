@@ -296,7 +296,7 @@ impl Runtime {
                     work.status = "completed".into();
                     work.phase = "ready".into();
                     work.progress_done = work.progress_total;
-                    work.result = value.mapped.clone().or_else(|| value.body.clone());
+                    work.result = value.clone().output();
                     work.note("completed", "", 0, "");
                 }
                 Ok(_) => {

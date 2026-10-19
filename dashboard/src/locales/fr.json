@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli est fermé",
   "settings.stoppedHint": "Vous pouvez fermer cet onglet. Ouvrez Hycli depuis le menu des applications pour revenir.",
   "errors.work_in_progress": "Terminez ou annulez les tâches en cours dans Activité, puis quittez à nouveau.",
-  "errors.shutting_down": "Hycli est en cours de fermeture."
+  "errors.shutting_down": "Hycli est en cours de fermeture.",
+  "errors.pagination_expired": "Ce curseur de page a expiré ou ne correspond plus à cette requête. Recommencez à la première page.",
+  "errors.pagination_invalid": "Le site a renvoyé un curseur non pris en charge. Il faut au moins 8 caractères et au plus 4096 octets, sans identifiants ni numéros de page courts."
 }

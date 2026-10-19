@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli 已退出",
   "settings.stoppedHint": "可以关闭此标签页了。要继续使用，请从应用菜单打开 Hycli。",
   "errors.work_in_progress": "请在活动中完成或取消正在进行的任务，然后再次退出。",
-  "errors.shutting_down": "Hycli 正在退出。"
+  "errors.shutting_down": "Hycli 正在退出。",
+  "errors.pagination_expired": "分页游标已过期或不再匹配此请求。请从第一页重新开始。",
+  "errors.pagination_invalid": "网站返回了不支持的分页游标。至少需要8个字符，最多4096字节，不接受凭据或短页码。"
 }

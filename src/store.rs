@@ -203,7 +203,11 @@ impl Store {
         &self.protection
     }
     pub fn keys(&self) -> Vec<String> {
-        self.data.keys().cloned().collect()
+        self.data
+            .keys()
+            .filter(|key| !key.starts_with("@pagination/"))
+            .cloned()
+            .collect()
     }
     pub fn set(&mut self, site: &str, key: &str, value: &str) -> AppResult<()> {
         if site.is_empty() || key.is_empty() || value.len() > 2 * 1024 * 1024 {
@@ -212,13 +216,13 @@ impl Store {
         let _lock = util::file_lock(&self.path.with_extension("vault-lock"), false)?;
         self.reload()?;
         let name = format!("{site}/{key}");
-        let previous = self.data.insert(name.clone(), value.into());
+        let snapshot = self.data.clone();
+        if self.data.get(&name).map(String::as_str) != Some(value) {
+            self.invalidate_pagination(site, key);
+        }
+        self.data.insert(name.clone(), value.into());
         if let Err(error) = self.save() {
-            if let Some(old) = previous {
-                self.data.insert(name, old);
-            } else {
-                self.data.remove(&name);
-            }
+            self.data = snapshot;
             return Err(error);
         }
         Ok(())
@@ -227,15 +231,58 @@ impl Store {
         let _lock = util::file_lock(&self.path.with_extension("vault-lock"), false)?;
         self.reload()?;
         let name = format!("{site}/{key}");
-        let previous = self.data.remove(&name);
+        let snapshot = self.data.clone();
+        if self.data.contains_key(&name) {
+            self.invalidate_pagination(site, key);
+        }
+        self.data.remove(&name);
         if let Err(error) = self.save() {
-            if let Some(old) = previous {
-                self.data.insert(name, old);
-            }
+            self.data = snapshot;
             return Err(error);
         }
         Ok(())
     }
+    fn invalidate_pagination(&mut self, site: &str, key: &str) {
+        self.data.retain(|name, value| {
+            if !name.starts_with("@pagination/") {
+                return true;
+            }
+            let Ok(record) = serde_json::from_str::<serde_json::Value>(value) else {
+                return false;
+            };
+            if site == "accounts" {
+                record["account"].as_str() != Some(key)
+            } else {
+                record["site"].as_str() != Some(site)
+            }
+        });
+    }
+    /// One cross-process transaction for private continuation records and pruning.
+    pub(crate) fn pagination_transaction<T>(
+        &mut self,
+        f: impl FnOnce(&mut BTreeMap<String, String>) -> AppResult<T>,
+    ) -> AppResult<T> {
+        let _lock = util::file_lock(&self.path.with_extension("vault-lock"), false)?;
+        self.reload()?;
+        let previous = self.data.clone();
+        let mut entries: BTreeMap<_, _> = self
+            .data
+            .iter()
+            .filter(|(k, _)| k.starts_with("@pagination/"))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let result = f(&mut entries)?;
+        self.data.retain(|k, _| !k.starts_with("@pagination/"));
+        self.data.extend(entries);
+        if self.data != previous {
+            if let Err(error) = self.save() {
+                self.data = previous;
+                return Err(error);
+            }
+        }
+        Ok(result)
+    }
+
     fn save(&mut self) -> AppResult<()> {
         self.prepare_key();
         let file = if let Some(key) = &self.key {

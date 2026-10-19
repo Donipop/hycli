@@ -451,7 +451,7 @@ pub(super) async fn site_run(
     let (result, _) = runner(&deps)?
         .run_op_for_account(&sp, op, &args.inputs, args.account.as_deref())
         .await?;
-    emit.data(&result.mapped.or(result.body));
+    emit.data(&result.output());
     Ok(())
 }
 

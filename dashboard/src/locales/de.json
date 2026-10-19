@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli wurde beendet",
   "settings.stoppedHint": "Sie können diesen Tab schließen. Öffnen Sie Hycli im Anwendungsmenü, um fortzufahren.",
   "errors.work_in_progress": "Schließen Sie laufende Aufgaben unter Aktivitäten ab oder brechen Sie sie ab. Beenden Sie Hycli dann erneut.",
-  "errors.shutting_down": "Hycli wird beendet."
+  "errors.shutting_down": "Hycli wird beendet.",
+  "errors.pagination_expired": "Dieser Seitencursor ist abgelaufen oder passt nicht mehr zur Anfrage. Beginne erneut auf der ersten Seite.",
+  "errors.pagination_invalid": "Die Website gab einen nicht unterstützten Seitencursor zurück. Er muss mindestens 8 Zeichen und höchstens 4096 Bytes haben, ohne Zugangsdaten oder kurze Seitenzahlen."
 }

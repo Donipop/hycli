@@ -285,7 +285,35 @@ impl Network {
         })
     }
     pub async fn fetch(&self, input: Request) -> AppResult<Response> {
-        let initial = validate_url(&input.url)?;
+        self.fetch_inner(input, None).await
+    }
+    /// The continuation key/value is supplied only by the private runtime resolver.
+    pub(crate) async fn fetch_paginated(
+        &self,
+        mut input: Request,
+        continuation: Option<(&str, &str)>,
+    ) -> AppResult<Response> {
+        if input.method != "GET" || !input.read_only {
+            return Err(AppError::api("unsafe_target", 400));
+        }
+        input.follow_redirects = false;
+        self.fetch_inner(input, continuation).await
+    }
+    async fn fetch_inner(
+        &self,
+        input: Request,
+        continuation: Option<(&str, &str)>,
+    ) -> AppResult<Response> {
+        let mut initial = validate_url(&input.url)?;
+        if let Some((key, value)) = continuation {
+            if initial.query_pairs().any(|(name, _)| name == key) {
+                return Err(AppError::api("data_invalid", 400));
+            }
+            initial.query_pairs_mut().append_pair(key, value);
+            if initial.as_str().len() > 8192 {
+                return Err(AppError::api("bad_url", 400));
+            }
+        }
         let mut target = initial.clone();
         let mut redirects = 0;
         let mut retries = 0;
@@ -572,7 +600,11 @@ impl Network {
                 continue;
             }
             return Ok(Response {
-                url: target.to_string(),
+                url: if continuation.is_some() {
+                    input.url.clone()
+                } else {
+                    target.to_string()
+                },
                 status,
                 headers,
                 bytes,
@@ -748,6 +780,56 @@ pub fn retry_after(headers: &[(String, String)]) -> Option<Duration> {
 #[cfg(test)]
 mod website_input_tests {
     use super::*;
+    #[tokio::test]
+    async fn private_query_timeout_does_not_expose_wire_url() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/pagination-tests")
+            .join(util::id());
+        std::fs::create_dir_all(&root).unwrap();
+        let policy = Arc::new(Policy::open(&root.join("policy.db")).unwrap());
+        let network = Network::new(policy, true);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/items", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    drop(stream);
+                });
+            }
+        });
+        let result = network
+            .fetch_paginated(
+                Request {
+                    url,
+                    method: "GET".into(),
+                    headers: vec![],
+                    body: None,
+                    account_id: String::new(),
+                    limit: 1024,
+                    timeout: Duration::from_millis(30),
+                    read_only: true,
+                    follow_redirects: true,
+                    tls_profile: String::new(),
+                },
+                Some(("pageToken", "private-timeout-cursor")),
+            )
+            .await;
+        let error = result.err().expect("slow response must time out");
+        assert_eq!(error.public_code, "timeout");
+        assert!(!format!("{error:?}").contains("private-timeout-cursor"));
+        for entry in std::fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                assert!(
+                    !String::from_utf8_lossy(&std::fs::read(path).unwrap())
+                        .contains("private-timeout-cursor")
+                );
+            }
+        }
+        server.abort();
+    }
     #[test]
     fn website_input_normalizes_domains_without_weakening_request_validation() {
         assert_eq!(

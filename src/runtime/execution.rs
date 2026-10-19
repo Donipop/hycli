@@ -29,7 +29,11 @@ impl Runtime {
         {
             return Err(AppError::api("bad_request", 400));
         }
-        let (url, _) = sp.build_request(op, &inputs)?;
+        let mut wire_inputs = inputs.clone();
+        if let Some(p) = &op.pagination {
+            wire_inputs.remove(&p.input);
+        }
+        let (url, _) = sp.build_request(op, &wire_inputs)?;
         let explicit_account = account.is_some_and(|value| !value.is_empty());
         let mut account = match account {
             Some(value) => value.to_owned(),
@@ -51,15 +55,18 @@ impl Runtime {
                 account.clear();
             }
         }
-        let (headers, _) = self.headers(sp, op, &url, &account)?;
-        Ok(ExecutionRequest {
+        let (headers, secrets) = self.headers(sp, op, &url, &account)?;
+        let request = ExecutionRequest {
             site_id: sp.site.name.clone(),
             action_id: op.name.clone(),
             account_id: account,
             inputs,
             spec_hash: Self::spec_hash(sp)?,
             credential_hash: util::hash(&serde_json::to_vec(&headers)?),
-        })
+        };
+        // Validate opaque capability before any dashboard job persists its inputs.
+        self.resolve_cursor(&request, op, &url, &secrets)?;
+        Ok(request)
     }
     /// Websites start with writes off until enabled once for that CLI (`hycli writes <site> allow`, MCP `hycli_writes`, or dashboard toggle).
     pub fn ensure_writes(&self, site: &str) -> AppResult<()> {
@@ -227,12 +234,25 @@ impl Runtime {
             Some(&request.account_id),
         )?;
         let mut effect = policy::operation_effect(op, &request.inputs);
-        let (mut url, mut body) = sp.build_request(op, &request.inputs)?;
+        let mut wire_inputs = request.inputs.clone();
+        if let Some(p) = &op.pagination {
+            wire_inputs.remove(&p.input);
+        }
+        let (mut url, mut body) = sp.build_request(op, &wire_inputs)?;
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
         let (mut headers, mut secrets) = self.headers(sp, op, &url, &request.account_id)?;
         checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
+        let cursor = self.resolve_cursor(&checked, op, &url, &secrets)?;
+        if let Some(value) = &cursor {
+            let mut semantic_inputs = wire_inputs.clone();
+            semantic_inputs.insert(op.pagination.as_ref().unwrap().query.clone(), value.clone());
+            if policy::operation_effect(op, &semantic_inputs) != Effect::Read {
+                return Err(AppError::api("unsafe_target", 400));
+            }
+            secrets.push(value.clone());
+        }
         if effect != Effect::Read || approval.is_some() {
             if op.effect == Effect::Read && approval.is_none() {
                 return Err(AppError::api("approval_required", 409));
@@ -319,7 +339,11 @@ impl Runtime {
                         .flatten()
                         .as_deref()
                         == Some("browser-fetch")));
-        let response = if op.transport == "browser" {
+        let response = if let Some(p) = &op.pagination {
+            self.network
+                .fetch_paginated(req_input, cursor.as_deref().map(|v| (p.query.as_str(), v)))
+                .await
+        } else if op.transport == "browser" {
             let credential = if request.account_id.is_empty() {
                 crate::accounts::Credential {
                     origin: req_origin,
@@ -414,18 +438,33 @@ impl Runtime {
             .and_then(|extraction| {
                 extraction.extract(&String::from_utf8_lossy(&response.bytes), &response.url)
             });
-        let raw = extracted.or(parsed_json).unwrap_or_else(
+        let mut raw = extracted.or(parsed_json).unwrap_or_else(
             || json!({"text":visible_text(&String::from_utf8_lossy(&response.bytes))}),
         );
+        let mut private_cursors = Vec::new();
+        if let Some(value) = &cursor {
+            private_cursors.push(value.clone());
+        }
+        if let Some(value) = op
+            .pagination
+            .as_ref()
+            .and_then(|p| raw.pointer(&p.next))
+            .and_then(Value::as_str)
+        {
+            private_cursors.push(value.into());
+        }
+        let next_cursor =
+            self.capture_cursor(&checked, op, &url, &mut raw, &mut secrets, matches_expected)?;
+        super::pagination::scrub(&mut raw, &private_cursors)?;
+        secrets.extend(private_cursors.iter().cloned());
         let clean = sanitized(raw.clone(), &secrets);
         let mapped = if op.model.is_empty() {
             None
         } else {
-            let model_bytes = serde_json::to_vec(&raw).unwrap_or_else(|_| response.bytes.clone());
-            Some(sanitized(
-                sp.apply_model(&op.model, &model_bytes)?,
-                &secrets,
-            ))
+            let model_bytes = serde_json::to_vec(&raw)?;
+            let mut mapped = sp.apply_model(&op.model, &model_bytes)?;
+            super::pagination::scrub(&mut mapped, &private_cursors)?;
+            Some(sanitized(mapped, &secrets))
         };
         self.state.update(|d| {
             if installed {
@@ -458,6 +497,8 @@ impl Runtime {
         }
         Ok((
             OpResult {
+                paginated: op.pagination.is_some(),
+                next_cursor,
                 site: sp.site.name.clone(),
                 op: request.action_id,
                 status: response.status,

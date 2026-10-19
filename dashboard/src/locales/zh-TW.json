@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli 已結束",
   "settings.stoppedHint": "可以關閉此分頁了。要繼續使用，請從應用程式選單開啟 Hycli。",
   "errors.work_in_progress": "請在活動中完成或取消進行中的工作，然後再次結束。",
-  "errors.shutting_down": "Hycli 正在結束。"
+  "errors.shutting_down": "Hycli 正在結束。",
+  "errors.pagination_expired": "分頁游標已過期或不再符合此請求。請從第一頁重新開始。",
+  "errors.pagination_invalid": "網站傳回不支援的分頁游標。至少需要8個字元，最多4096位元組，不接受憑證或短頁碼。"
 }

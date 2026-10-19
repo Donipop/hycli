@@ -339,7 +339,7 @@ impl Runtime {
                 .execute_for_job(request, approval.as_deref(), Some(&job_id))
                 .await?;
             result.ensure_success()?;
-            Ok(result.mapped.or(result.body))
+            Ok(result.output())
         })
     }
 
