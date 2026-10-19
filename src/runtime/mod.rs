@@ -3,6 +3,7 @@ mod accounts;
 mod execution;
 mod preflight;
 mod recon;
+mod session;
 mod transport;
 mod views;
 

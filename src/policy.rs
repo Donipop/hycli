@@ -914,3 +914,59 @@ pub fn safe_read_url(url: &url::Url) -> bool {
                     && dangerous_intent(&value))
         })
 }
+
+/// Strict URL semantics for manual session diagnostics, including intercepted browser GETs.
+/// Opaque persisted GraphQL operations need a separate, evidenced execution contract.
+pub(crate) fn safe_session_read_url(url: &url::Url) -> bool {
+    if !safe_read_url(url) {
+        return false;
+    }
+    let mut args = BTreeMap::new();
+    for (key, value) in url.query_pairs() {
+        if args.insert(key.into_owned(), value.into_owned()).is_some() {
+            return false;
+        }
+    }
+    let path = url.path().to_ascii_lowercase();
+    let graphql = path.contains("graphql")
+        || path.ends_with("/gql")
+        || args.keys().any(|key| {
+            matches!(
+                key.to_ascii_lowercase().as_str(),
+                "operationname" | "queryid" | "extensions"
+            )
+        });
+    fn graphql_envelope(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
+                matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "query" | "operationname" | "queryid" | "extensions" | "persistedquery"
+                ) || graphql_envelope(value)
+            }),
+            serde_json::Value::Array(values) => values.iter().any(graphql_envelope),
+            _ => false,
+        }
+    }
+    let visible_document = args
+        .get("query")
+        .is_some_and(|query| graphql_parser::parse_query::<&str>(query).is_ok());
+    if (graphql && !visible_document)
+        || args.values().any(|value| {
+            serde_json::from_str::<serde_json::Value>(value)
+                .ok()
+                .is_some_and(|value| graphql_envelope(&value))
+        })
+    {
+        return false;
+    }
+    let operation = Operation {
+        name: "session-diagnostic".into(),
+        method: "GET".into(),
+        path: url.path().into(),
+        effect: Effect::Read,
+        evidence: "explicit diagnostic GET".into(),
+        ..Default::default()
+    };
+    operation_effect(&operation, &args) == Effect::Read
+}

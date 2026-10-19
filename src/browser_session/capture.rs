@@ -72,12 +72,29 @@ pub async fn capture(
     entry: &str,
     allow_local: bool,
 ) -> AppResult<Capture> {
-    if let Some(cdp_url) = discover_live_cdp_endpoint(credential) {
+    capture_scoped(credential, entry, allow_local, false).await
+}
+
+pub(crate) async fn capture_session_diagnostic(
+    account: &Credential,
+    entry: &str,
+    allow_local: bool,
+) -> AppResult<Capture> {
+    capture_scoped(account, entry, allow_local, true).await
+}
+
+async fn capture_scoped(
+    account: &Credential,
+    entry: &str,
+    allow_local: bool,
+    diagnostic: bool,
+) -> AppResult<Capture> {
+    if !diagnostic && let Some(cdp_url) = discover_live_cdp_endpoint(account) {
         if let Ok(Ok((browser, mut handler))) =
             tokio::time::timeout(Duration::from_secs(3), Browser::connect(cdp_url)).await
         {
             let url = crate::net::validate_url(entry)?;
-            let cred_origin = crate::net::validate_url(&credential.origin)?;
+            let cred_origin = crate::net::validate_url(&account.origin)?;
             if !crate::net::same_site_origin(&url, &cred_origin) || !navigation_safe(&url) {
                 return Err(AppError::api("unsafe_target", 400));
             }
@@ -85,7 +102,7 @@ pub async fn capture(
             let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
             let result = tokio::time::timeout(
                 Duration::from_secs(35),
-                observe(&browser, credential, entry, allow_local),
+                observe(&browser, account, entry, allow_local, diagnostic),
             )
             .await
             .map_err(unavailable)
@@ -104,7 +121,7 @@ pub async fn capture(
         .iter()
         .find(|b| b.protocol == "chromium-cdp")
         .ok_or_else(|| AppError::api("browser_unavailable", 422))?;
-    capture_with_engine(credential, entry, allow_local, engine).await
+    capture_with_engine_scoped(account, entry, allow_local, engine, diagnostic).await
 }
 
 async fn run_capture_with_mode(
@@ -113,6 +130,7 @@ async fn run_capture_with_mode(
     allow_local: bool,
     engine: &crate::environment::BrowserEngine,
     headed: bool,
+    diagnostic: bool,
 ) -> AppResult<Capture> {
     let (profile_dir, _profile_lock, _snapshot) =
         acquire_profile_dir(&credential.origin).map_err(unavailable)?;
@@ -127,7 +145,7 @@ async fn run_capture_with_mode(
     let drive = tokio::spawn(async move { while handler.next().await.is_some() {} });
     let result = tokio::time::timeout(
         Duration::from_secs(35),
-        observe(&browser, credential, entry, allow_local),
+        observe(&browser, credential, entry, allow_local, diagnostic),
     )
     .await
     .map_err(unavailable)
@@ -143,8 +161,18 @@ pub async fn capture_with_engine(
     allow_local: bool,
     engine: &crate::environment::BrowserEngine,
 ) -> AppResult<Capture> {
+    capture_with_engine_scoped(credential, entry, allow_local, engine, false).await
+}
+
+async fn capture_with_engine_scoped(
+    account: &Credential,
+    entry: &str,
+    allow_local: bool,
+    engine: &crate::environment::BrowserEngine,
+    diagnostic: bool,
+) -> AppResult<Capture> {
     let url = crate::net::validate_url(entry)?;
-    let cred_origin = crate::net::validate_url(&credential.origin)?;
+    let cred_origin = crate::net::validate_url(&account.origin)?;
     if !crate::net::same_site_origin(&url, &cred_origin) || !navigation_safe(&url) {
         return Err(AppError::api("unsafe_target", 400));
     }
@@ -153,10 +181,18 @@ pub async fn capture_with_engine(
         return Err(AppError::api("browser_unavailable", 422));
     }
     let force_headed = std::env::var_os("HYCLI_HEADED").is_some();
-    let first = run_capture_with_mode(credential, entry, allow_local, engine, force_headed).await?;
+    let first = run_capture_with_mode(
+        account,
+        entry,
+        allow_local,
+        engine,
+        force_headed,
+        diagnostic,
+    )
+    .await?;
     if !force_headed && capture_needs_headed_escalation(&first) && can_run_headed() {
         if let Ok(escalated) =
-            run_capture_with_mode(credential, entry, allow_local, engine, true).await
+            run_capture_with_mode(account, entry, allow_local, engine, true, diagnostic).await
         {
             if !capture_needs_headed_escalation(&escalated)
                 || escalated.observations.len() > first.observations.len()
@@ -235,6 +271,7 @@ async fn observe(
     credential: &Credential,
     entry: &str,
     allow_local: bool,
+    diagnostic: bool,
 ) -> AppResult<Capture> {
     let page = browser.new_page("about:blank").await.map_err(unavailable)?;
     for cookie in &credential.cookies {
@@ -305,6 +342,10 @@ async fn observe(
                                 && same
                                 && navigation_safe(url))
                     }) && is_safe_method;
+                    if diagnostic {
+                        permitted &= ["GET","HEAD","OPTIONS"].contains(&method.as_str())
+                            && parsed.as_ref().is_some_and(crate::policy::safe_session_read_url);
+                    }
                     if let Some(url) = &parsed {
                         let origin = url.origin().ascii_serialization();
                         let public = if let Some(public) = checked_origins.get(&origin) { *public } else {

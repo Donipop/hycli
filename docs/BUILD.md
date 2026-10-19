@@ -57,6 +57,40 @@ For websites, Hycli inventories the current environment and gives the AI scoped 
 
 The browser companion remains an optional fallback for browsers whose protected sign-ins cannot be read locally. Companion archives and setup instructions are available in **Accounts**. Store publication/signing is separate from local unpacked or temporary installation.
 
+### Verify a browser session from the CLI
+
+`hycli accounts` still lists saved accounts. When automatic current-account discovery is insufficient, the CLI can inspect and verify an evidence-backed connection without an AI preparation loop:
+
+```sh
+hycli accounts inspect ACCOUNT_ID
+hycli accounts observe ACCOUNT_ID https://website.example/app --browser
+hycli accounts observe ACCOUNT_ID https://website.example/current-context
+hycli accounts verify ACCOUNT_ID --recipe connection.json
+hycli accounts refresh ACCOUNT_ID
+```
+
+Inspection and observation return key names, request shapes and response types, never cookies, authentication headers or private response values. Known credential values are also redacted from metadata and recipe references. Identity fields that echo those values are rejected before account metadata is saved. The optional browser observation uses a private browser instance and retains captured authentication headers in the local vault; it does not attach to a live browser profile. Observation alone does not verify identity. Capturing changed authentication headers clears the previous verified identity until the new session is verified. The JSON connection recipe uses the same `identity_url`, local `headers` references, `identity` or `identity_html` mapping, and `evidence` fields used during preparation; it must not contain secret values. Verification requires a GET path already observed for this account's website, enforces its credential origin and read-only URL policy, and rejects identities also returned without authentication. Use an actual current-account response, not a public profile. A failed verification preserves the previously verified recipe. Refresh reuses that recipe with the same single-request verification and anonymous baseline; an expired or credential-echo identity is not reported as verified.
+
+For a JSON current-account endpoint, `connection.json` can start with:
+
+```json
+{
+  "identity_url": "https://website.example/current-context",
+  "identity": {"user_id": "/id", "name": "/name"},
+  "evidence": "observed_browser_request"
+}
+```
+
+If the endpoint requires an authentication header, add a `headers` entry such as `{"header":"X-Csrf-Token","source":"cookie","key":"csrf","prefix":""}` using names returned by inspection. Header rules may reference `cookie`, `local_storage` or `captured_header` sources; copy key names, never their values. HTTP observation makes one bounded request and does not follow redirects or automatically start a browser. Browser diagnostics intercept every outgoing request: only safe GET/HEAD/OPTIONS requests are sent, with the same duplicate-query, nested-intent and GraphQL checks as the initial URL. GraphQL GETs require a visible top-level query document; opaque persisted operations and nested GraphQL envelopes are rejected. This is a diagnostic surface; useful data execution remains in the generated website actions.
+
+Browser observation needs an available local Chromium engine. `HYCLI_BROWSER_EXECUTABLE` can select its executable for that invocation. Normal observation uses bounded HTTP and does not require a browser engine.
+
+The optional browser session CLI contract can be tested against a synthetic local website with an installed Chromium engine:
+
+```sh
+HYCLI_BROWSER_EXECUTABLE=/path/to/chromium cargo test --locked --test cli session_cli_browser_observation_keeps_headers_in_the_vault -- --ignored
+```
+
 ## Reproducible verification
 
 ```sh

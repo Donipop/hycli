@@ -159,6 +159,12 @@ impl ConnectionRecipe {
     }
 }
 
+/// Account metadata must never become a plaintext copy of a credential echo.
+pub(crate) fn identity_is_safe(identity: &Identity, credential: &Credential) -> bool {
+    let original = json!([identity.user_id, identity.email, identity.name]);
+    crate::runtime::sanitized(original.clone(), &credential.session_redaction_values()) == original
+}
+
 /// Keys and type information only; no leaf values, lengths, hashes or token fragments.
 pub(crate) fn shape(value: &Value, depth: usize) -> Value {
     if depth > 4 {
@@ -248,6 +254,8 @@ impl Runtime {
         let mut credential = self.credential(account)?;
         let resolved = recipe.resolve_headers(&credential)?;
         credential.headers.extend(resolved.clone());
+        // Classify explicit sources from this candidate, without persisting it before verification.
+        credential.recipe = Some(recipe.clone());
         self.policy
             .resume_auth(&format!("{}|{account}", credential.origin))?;
         let response = self
@@ -278,6 +286,9 @@ impl Runtime {
         let identity = recipe
             .identity_from_response(&response)
             .ok_or_else(|| AppError::api("identity_unavailable", 422))?;
+        if !identity_is_safe(&identity, &credential) {
+            return Err(AppError::api("identity_unavailable", 422));
+        }
         // Do not label an arbitrary public profile endpoint as the signed-in account.
         let baseline_scope = format!("{account}:identity-baseline");
         // An unauthenticated 401 is the expected baseline result, not a lost user session.

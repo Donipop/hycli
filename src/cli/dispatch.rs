@@ -1,6 +1,6 @@
 use super::{
     actions,
-    args::{Cmd, Deps, JobsCmd, KbCmd},
+    args::{AccountsCmd, Cmd, Deps, JobsCmd, KbCmd},
     site_cmd::{
         auth_cmd, capture_run, check_run, find_spec, hycli_sites, job_outcome, site_run, spec_cmd,
         try_run, wait_preparation,
@@ -181,7 +181,10 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             }));
             Ok(())
         }
-        Cmd::Accounts { site } => {
+        Cmd::Accounts { site, cmd } => {
+            if let Some(cmd) = cmd {
+                return accounts_cmd(&deps, cmd, site.as_deref(), emit).await;
+            }
             let accounts: Vec<_> = runner(&deps)?
                 .state
                 .accounts()?
@@ -421,6 +424,58 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
         Cmd::Check { site } => check_run(deps, site, emit).await,
         Cmd::Site(rest) => site_run(deps, rest, emit).await,
     }
+}
+
+async fn accounts_cmd(
+    deps: &Deps,
+    cmd: AccountsCmd,
+    site: Option<&str>,
+    emit: &Emitter,
+) -> Result<(), AppError> {
+    let core = runner(deps)?;
+    if let Some(site) = site {
+        let id = match &cmd {
+            AccountsCmd::Inspect { account }
+            | AccountsCmd::Observe { account, .. }
+            | AccountsCmd::Verify { account, .. }
+            | AccountsCmd::Refresh { account } => account,
+        };
+        if !core
+            .state
+            .account(id)?
+            .is_some_and(|account| account.site_id == site)
+        {
+            return Err(AppError::api("not_found", 404));
+        }
+    }
+    match cmd {
+        AccountsCmd::Inspect { account } => {
+            emit.data(&core.inspect_account_session(&account)?);
+        }
+        AccountsCmd::Observe {
+            account,
+            url,
+            browser,
+        } => {
+            emit.data(
+                &core
+                    .observe_account_session(&account, &url, browser)
+                    .await?,
+            );
+        }
+        AccountsCmd::Verify { account, recipe } => {
+            let recipe: crate::session_recipe::ConnectionRecipe = serde_json::from_slice(
+                &crate::util::read_bounded(std::path::Path::new(&recipe), 128 * 1024)
+                    .map_err(|_| AppError::api("data_invalid", 400))?,
+            )
+            .map_err(|_| AppError::api("data_invalid", 400))?;
+            emit.data(&core.verify_observed_session(&account, &recipe).await?);
+        }
+        AccountsCmd::Refresh { account } => {
+            emit.data(&core.refresh_account_session(&account).await?)
+        }
+    }
+    Ok(())
 }
 
 async fn kb_cmd(deps: Deps, cmd: KbCmd, emit: &Emitter) -> Result<(), AppError> {
