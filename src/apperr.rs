@@ -69,6 +69,8 @@ impl AppError {
                 "ai_request_invalid" => "Check the selected model and AI connection settings in `hycli open`; the provider rejected the request.",
                 "ai_billing_error" => "Check billing settings and spending limits in the AI provider account before retrying.",
                 "ai_refused" => "The AI provider declined this request. Retrying will not help; choose another model or AI connection in `hycli open`.",
+                "pagination_invalid" => "The website returned an unsupported continuation. Use an opaque cursor of at least 8 characters, at most 4096 bytes, and never an authentication credential. Short page numbers are not supported by private pagination.",
+                "pagination_expired" => "Start this read again without its cursor, then use the returned next_cursor for the same account and inputs within 15 minutes.",
                 "query_failed" => "The website reported query errors. Check the inputs and the action definition before retrying.",
                 "response_mismatch" => "The website returned a different response than this action expects. Reconnect if signed out, or prepare the website again.",
                 "site_rate_limited" | "rate_limited" => "Wait for the website's request limit to clear before retrying.",

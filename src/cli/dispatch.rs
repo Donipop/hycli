@@ -248,7 +248,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             let (result, _) = runner(&deps)?
                 .run_op_for_account(&sp, &action, &args, account.as_deref())
                 .await?;
-            emit.data(&result.mapped.or(result.body));
+            emit.data(&result.output());
             Ok(())
         }
         Cmd::Writes { site, mode } => {

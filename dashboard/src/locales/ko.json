@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli가 종료되었습니다",
   "settings.stoppedHint": "이 탭을 닫아도 됩니다. 다시 사용하려면 앱 메뉴에서 Hycli를 여세요.",
   "errors.work_in_progress": "활동에서 진행 중인 작업을 완료하거나 취소한 뒤 다시 종료해 주세요.",
-  "errors.shutting_down": "Hycli를 종료하는 중입니다."
+  "errors.shutting_down": "Hycli를 종료하는 중입니다.",
+  "errors.pagination_expired": "페이지 이동 번호표가 만료되었거나 요청과 일치하지 않습니다. 첫 페이지부터 다시 시작하세요.",
+  "errors.pagination_invalid": "웹사이트가 지원되지 않는 페이지 이동값을 반환했습니다. 8자 이상, 4096바이트 이하의 값만 지원하며 인증정보나 짧은 페이지 번호는 사용할 수 없습니다."
 }

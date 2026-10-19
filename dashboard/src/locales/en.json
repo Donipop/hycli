@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli has closed",
   "settings.stoppedHint": "You can close this tab. Open Hycli from your application menu to return.",
   "errors.work_in_progress": "Finish or cancel active work in Activity, then quit again.",
-  "errors.shutting_down": "Hycli is shutting down."
+  "errors.shutting_down": "Hycli is shutting down.",
+  "errors.pagination_expired": "This page cursor expired or no longer matches this request. Start again from the first page.",
+  "errors.pagination_invalid": "This website returned an unsupported page cursor. At least 8 characters and at most 4096 bytes are required; credentials and short page numbers are not accepted."
 }

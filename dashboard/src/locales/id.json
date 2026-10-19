@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli telah ditutup",
   "settings.stoppedHint": "Anda dapat menutup tab ini. Buka Hycli dari menu aplikasi untuk kembali.",
   "errors.work_in_progress": "Selesaikan atau batalkan pekerjaan yang sedang berjalan di Aktivitas, lalu keluar lagi.",
-  "errors.shutting_down": "Hycli sedang ditutup."
+  "errors.shutting_down": "Hycli sedang ditutup.",
+  "errors.pagination_expired": "Kursor halaman ini kedaluwarsa atau tidak lagi cocok dengan permintaan. Mulai lagi dari halaman pertama.",
+  "errors.pagination_invalid": "Situs mengembalikan kursor halaman yang tidak didukung. Minimal 8 karakter dan maksimal 4096 byte, tanpa kredensial atau nomor halaman pendek."
 }

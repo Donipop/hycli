@@ -313,6 +313,7 @@ pub fn draft_spec(
             )
         };
         let mut op = spec::Operation {
+            pagination: None,
             transport: String::new(),
             name,
             desc: format!(

@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli đã đóng",
   "settings.stoppedHint": "Bạn có thể đóng thẻ này. Mở Hycli từ menu ứng dụng để quay lại.",
   "errors.work_in_progress": "Hoàn tất hoặc hủy công việc đang chạy trong Hoạt động, rồi thoát lại.",
-  "errors.shutting_down": "Hycli đang đóng."
+  "errors.shutting_down": "Hycli đang đóng.",
+  "errors.pagination_expired": "Con trỏ trang đã hết hạn hoặc không còn khớp với yêu cầu. Hãy bắt đầu lại từ trang đầu tiên.",
+  "errors.pagination_invalid": "Trang web trả về con trỏ trang không được hỗ trợ. Cần ít nhất 8 ký tự và tối đa 4096 byte, không chấp nhận thông tin đăng nhập hoặc số trang ngắn."
 }

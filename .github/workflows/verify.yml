@@ -108,6 +108,8 @@ jobs:
           cargo fmt --all --check
           cargo test --all-targets --locked
           cargo build --locked --bin hycli --example dashboard_fixture
+      - name: Private pagination CLI and MCP
+        run: node scripts/test-pagination.mjs
       - name: Browser dependencies
         if: matrix.browser_tests
         working-directory: dashboard

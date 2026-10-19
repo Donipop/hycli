@@ -46,12 +46,13 @@ impl Spec {
                 });
             }
 
-            if self.spec_version != SPEC_VERSION && self.spec_version != 2 {
+            if self.spec_version != SPEC_VERSION && self.spec_version != 2 && self.spec_version != 3
+            {
                 add(
                     &mut out,
                     "spec_version",
-                    format!("supported: 1|2, got: {}", self.spec_version),
-                    "Set spec_version to 1 or 2",
+                    format!("supported: 1|2|3, got: {}", self.spec_version),
+                    "Set spec_version to 1, 2 or 3",
                 );
             }
             if self.site.name.is_empty() {

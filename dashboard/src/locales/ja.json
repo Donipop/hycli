@@ -514,5 +514,7 @@
   "settings.stopped": "Hycliを終了しました",
   "settings.stoppedHint": "このタブを閉じてかまいません。再開するにはアプリメニューからHycliを開いてください。",
   "errors.work_in_progress": "アクティビティで実行中の作業を完了またはキャンセルしてから、もう一度終了してください。",
-  "errors.shutting_down": "Hycliを終了しています。"
+  "errors.shutting_down": "Hycliを終了しています。",
+  "errors.pagination_expired": "ページカーソルの期限が切れたか、リクエストと一致しません。最初のページからやり直してください。",
+  "errors.pagination_invalid": "サイトが未対応のページカーソルを返しました。8文字以上4096バイト以下が必要で、認証情報や短いページ番号は使えません。"
 }

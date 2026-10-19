@@ -514,5 +514,7 @@
   "settings.stopped": "Hycli zostało zamknięte",
   "settings.stoppedHint": "Możesz zamknąć tę kartę. Aby wrócić, otwórz Hycli z menu aplikacji.",
   "errors.work_in_progress": "Zakończ lub anuluj trwające zadania w Aktywności, a następnie ponownie zamknij Hycli.",
-  "errors.shutting_down": "Hycli jest zamykane."
+  "errors.shutting_down": "Hycli jest zamykane.",
+  "errors.pagination_expired": "Ten kursor strony wygasł lub nie pasuje już do żądania. Zacznij ponownie od pierwszej strony.",
+  "errors.pagination_invalid": "Witryna zwróciła nieobsługiwany kursor strony. Wymagane jest co najmniej 8 znaków i najwyżej 4096 bajtów, bez danych logowania i krótkich numerów stron."
 }
