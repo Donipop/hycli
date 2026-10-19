@@ -74,6 +74,25 @@ pub(super) fn scrub(value: &mut Value, cursors: &[String]) -> AppResult<()> {
     }
     Ok(())
 }
+/// Match the final URL assembled by the network layer without exposing its cursor.
+pub(super) fn continuation_effect(
+    op: &Operation,
+    inputs: &BTreeMap<String, String>,
+    url: &str,
+    value: &str,
+) -> Effect {
+    let Some(pagination) = &op.pagination else {
+        return Effect::Unknown;
+    };
+    let Ok(mut url) = url::Url::parse(url) else {
+        return Effect::Unknown;
+    };
+    url.query_pairs_mut().append_pair(&pagination.query, value);
+    let mut inputs = inputs.clone();
+    inputs.remove(&pagination.input);
+    policy::rendered_request_effect(op, &inputs, url.as_str(), None)
+}
+
 fn binding(request: &ExecutionRequest, op: &Operation, url: &str) -> AppResult<String> {
     let mut inputs = request.inputs.clone();
     if let Some(p) = &op.pagination {
@@ -186,10 +205,7 @@ impl Runtime {
         if !safe_value(value, secrets) {
             return Err(AppError::api("pagination_invalid", 400));
         }
-        let mut semantic_inputs = request.inputs.clone();
-        semantic_inputs.remove(&p.input);
-        semantic_inputs.insert(p.query.clone(), value.into());
-        if policy::operation_effect(op, &semantic_inputs) != Effect::Read {
+        if continuation_effect(op, &request.inputs, url, value) != Effect::Read {
             return Err(invalid());
         }
         secrets.push(value.into());
@@ -231,6 +247,74 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rendered_continuation_protocol_selector_requires_review() {
+        let mut operation = op();
+        operation.pagination.as_mut().unwrap().query = "extensions".into();
+        let value = r#"{"persistedQuery":{"sha256Hash":"synthetic-reference"}}"#;
+        assert_eq!(
+            continuation_effect(
+                &operation,
+                &BTreeMap::new(),
+                "https://fixture.example.test/items",
+                value
+            ),
+            Effect::Unknown
+        );
+    }
+
+    #[test]
+    fn rendered_continuation_values_are_data_unless_the_field_selects_a_protocol() {
+        let mut operation = op();
+        let inputs = BTreeMap::from([("cursor".into(), "hc_synthetic-handle".into())]);
+        for value in [
+            "synthetic-page-token",
+            "mutation { sampleChange }",
+            r#"{"query":"mutation { sampleChange }"}"#,
+            r#"{"operation":"update"}"#,
+            r#"{"extensions":{"persistedQuery":{"sha256Hash":"synthetic-reference"}}}"#,
+        ] {
+            assert_eq!(
+                continuation_effect(
+                    &operation,
+                    &inputs,
+                    "https://fixture.example.test/items?limit=10",
+                    value
+                ),
+                Effect::Read
+            );
+        }
+        operation.pagination.as_mut().unwrap().query = "query".into();
+        assert_eq!(
+            continuation_effect(
+                &operation,
+                &inputs,
+                "https://fixture.example.test/items",
+                "query { items { id } }"
+            ),
+            Effect::Read
+        );
+        assert_eq!(
+            continuation_effect(
+                &operation,
+                &inputs,
+                "https://fixture.example.test/items",
+                "mutation { sampleChange }"
+            ),
+            Effect::Write
+        );
+        operation.pagination.as_mut().unwrap().query = "action".into();
+        assert_eq!(
+            continuation_effect(
+                &operation,
+                &inputs,
+                "https://fixture.example.test/items",
+                "update"
+            ),
+            Effect::Write
+        );
+    }
+
     fn core() -> std::sync::Arc<Runtime> {
         Runtime::open(
             &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

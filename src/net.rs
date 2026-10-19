@@ -36,6 +36,20 @@ pub struct Request {
     /// Compatibility metadata; requests always use the standard HTTP/TLS stack.
     pub tls_profile: String,
 }
+impl Request {
+    fn check_read_headers(&self) -> AppResult<()> {
+        if self.read_only
+            && crate::policy::request_headers_effect(
+                self.headers
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_str())),
+            ) != crate::policy::Effect::Read
+        {
+            return Err(AppError::api("approval_required", 409));
+        }
+        Ok(())
+    }
+}
 pub struct Response {
     pub url: String,
     pub status: u16,
@@ -130,6 +144,7 @@ impl Network {
         credential: &crate::accounts::Credential,
         input: &Request,
     ) -> AppResult<Response> {
+        input.check_read_headers()?;
         let initial = validate_url(&input.url)?;
         let origin_str = initial.origin().ascii_serialization();
         let strategy_key = Policy::strategy_key(
@@ -304,6 +319,7 @@ impl Network {
         input: Request,
         continuation: Option<(&str, &str)>,
     ) -> AppResult<Response> {
+        input.check_read_headers()?;
         let mut initial = validate_url(&input.url)?;
         if let Some((key, value)) = continuation {
             if initial.query_pairs().any(|(name, _)| name == key) {
@@ -780,6 +796,28 @@ pub fn retry_after(headers: &[(String, String)]) -> Option<Duration> {
 #[cfg(test)]
 mod website_input_tests {
     use super::*;
+    #[test]
+    fn read_headers_guard_is_pure_and_preserves_non_read_requests() {
+        let mut request = Request {
+            url: "https://fixture.example.test/items".into(),
+            method: "GET".into(),
+            headers: vec![("X-HTTP-Method-Override".into(), "synthetic-selector".into())],
+            body: None,
+            account_id: String::new(),
+            limit: 1024,
+            timeout: Duration::from_secs(1),
+            read_only: true,
+            follow_redirects: false,
+            tls_profile: String::new(),
+        };
+        let error = request.check_read_headers().unwrap_err();
+        assert_eq!(error.public_code, "approval_required");
+        request.read_only = false;
+        assert!(request.check_read_headers().is_ok());
+        request.read_only = true;
+        request.headers = vec![("Accept".into(), "application/json".into())];
+        assert!(request.check_read_headers().is_ok());
+    }
     #[tokio::test]
     async fn private_query_timeout_does_not_expose_wire_url() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

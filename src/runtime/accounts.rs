@@ -328,7 +328,8 @@ impl Runtime {
             tls_profile: "standard".into(),
         };
         let response = self.network.fetch(request.clone()).await?;
-        if response.status == 401 || response.status == 403 {
+        // A permission/challenge response does not prove this session signed out.
+        if response.status == 401 {
             self.invalidate_identity_if_current(id, &expected, true)?;
             return self
                 .state

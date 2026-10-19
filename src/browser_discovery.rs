@@ -27,6 +27,21 @@ struct ImportedSession {
     profile: BrowserProfile,
     cookies: Vec<crate::accounts::Cookie>,
     storage: crate::browser_storage::Storage,
+    complete: bool,
+}
+impl ImportedSession {
+    fn from_results(
+        profile: BrowserProfile,
+        cookies: Result<Vec<crate::accounts::Cookie>, ()>,
+        storage: Result<crate::browser_storage::Storage, ()>,
+    ) -> Self {
+        Self {
+            profile,
+            complete: cookies.is_ok() && storage.is_ok(),
+            cookies: cookies.unwrap_or_default(),
+            storage: storage.unwrap_or_default(),
+        }
+    }
 }
 struct ChromiumSnapshot(PathBuf);
 impl Drop for ChromiumSnapshot {
@@ -87,12 +102,14 @@ fn load_site_cookies(
     use rookie_cookies::{AppBoundPolicy, FromPathRequest};
     let db = if profile.browser == "Firefox" {
         profile.path.join("cookies.sqlite")
-    } else if profile.path.join("Network/Cookies").is_file() {
+    } else if crate::browser_storage::source_metadata(&profile.path.join("Network/Cookies"))?
+        .is_some_and(|meta| meta.is_file())
+    {
         profile.path.join("Network/Cookies")
     } else {
         profile.path.join("Cookies")
     };
-    if !db.is_file() {
+    if !crate::browser_storage::source_metadata(&db)?.is_some_and(|meta| meta.is_file()) {
         return Ok(vec![]);
     }
     let browser_id = match profile.browser.as_str() {
@@ -236,18 +253,54 @@ fn scan_site(
             profile.browser == "Firefox",
             &target.origin().ascii_serialization(),
         );
-        if cookies.is_err() && !storage.as_ref().is_ok_and(|s| !s.is_empty()) {
+        let session = ImportedSession::from_results(profile, cookies, storage);
+        if !session.complete {
             unavailable += 1;
         }
-        found.push(ImportedSession {
-            profile,
-            cookies: cookies.unwrap_or_default(),
-            storage: storage.unwrap_or_default(),
-        });
+        found.push(session);
     }
     (checked, unavailable, found)
 }
 impl Runtime {
+    /// A failed local read is not a logout. Keep the old snapshot whole rather
+    /// than mixing cookies and storage that may belong to different sign-ins.
+    fn replace_imported_account(&self, id: &str, session: &ImportedSession) -> AppResult<bool> {
+        if !session.complete {
+            return Ok(false);
+        }
+        let (credential, changed) = self.update_credential(id, |credential| {
+            let changed = serde_json::to_value(&credential.cookies)?
+                != serde_json::to_value(&session.cookies)?
+                || credential.local_storage != session.storage;
+            credential.cookies = session.cookies.clone();
+            credential.local_storage = session.storage.clone();
+            if changed {
+                credential.headers.clear();
+            }
+            Ok(changed)
+        })?;
+        self.state.update(|d| {
+            if let Some(account) = d.accounts.get_mut(id) {
+                account.cookie_count = credential.cookies.len();
+                account.status =
+                    if credential.cookies.is_empty() && credential.local_storage.is_empty() {
+                        "expired"
+                    } else {
+                        "connected"
+                    }
+                    .into();
+                if changed {
+                    account.verified_identity = false;
+                    account.label.clear();
+                    account.email.clear();
+                    account.user_id.clear();
+                    account.name.clear();
+                }
+            }
+            Ok(())
+        })?;
+        Ok(true)
+    }
     pub async fn find_browser_accounts(
         self: &std::sync::Arc<Self>,
         site_id: &str,
@@ -320,38 +373,9 @@ impl Runtime {
                 continue;
             }
             let id = if let Some(id) = existing {
-                let (credential, changed) = self.update_credential(&id, |credential| {
-                    let changed = serde_json::to_value(&credential.cookies)?
-                        != serde_json::to_value(&session.cookies)?
-                        || credential.local_storage != session.storage;
-                    credential.cookies = session.cookies;
-                    credential.local_storage = session.storage;
-                    if changed {
-                        credential.headers.clear();
-                    }
-                    Ok(changed)
-                })?;
-                self.state.update(|d| {
-                    if let Some(account) = d.accounts.get_mut(&id) {
-                        account.cookie_count = credential.cookies.len();
-                        account.status = if credential.cookies.is_empty()
-                            && credential.local_storage.is_empty()
-                        {
-                            "expired"
-                        } else {
-                            "connected"
-                        }
-                        .into();
-                        if changed {
-                            account.verified_identity = false;
-                            account.label.clear();
-                            account.email.clear();
-                            account.user_id.clear();
-                            account.name.clear();
-                        }
-                    }
-                    Ok(())
-                })?;
+                if !self.replace_imported_account(&id, &session)? {
+                    continue;
+                }
                 id
             } else {
                 // A not-yet-installed site has the same deterministic ID used by preparation.
@@ -610,6 +634,137 @@ fn identity_key(account: &crate::accounts::AccountView) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_reimport_read_failures_preserve_the_whole_verified_session() {
+        use crate::accounts::{Credential, Identity};
+        use serde_json::json;
+        let root = std::env::var_os("HYCLI_TEST_DATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cache/tests"))
+            .join(util::id());
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        let credential: Credential = serde_json::from_value(json!({
+            "origin":"https://example.com",
+            "source_profile":"synthetic-profile",
+            "cookies":[{"name":"sid","value":"synthetic-cookie","domain":"example.com","path":"/"}],
+            "local_storage":{"session":"synthetic-storage"},
+            "headers":{"authorization":"Bearer synthetic-header"}
+        }))
+        .unwrap();
+        let account = core
+            .register_browser_credential("fixture", credential.clone(), "Fixture", "Synthetic")
+            .unwrap();
+        core.publish_verified_identity(
+            &account.id,
+            &credential,
+            credential.clone(),
+            Identity {
+                user_id: "original-person".into(),
+                name: "Original Person".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let profile = || BrowserProfile {
+            id: "synthetic-profile".into(),
+            ..Default::default()
+        };
+        let snapshot = || {
+            let state = core.state.read().unwrap();
+            (
+                serde_json::to_value(core.credential(&account.id).unwrap()).unwrap(),
+                serde_json::to_value(&state).unwrap(),
+                state.identity_generations.clone(),
+                state.sites["fixture"].account_selection_revision.clone(),
+                serde_json::to_value(&state.sites["fixture"].account_binding).unwrap(),
+            )
+        };
+        let before = snapshot();
+        // Exercise real readers using isolated corrupt fixtures, never installed browsers.
+        for cookie_failure in [true, false] {
+            let path = root.join(if cookie_failure {
+                "broken-cookies"
+            } else {
+                "broken-storage"
+            });
+            let broken = if cookie_failure {
+                path.join("cookies.sqlite")
+            } else {
+                path.join("storage/default/https+++example.com/ls/data.sqlite")
+            };
+            std::fs::create_dir_all(broken.parent().unwrap()).unwrap();
+            std::fs::write(&broken, b"not a sqlite database").unwrap();
+            let (checked, unavailable, sessions) = scan_site(
+                &url::Url::parse("https://example.com/").unwrap(),
+                "",
+                Some(vec![BrowserProfile {
+                    path,
+                    browser: "Firefox".into(),
+                    ..profile()
+                }]),
+            );
+            assert_eq!((checked, unavailable, sessions.len()), (1, 1, 1));
+            let accepted = core
+                .replace_imported_account(&account.id, &sessions[0])
+                .unwrap();
+            assert_eq!(
+                snapshot(),
+                before,
+                "reader failure must preserve the existing session"
+            );
+            assert!(!accepted);
+        }
+        let different_storage =
+            std::collections::BTreeMap::from([("session".into(), "different-person".into())]);
+        for (cookies, storage) in [
+            (Err(()), Ok(Default::default())),
+            (Err(()), Ok(different_storage.clone())),
+            (Ok(credential.cookies.clone()), Err(())),
+            (Ok(vec![]), Err(())),
+            (Err(()), Err(())),
+        ] {
+            let imported = ImportedSession::from_results(profile(), cookies, storage);
+            assert!(!imported.complete);
+            let accepted = core
+                .replace_imported_account(&account.id, &imported)
+                .unwrap();
+            assert_eq!(
+                snapshot(),
+                before,
+                "local read failure must not replace any part of the session"
+            );
+            assert!(
+                !accepted,
+                "failed snapshot must skip refresh as well as replacement"
+            );
+        }
+        // The next complete scan still works, without borrowing values from the old person.
+        let replacement =
+            ImportedSession::from_results(profile(), Ok(vec![]), Ok(different_storage));
+        assert!(
+            core.replace_imported_account(&account.id, &replacement)
+                .unwrap()
+        );
+        let current = core.credential(&account.id).unwrap();
+        assert!(current.cookies.is_empty());
+        assert!(current.headers.is_empty());
+        assert!(current.identity_proof.is_empty());
+        assert_eq!(current.local_storage["session"], "different-person");
+        let view = core.state.account(&account.id).unwrap().unwrap();
+        assert!(!view.verified_identity);
+        assert!(view.user_id.is_empty());
+        assert_eq!(view.status, "connected");
+        // Authoritative empty results are different from an unreadable profile.
+        let empty = ImportedSession::from_results(profile(), Ok(vec![]), Ok(Default::default()));
+        assert!(core.replace_imported_account(&account.id, &empty).unwrap());
+        assert_eq!(
+            core.state.account(&account.id).unwrap().unwrap().status,
+            "expired"
+        );
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn chromium_partition_projection_requires_known_source_metadata() {
         let database = rusqlite::Connection::open_in_memory().unwrap();

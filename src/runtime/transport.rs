@@ -168,6 +168,14 @@ impl Runtime {
                     .request_headers(url)?,
             );
         }
+        if policy::request_headers_effect(
+            headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        ) != policy::Effect::Read
+        {
+            return Err(AppError::api("approval_required", 409));
+        }
         let req_origin = parsed.origin().ascii_serialization();
         let is_local_url =
             url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
