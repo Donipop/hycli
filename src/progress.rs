@@ -178,8 +178,42 @@ impl Runtime {
     }
 }
 
+struct ObservedJobGuard<'a> {
+    core: &'a Runtime,
+    job_id: String,
+    active: bool,
+}
+
+impl Drop for ObservedJobGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let _ = self.core.state.update_job(&self.job_id, |work| {
+            if !["queued", "running"].contains(&work.status.as_str()) {
+                return;
+            }
+            work.finished_at = util::now();
+            if work.is_outcome_uncertain() {
+                work.status = "failed".into();
+                work.phase = "failed".into();
+                work.error_code = "action_outcome_unknown".into();
+                work.note("failed", "", 0, "");
+            } else {
+                work.status = "cancelled".into();
+                work.phase = "cancelled".into();
+                if work.error_code.is_empty() {
+                    work.error_code = "cancelled".into();
+                }
+                work.note("cancelled", "", 0, "");
+            }
+        });
+        self.core.changed();
+    }
+}
+
 impl Runtime {
-    /// Terminal and MCP reads have the same visible work record as dashboard actions.
+    /// Terminal and MCP actions have the same visible work record and recovery guarantees as dashboard actions.
     pub(crate) async fn execute_observed(
         &self,
         request: crate::policy::ExecutionRequest,
@@ -189,46 +223,71 @@ impl Runtime {
         job.site_id = request.site_id.clone();
         job.action_id = request.action_id.clone();
         job.account_id = request.account_id.clone();
+        if let Ok(sp) = self.spec(&request.site_id)
+            && let Ok(op) = sp.op(&request.action_id)
+        {
+            job.effect = crate::policy::operation_effect(op, &request.inputs);
+        }
         if let Some(site) = self
             .sites(locale)?
             .into_iter()
             .find(|site| site.id == job.site_id)
         {
             job.site_title = site.title;
-            job.action_title = site
+            if let Some(action) = site
                 .actions
                 .into_iter()
                 .find(|action| action.id == job.action_id)
-                .map(|action| action.title)
-                .unwrap_or_default();
+            {
+                job.action_title = action.title;
+                if job.effect == crate::policy::Effect::Read {
+                    job.effect = action.effect;
+                }
+            }
         }
         job.status = "running".into();
         job.phase = "run".into();
+        job.dispatch_phase = crate::state::DispatchPhase::PreDispatch;
+        job.owner_pid = std::process::id();
         job.progress_done = 1;
         job.note("running", "", 0, "");
         self.state.add_job(job.clone())?;
         self.changed();
+        let mut guard = ObservedJobGuard {
+            core: self,
+            job_id: job.id.clone(),
+            active: true,
+        };
+        let mut rx = self.events.subscribe();
         let cancelled = async {
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                if self
-                    .state
-                    .job(&job.id)
-                    .is_ok_and(|job| job.status == "cancelled")
+                tokio::select! {
+                    _ = rx.recv() => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+                }
+                if let Ok(current) = self.state.job(&job.id)
+                    && !["queued", "running"].contains(&current.status.as_str())
                 {
-                    return;
+                    return if !current.error_code.is_empty() {
+                        current.error_code
+                    } else if current.status == "cancelled" {
+                        "cancelled".into()
+                    } else {
+                        "action_outcome_unknown".into()
+                    };
                 }
             }
         };
         let result = tokio::select! {
-            value = self.execute(request, None) => value.and_then(|result| {
+            value = self.execute_for_job(request, None, Some(&job.id)) => value.and_then(|result| {
                 result.0.ensure_success()?;
                 Ok(result)
             }),
-            () = cancelled => Err(crate::apperr::AppError::api("cancelled", 409)),
+            code = cancelled => Err(crate::apperr::AppError::api(&code, 409)),
         };
-        self.state.update_job(&job.id, |work| {
-            if work.status == "cancelled" {
+        guard.active = false;
+        let persisted = self.state.update_job(&job.id, |work| {
+            if !["queued", "running"].contains(&work.status.as_str()) {
                 return;
             }
             work.finished_at = util::now();
@@ -253,7 +312,20 @@ impl Runtime {
                     work.note("failed", "", 0, "");
                 }
             }
-        })?;
+        });
+        if let Err(error) = persisted {
+            let _ = self.state.update_job(&job.id, |work| {
+                if ["queued", "running"].contains(&work.status.as_str()) {
+                    work.status = "failed".into();
+                    work.phase = "failed".into();
+                    work.error_code = error.public_code.clone();
+                    work.finished_at = util::now();
+                    work.result = None;
+                }
+            });
+            self.changed();
+            return Err(error);
+        }
         self.changed();
         result
     }

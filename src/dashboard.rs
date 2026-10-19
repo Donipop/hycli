@@ -648,6 +648,16 @@ async fn edit_site(
     })?;
     if body.get("writes") == Some(&Value::Bool(false)) {
         web.core.policy.invalidate(Some(&id), None)?;
+        if let Ok(snapshot) = web.core.state.read() {
+            for job in snapshot.jobs {
+                if job.site_id == id
+                    && ["queued", "running"].contains(&job.status.as_str())
+                    && job.is_write_action()
+                {
+                    let _ = web.core.cancel_job(&job.id);
+                }
+            }
+        }
     }
     web.core.changed();
     Ok(ok())
@@ -741,9 +751,17 @@ async fn approve(
         .request
         .ok_or_else(|| AppError::api("approval_expired", 409))?;
     web.core.policy.claim(&id)?;
-    Ok(Json(
-        json!({"job":web.core.start_action(request,Some(id),language(&headers))?}),
-    ))
+    let job = match web
+        .core
+        .start_action(request, Some(id.clone()), language(&headers))
+    {
+        Ok(job) => job,
+        Err(err) => {
+            let _ = web.core.policy.unclaim(&id);
+            return Err(err);
+        }
+    };
+    Ok(Json(json!({"job": job})))
 }
 async fn reject(State(web): State<Web>, Path(id): Path<String>) -> AppResult<Json<Value>> {
     web.core.policy.reject(&id)?;

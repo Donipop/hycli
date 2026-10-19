@@ -141,8 +141,8 @@ impl Server {
                     )
                     .with_annotations(
                         ToolAnnotations::new()
-                            .read_only(true)
-                            .destructive(false)
+                            .read_only(name != "hycli_writes")
+                            .destructive(name == "hycli_writes")
                             .idempotent(!["hycli_prepare", "hycli_request"].contains(&name))
                             .open_world(
                                 ["hycli_prepare", "hycli_request", "hycli_recon"].contains(&name),
