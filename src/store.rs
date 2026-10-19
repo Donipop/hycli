@@ -29,6 +29,7 @@ pub struct Store {
     key: Option<Vec<u8>>,
     protection: String,
     keyring_allowed: bool,
+    raw_hash: String,
 }
 
 impl Store {
@@ -42,9 +43,28 @@ impl Store {
             key: None,
             protection: "file_permissions_only".into(),
             keyring_allowed,
+            raw_hash: String::new(),
         };
-        match util::read_bounded(path, 8 * 1024 * 1024) {
+        store.load_if_changed()?;
+        Ok(store)
+    }
+    fn load_if_changed(&mut self) -> AppResult<()> {
+        match util::read_bounded(&self.path, 8 * 1024 * 1024) {
             Ok(bytes) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if std::fs::metadata(&self.path)?.permissions().mode() & 0o777 != 0o600 {
+                        std::fs::set_permissions(
+                            &self.path,
+                            std::fs::Permissions::from_mode(0o600),
+                        )?;
+                    }
+                }
+                let next_hash = util::hash(&bytes);
+                if !self.raw_hash.is_empty() && self.raw_hash == next_hash {
+                    return Ok(());
+                }
                 let value: serde_json::Value = serde_json::from_slice(&bytes)?;
                 if value.get("version").is_some() {
                     let file: VaultFile = serde_json::from_value(value)?;
@@ -52,9 +72,6 @@ impl Store {
                         return Err(AppError::api("data_invalid", 400));
                     }
                     if file.protection == "os_keyring" {
-                        let key = store.existing_key()?;
-                        let cipher = Aes256Gcm::new_from_slice(&key)
-                            .map_err(|_| AppError::api("credentials_invalid", 401))?;
                         let nonce = STANDARD
                             .decode(file.nonce)
                             .map_err(|_| AppError::api("data_invalid", 400))?;
@@ -64,35 +81,54 @@ impl Store {
                         let ciphertext = STANDARD
                             .decode(file.ciphertext)
                             .map_err(|_| AppError::api("data_invalid", 400))?;
-                        let plaintext = cipher
-                            .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
-                            .map_err(|_| AppError::api("credentials_invalid", 401))?;
-                        store.data = serde_json::from_slice(&plaintext)?;
-                        store.key = Some(key);
-                        store.protection = "os_keyring".into();
+                        let decrypt_with = |key_bytes: &[u8]| -> AppResult<Vec<u8>> {
+                            let cipher = Aes256Gcm::new_from_slice(key_bytes)
+                                .map_err(|_| AppError::api("credentials_invalid", 401))?;
+                            cipher
+                                .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+                                .map_err(|_| AppError::api("credentials_invalid", 401))
+                        };
+                        let (plaintext, active_key) = match &self.key {
+                            Some(cached_key) if self.keyring_allowed => {
+                                match decrypt_with(cached_key) {
+                                    Ok(plain) => (plain, cached_key.clone()),
+                                    Err(_) => {
+                                        let fresh = self.existing_key()?;
+                                        (decrypt_with(&fresh)?, fresh)
+                                    }
+                                }
+                            }
+                            _ => {
+                                let fresh = self.existing_key()?;
+                                (decrypt_with(&fresh)?, fresh)
+                            }
+                        };
+                        self.data = serde_json::from_slice(&plaintext)?;
+                        self.key = Some(active_key);
+                        self.protection = "os_keyring".into();
                     } else if file.protection == "file_permissions_only" {
-                        store.data = file.values;
+                        self.data = file.values;
+                        self.key = None;
+                        self.protection = "file_permissions_only".into();
                     } else {
                         return Err(AppError::api("data_invalid", 400));
                     }
                 } else {
                     // Upgrade the original CLI's private store on its next write.
-                    store.data = serde_json::from_value(value)?;
+                    self.data = serde_json::from_value(value)?;
+                    self.key = None;
+                    self.protection = "file_permissions_only".into();
                 }
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if std::fs::metadata(path)?.permissions().mode() & 0o777 != 0o600 {
-                        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-                    }
-                }
+                self.raw_hash = next_hash;
             }
-            Err(error) if !path.exists() => {
+            Err(error) if !self.path.exists() => {
                 let _ = error;
+                self.data.clear();
+                self.raw_hash.clear();
             }
             Err(error) => return Err(error),
         }
-        Ok(store)
+        Ok(())
     }
     fn keyring_entry(&self) -> AppResult<keyring::Entry> {
         if !self.keyring_allowed {
@@ -152,8 +188,7 @@ impl Store {
         }
     }
     pub(crate) fn reload(&mut self) -> AppResult<()> {
-        *self = Self::open_with_keyring(&self.path, self.keyring_allowed)?;
-        Ok(())
+        self.load_if_changed()
     }
     pub(crate) fn get(&self, site: &str, key: &str) -> Option<&str> {
         self.data.get(&format!("{site}/{key}")).map(String::as_str)
@@ -240,6 +275,9 @@ impl Store {
                 values: self.data.clone(),
             }
         };
-        util::atomic_file(&self.path, &serde_json::to_vec(&file)?)
+        let bytes = serde_json::to_vec(&file)?;
+        util::atomic_file(&self.path, &bytes)?;
+        self.raw_hash = util::hash(&bytes);
+        Ok(())
     }
 }

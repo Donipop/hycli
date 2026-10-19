@@ -423,18 +423,19 @@ impl Runtime {
             return Err(AppError::api("bad_request", 400));
         }
         let (url, _) = sp.build_request(op, &inputs)?;
-        let data = self.state.read()?;
         let explicit_account = account.is_some_and(|value| !value.is_empty());
-        let mut account = account.map(str::to_owned).unwrap_or_else(|| {
-            data.sites
-                .get(&sp.site.name)
-                .map(|s| s.account_id.clone())
-                .unwrap_or_default()
-        });
+        let mut account = match account {
+            Some(value) => value.to_owned(),
+            None => self
+                .state
+                .site(&sp.site.name)?
+                .map(|s| s.account_id)
+                .unwrap_or_default(),
+        };
         if !account.is_empty() {
-            let a = data
-                .accounts
-                .get(&account)
+            let a = self
+                .state
+                .account(&account)?
                 .ok_or_else(|| AppError::api("auth_required", 401))?;
             if a.site_id != sp.site.name || !same_site_url(&a.site_url, &url)? {
                 if explicit_account {
@@ -455,7 +456,7 @@ impl Runtime {
     }
     /// Websites start with writes off until enabled once for that CLI (`hycli writes <site> allow`, MCP `hycli_writes`, or dashboard toggle).
     pub fn ensure_writes(&self, site: &str) -> AppResult<()> {
-        if self.state.read()?.sites.get(site).is_some_and(|m| m.writes) {
+        if self.state.site_writes(site)? {
             return Ok(());
         }
         Err(AppError::api("writes_disabled", 409))
@@ -486,13 +487,14 @@ impl Runtime {
             .iter()
             .find(|a| a.id == request.action_id)
             .ok_or_else(|| AppError::api("not_found", 404))?;
-        let account = self
-            .state
-            .read()?
-            .accounts
-            .get(&request.account_id)
-            .map(|a| a.label.clone())
-            .unwrap_or_default();
+        let account = if request.account_id.is_empty() {
+            String::new()
+        } else {
+            self.state
+                .account(&request.account_id)?
+                .map(|a| a.label)
+                .unwrap_or_default()
+        };
         let sp = self.spec(&request.site_id)?;
         let op = sp.op(&request.action_id)?;
         let inputs = params(op)
@@ -547,7 +549,7 @@ impl Runtime {
         }
         let request = self.request(sp, op, args.clone(), account)?;
         if self.spec(&sp.site.name).is_ok() {
-            self.execute_observed(request, &self.state.read()?.settings.locale)
+            self.execute_observed(request, &self.state.settings()?.locale)
                 .await
         } else {
             self.execute_definition(sp, request, None, false).await
@@ -1024,9 +1026,7 @@ impl Runtime {
         if strategy.is_some_and(|auth| auth.kind == "browser")
             && !self
                 .state
-                .read()?
-                .accounts
-                .get(account)
+                .account(account)?
                 .is_some_and(|view| view.verified_identity && view.status == "connected")
         {
             return Err(AppError::api("auth_required", 401));
@@ -1034,9 +1034,7 @@ impl Runtime {
         if strategy.is_some_and(|auth| auth.kind == "derived")
             && !self
                 .state
-                .read()?
-                .accounts
-                .get(account)
+                .account(account)?
                 .is_some_and(|view| view.status == "connected")
         {
             return Err(AppError::api("auth_required", 401));

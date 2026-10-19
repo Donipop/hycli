@@ -461,7 +461,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
                 find_spec(id)?;
             }
             let core = runner(&deps)?;
-            let sites = core.sites(&core.state.read()?.settings.locale)?;
+            let sites = core.sites(&core.state.settings()?.locale)?;
             if let Some(id) = site {
                 let site = sites
                     .into_iter()
@@ -485,12 +485,8 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
                             })?;
                     emit.data(&action);
                 } else {
-                    let latest_understanding = core.state.read().ok().and_then(|d| {
-                        d.jobs
-                            .iter()
-                            .find(|j| j.site_id == site.id && j.understanding.is_some())
-                            .and_then(|j| j.understanding.clone())
-                    });
+                    let latest_understanding =
+                        core.state.latest_understanding(&site.id).ok().flatten();
                     let guide =
                         hycli::cli_actions::build_user_guide(&site, latest_understanding.as_ref());
                     let mut val = serde_json::to_value(&site).unwrap_or(serde_json::Value::Null);
@@ -518,8 +514,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
         Cmd::Accounts { site } => {
             let accounts: Vec<_> = runner(&deps)?
                 .state
-                .read()?
-                .accounts
+                .accounts()?
                 .into_values()
                 .filter(|a| site.as_ref().is_none_or(|id| a.site_id == *id))
                 .collect();
@@ -533,7 +528,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             intent,
         } => {
             let core = runner(&deps)?;
-            let locale = language.unwrap_or(core.state.read()?.settings.locale);
+            let locale = language.unwrap_or(core.state.settings()?.locale);
             let job = core.start_prepare_with_intent(
                 &url,
                 "",
@@ -550,7 +545,7 @@ async fn dispatch(deps: Deps, cmd: Cmd, emit: &Emitter) -> Result<(), AppError> 
             language,
         } => {
             let core = runner(&deps)?;
-            let locale = language.unwrap_or(core.state.read()?.settings.locale);
+            let locale = language.unwrap_or(core.state.settings()?.locale);
             let job = core.start_request(
                 &site,
                 &instruction,
@@ -894,7 +889,7 @@ async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result<(), AppErr
             let dst = hycli::platform::specs_dir().join(format!("{}.yaml", sp.site.name));
             let core = runner(&deps)?;
             core.install(&sp)?;
-            let locale = core.state.read()?.settings.locale;
+            let locale = core.state.settings()?.locale;
             let user_guide = core
                 .sites(&locale)
                 .ok()
@@ -1184,7 +1179,7 @@ async fn site_run(mut deps: Deps, rest: Vec<String>, emit: &Emitter) -> Result<(
     if help {
         let core = runner(&deps)?;
         let view = core
-            .sites(&core.state.read()?.settings.locale)?
+            .sites(&core.state.settings()?.locale)?
             .into_iter()
             .find(|s| s.id == *site)
             .ok_or_else(|| AppError::api("not_found", 404))?;
