@@ -251,3 +251,5 @@ Hycli est distribué sous licence [Apache-2.0](../../LICENSE). Utilisez-le uniqu
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+Pour lire une page JSON ou GraphQL avec un compte vérifié sans installer une action, consultez [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

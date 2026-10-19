@@ -251,3 +251,5 @@ Hycli 採用 [Apache-2.0](../../LICENSE) 授權條款發佈。請僅在你有權
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+若要使用已驗證帳戶讀取單頁 JSON 或 GraphQL，請參閱 [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

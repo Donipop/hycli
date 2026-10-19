@@ -183,7 +183,7 @@ fn is_safe_graphql_read_post(url: &url::Url, post_data: Option<&str>) -> bool {
         return false;
     };
     use graphql_parser::query::{Definition, OperationDefinition};
-    let Ok(doc) = graphql_parser::parse_query::<&str>(query) else {
+    let Some(doc) = crate::policy::parse_graphql_bounded(query) else {
         return false;
     };
     let mut has_query = false;

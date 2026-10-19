@@ -300,7 +300,7 @@ impl Network {
         })
     }
     pub async fn fetch(&self, input: Request) -> AppResult<Response> {
-        self.fetch_inner(input, None).await
+        self.fetch_inner(input, None, None).await
     }
     /// The continuation key/value is supplied only by the private runtime resolver.
     pub(crate) async fn fetch_paginated(
@@ -312,12 +312,24 @@ impl Network {
             return Err(AppError::api("unsafe_target", 400));
         }
         input.follow_redirects = false;
-        self.fetch_inner(input, continuation).await
+        self.fetch_inner(input, continuation, None).await
+    }
+    /// Recheck private account authority after every wait and immediately before dispatch.
+    /// The callback is also run for each bounded transport retry.
+    pub(crate) async fn fetch_guarded(
+        &self,
+        input: Request,
+        continuation: Option<(&str, &str)>,
+        check_authority: &(dyn Fn() -> AppResult<()> + Sync),
+    ) -> AppResult<Response> {
+        self.fetch_inner(input, continuation, Some(check_authority))
+            .await
     }
     async fn fetch_inner(
         &self,
         input: Request,
         continuation: Option<(&str, &str)>,
+        check_authority: Option<&(dyn Fn() -> AppResult<()> + Sync)>,
     ) -> AppResult<Response> {
         input.check_read_headers()?;
         let mut initial = validate_url(&input.url)?;
@@ -335,6 +347,9 @@ impl Network {
         let mut retries = 0;
         let start = Instant::now();
         loop {
+            if let Some(check) = check_authority {
+                check()?;
+            }
             let addresses = resolve(&target, self.allow_local).await?;
             let host_scope = format!("{}|*", target.origin().ascii_serialization());
             let host_token = self.policy.acquire(&host_scope).await?;
@@ -478,6 +493,9 @@ impl Network {
             let mut request = client.request(method, target.clone()).headers(headers);
             if let Some(body) = &input.body {
                 request = request.body(body.clone());
+            }
+            if let Some(check) = check_authority {
+                check()?;
             }
             let response = request.send().await;
             let response = match response {

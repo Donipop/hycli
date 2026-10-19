@@ -364,10 +364,91 @@ pub(crate) fn payload_effect(value: &serde_json::Value) -> (Effect, bool) {
     }
 }
 
+/// Count structure outside GraphQL comments, normal strings and block strings
+/// before entering the recursive GraphQL parser. This limits depth only; the
+/// parser remains responsible for syntax, including unterminated strings.
+pub(crate) fn graphql_depth_is_bounded(body: &str) -> bool {
+    let bytes = body.as_bytes();
+    let mut at = 0;
+    let mut depth = 0usize;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'#' => {
+                while at < bytes.len() && !matches!(bytes[at], b'\r' | b'\n') {
+                    at += 1;
+                }
+                continue;
+            }
+            b'"' => {
+                let block = bytes[at..].starts_with(b"\"\"\"");
+                at += if block { 3 } else { 1 };
+                let mut closed = false;
+                while at < bytes.len() {
+                    if block && bytes[at..].starts_with(b"\\\"\"\"") {
+                        // Block strings escape only a triple quote, not an
+                        // arbitrary following character or another backslash.
+                        at += 4;
+                    } else if !block && bytes[at] == b'\\' {
+                        at += 2;
+                    } else if block && bytes[at..].starts_with(b"\"\"\"") {
+                        at += 3;
+                        closed = true;
+                        break;
+                    } else if !block && bytes[at] == b'"' {
+                        at += 1;
+                        closed = true;
+                        break;
+                    } else {
+                        at += 1;
+                    }
+                }
+                if !closed {
+                    return true; // Malformed syntax ends here; no later structure can execute.
+                }
+                continue;
+            }
+            b'{' | b'[' | b'(' => {
+                depth += 1;
+                // graphql-parser's own limit (50) still overflows a 1 MiB
+                // thread stack in an unoptimized build. Keep our measured
+                // smaller structural limit before entering that parser.
+                if depth > 32 {
+                    return false;
+                }
+            }
+            b'}' | b']' | b')' => {
+                let Some(next) = depth.checked_sub(1) else {
+                    return true; // The parser rejects this unmatched closer before any suffix.
+                };
+                depth = next;
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    true
+}
+
+/// One bounded entry into graphql-parser for every production read classifier.
+/// None is an unknown/unsupported document, never authority to dispatch.
+pub(crate) fn parse_graphql_bounded(
+    query: &str,
+) -> Option<graphql_parser::query::Document<'_, &str>> {
+    if !graphql_depth_is_bounded(query) {
+        return None;
+    }
+    graphql_parser::parse_query::<&str>(query).ok()
+}
+
 fn graphql_document_effect(query: &str, required: bool) -> Option<Effect> {
     use graphql_parser::query::{Definition, OperationDefinition};
-    match graphql_parser::parse_query::<&str>(query) {
-        Ok(document) => {
+    // A limit failure is unknown even if a permitted lexical prefix (such as a
+    // BOM) prevents the fallback name heuristic from recognizing the document.
+    if !graphql_depth_is_bounded(query) {
+        return Some(Effect::Unknown);
+    }
+    match parse_graphql_bounded(query) {
+        Some(document) => {
             let operations: Vec<_> = document
                 .definitions
                 .iter()
@@ -394,16 +475,15 @@ fn graphql_document_effect(query: &str, required: bool) -> Option<Effect> {
                 },
             )
         }
-        Err(_)
-            if required
-                || query.trim_start().starts_with(['{', '#'])
-                || ["query", "mutation", "subscription", "fragment"]
-                    .iter()
-                    .any(|word| query.trim_start().starts_with(word)) =>
+        None if required
+            || query.trim_start().starts_with(['{', '#'])
+            || ["query", "mutation", "subscription", "fragment"]
+                .iter()
+                .any(|word| query.trim_start().starts_with(word)) =>
         {
             Some(Effect::Unknown)
         }
-        Err(_) => None,
+        None => None,
     }
 }
 
@@ -1154,7 +1234,7 @@ pub(crate) fn safe_session_read_url(url: &url::Url) -> bool {
     }
     let visible_document = args
         .get("query")
-        .is_some_and(|query| graphql_parser::parse_query::<&str>(query).is_ok());
+        .is_some_and(|query| parse_graphql_bounded(query).is_some());
     if (graphql && !visible_document)
         || args.values().any(|value| {
             serde_json::from_str::<serde_json::Value>(value)
@@ -1538,5 +1618,62 @@ mod rendered_request_tests {
             Effect::Unknown
         );
         assert_eq!(operation_effect(op, &BTreeMap::new()), Effect::Read);
+    }
+}
+
+#[cfg(test)]
+mod bounded_graphql_tests {
+    use super::*;
+
+    #[test]
+    fn shared_graphql_entry_bounds_read_classification_on_one_mib_stack() {
+        std::thread::Builder::new()
+            .name("shared-graphql-one-mib".into())
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for depth in [32, 33] {
+                    let query = format!(
+                        "query Q {{ {}id{} }}",
+                        "child { ".repeat(depth - 1),
+                        "}".repeat(depth - 1)
+                    );
+                    let expected = if depth == 32 {
+                        Effect::Read
+                    } else {
+                        Effect::Unknown
+                    };
+                    assert_eq!(graphql_document_effect(&query, true), Some(expected));
+                    assert_eq!(
+                        graphql_document_effect(&format!("\u{feff}{query}"), false),
+                        Some(expected)
+                    );
+                    assert_eq!(
+                        payload_effect(&serde_json::json!({"filter":{"query":query}})).0,
+                        expected
+                    );
+                    let mut url = url::Url::parse("https://example.test/graphql").unwrap();
+                    url.query_pairs_mut().append_pair("query", &query);
+                    assert_eq!(safe_read_url(&url), depth == 32);
+                    assert_eq!(safe_session_read_url(&url), depth == 32);
+                    let operation = Operation {
+                        method: "GET".into(),
+                        path: "/graphql".into(),
+                        ..Default::default()
+                    };
+                    assert_eq!(
+                        operation.graphql_query(&BTreeMap::from([("query".into(), query)])),
+                        depth == 32
+                    );
+                }
+                assert_eq!(graphql_document_effect("ordinary text", false), None);
+                assert_eq!(graphql_document_effect("ordinary \"search", false), None);
+                assert_eq!(
+                    graphql_document_effect("query Q { id }", true),
+                    Some(Effect::Read)
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

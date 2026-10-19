@@ -274,3 +274,5 @@ Hycli is licensed under [Apache-2.0](LICENSE). Use it only with websites and acc
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+For a known JSON or GraphQL endpoint before a website action exists, see [bounded verified-account reads](docs/ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

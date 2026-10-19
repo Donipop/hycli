@@ -27,7 +27,7 @@ fn invalid() -> AppError {
 fn expired() -> AppError {
     AppError::api("pagination_expired", 409)
 }
-fn safe_value(value: &str, secrets: &[String]) -> bool {
+pub(super) fn safe_value(value: &str, secrets: &[String]) -> bool {
     if value.chars().count() < 8
         || value.len() > MAX_VALUE
         || value.chars().any(char::is_control)
@@ -151,13 +151,21 @@ impl Runtime {
         let Some(handle) = request.inputs.get(&p.input) else {
             return Ok(None);
         };
+        self.resolve_cursor_binding(&binding(request, op, url)?, handle, secrets)
+            .map(Some)
+    }
+    pub(super) fn resolve_cursor_binding(
+        &self,
+        expected: &str,
+        handle: &str,
+        secrets: &[String],
+    ) -> AppResult<String> {
         if !handle.starts_with("hc_")
             || handle.len() != 35
             || !handle[3..].bytes().all(|c| c.is_ascii_hexdigit())
         {
             return Err(expired());
         }
-        let expected = binding(request, op, url)?;
         let result = self
             .vault
             .lock()
@@ -178,7 +186,7 @@ impl Runtime {
                     }
                 }
             })?;
-        result.map(Some).ok_or_else(expired)
+        result.ok_or_else(expired)
     }
     pub(crate) fn capture_cursor(
         &self,
@@ -212,11 +220,26 @@ impl Runtime {
         if !issue {
             return Ok(None);
         }
+        self.store_cursor_binding(
+            &request.site_id,
+            &request.account_id,
+            &binding(request, op, url)?,
+            value,
+        )
+        .map(Some)
+    }
+    pub(super) fn store_cursor_binding(
+        &self,
+        site: &str,
+        account: &str,
+        binding: &str,
+        value: &str,
+    ) -> AppResult<String> {
         let handle = format!("hc_{}", util::id());
         let record = serde_json::to_string(&Record {
-            site: request.site_id.clone(),
-            account: request.account_id.clone(),
-            binding: binding(request, op, url)?,
+            site: site.into(),
+            account: account.into(),
+            binding: binding.into(),
             expires: util::unix_ms() + TTL,
             value: value.into(),
         })?;
@@ -240,7 +263,7 @@ impl Runtime {
                 records.insert(format!("{PREFIX}{handle}"), record);
                 Ok(())
             })?;
-        Ok(Some(handle))
+        Ok(handle)
     }
 }
 

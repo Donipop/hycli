@@ -205,7 +205,9 @@ impl Store {
     pub fn keys(&self) -> Vec<String> {
         self.data
             .keys()
-            .filter(|key| !key.starts_with("@pagination/"))
+            .filter(|key| {
+                !key.starts_with("@pagination/") && !key.starts_with("@read-observation/")
+            })
             .cloned()
             .collect()
     }

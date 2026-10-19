@@ -251,3 +251,5 @@ Hycli는 [Apache-2.0](../../LICENSE) 라이선스로 배포됩니다. 접근 권
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+검증된 계정으로 SiteSpec 설치 없이 JSON·GraphQL 한 페이지를 읽으려면 다음 안내를 참고하세요. [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.
