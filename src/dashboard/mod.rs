@@ -351,7 +351,8 @@ async fn settings(State(web): State<Web>, Json(patch): Json<Value>) -> AppResult
             }
             v[k] = x.clone();
         }
-        let s: Settings = serde_json::from_value(v)?;
+        let s: Settings =
+            serde_json::from_value(v).map_err(|_| AppError::api("bad_request", 400))?;
         if state::locale_or_default(&s.locale) != s.locale
             || !["light", "dark", "system"].contains(&s.theme.as_str())
             || (!s.default_provider.is_empty() && ai::provider(&s.default_provider).is_none())
