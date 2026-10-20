@@ -1,7 +1,7 @@
 use super::Runtime;
 use crate::{
     apperr::{AppError, AppResult},
-    net::{Request, Response},
+    net::Request,
     spec::{AuthStrategy, OAuthRefreshBinding, Operation, Spec},
     util,
 };
@@ -568,7 +568,8 @@ impl Runtime {
         continuation: Option<(&str, &str)>,
         secrets: &mut Vec<String>,
         expected_hash: &str,
-    ) -> AppResult<Response> {
+        receiver: Option<&crate::net::FileReceiver>,
+    ) -> AppResult<crate::net::FileResponse> {
         let auth = sp.find_auth(&op.auth).ok_or_else(invalid)?;
         let binding = auth.oauth_refresh.as_ref().ok_or_else(invalid)?;
         if !request.read_only
@@ -596,14 +597,14 @@ impl Runtime {
             ));
             let response = self
                 .network
-                .fetch_oauth_guarded(
+                .fetch_oauth_resource_guarded(
                     request.clone(),
                     continuation,
                     &|| {
                         self.oauth_check_spec(sp, installed)?;
                         self.oauth_check_current(&key, &raw)
                     },
-                    None,
+                    receiver,
                 )
                 .await?;
             {
@@ -617,8 +618,8 @@ impl Runtime {
                     return Err(failure());
                 }
             }
-            let expired = response.status == 401
-                && response.headers.iter().any(|(name, value)| {
+            let expired = response.response.status == 401
+                && response.response.headers.iter().any(|(name, value)| {
                     name.eq_ignore_ascii_case("www-authenticate")
                         && value.to_ascii_lowercase().starts_with("bearer ")
                         && value[7..].split(',').any(|part| {
@@ -631,6 +632,7 @@ impl Runtime {
             if !expired {
                 return Ok(response);
             }
+            drop(response);
             if attempt == 0 && budget {
                 (grant, raw) = self
                     .oauth_ready(

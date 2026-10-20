@@ -253,6 +253,10 @@ pub fn router(web: Web) -> Router {
         .route("/api/jobs/{id}/cancel", post(routes_jobs::cancel))
         .route("/api/jobs/{id}/retry", post(routes_jobs::retry))
         .route("/api/jobs/{id}/result", get(routes_jobs::result))
+        .route(
+            "/api/jobs/{id}/artifacts/{artifact_id}",
+            get(routes_jobs::artifact).head(routes_jobs::artifact_head),
+        )
         .route("/api/jobs/{id}/summarize", post(routes_jobs::summarize))
         .route("/api/accounts/pair", post(routes_accounts::pair))
         .route(

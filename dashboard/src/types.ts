@@ -1,3 +1,10 @@
+export type FileArtifact = {
+  kind: 'file'; version: 1; status: 'complete'; artifact_id: string;
+  local_path: string; location_scope: 'hycli_host'; filename: string;
+  media_type: string; byte_count: number; sha256: string;
+  content_trust: 'untrusted'; created_at: string;
+  provenance: { site: string; action: string; source_origin: string };
+};
 export type Settings = { locale: string; theme: 'light' | 'dark' | 'system'; reduce_motion: boolean; notifications: boolean; default_provider: string; browser_address?: string; engine_path?: string };
 export type Provider = { id: string; name: string; default_model: string; key_url?: string; model: string; connected: boolean; has_key: boolean; models: string[]; available: boolean; account?: string };
 export type Field = { id: string; label: string; hint?: string; type: string; required: boolean; default?: unknown };
@@ -6,7 +13,7 @@ export type Site = { id: string; title: string; url: string; host: string; summa
 export type Account = { id: string; site_id: string; site_url: string; label: string; email?: string; user_id?: string; name?: string; browser: string; profile?: string; status: string; verified_identity: boolean; checked_at: string; cookie_count: number; created_at: string };
 export type JobAgent = { id: string; status: string; found: number; started_at: string; finished_at?: string };
 export type JobNote = { seq: number; at: string; code: string; message: string; agent: string; count: number };
-export type Job = { id: string; kind: string; site_id?: string; site_title: string; url?: string; intent?: string; understanding?: { summary: string; workflows: {id: string; title: string; benefit: string; steps: string[]; success_criteria: string}[] }; action_id?: string; action_title?: string; provider?: string; locale: string; account_id?: string; status: string; phase: string; error_code?: string; found: string[]; started_at: string; updated_at: string; finished_at?: string; result?: unknown; summary?: string; progress_done?: number; progress_total?: number; agents?: JobAgent[]; notes?: JobNote[]; parent_id?: string };
+export type Job = { id: string; kind: string; site_id?: string; site_title: string; url?: string; intent?: string; understanding?: { summary: string; workflows: {id: string; title: string; benefit: string; steps: string[]; success_criteria: string}[] }; action_id?: string; action_title?: string; provider?: string; locale: string; account_id?: string; status: string; phase: string; error_code?: string; found: string[]; started_at: string; updated_at: string; finished_at?: string; result?: unknown; artifact?: FileArtifact; summary?: string; progress_done?: number; progress_total?: number; agents?: JobAgent[]; notes?: JobNote[]; parent_id?: string };
 export type Engine = { available: boolean; compatible: boolean; name: string; version: string; path: string };
 export type Approval = { id: string; site_id: string; site_title: string; action_id: string; action_title: string; account_id?: string; account_label?: string; inputs: { label: string; value: string }[]; expires_at: string; status: string };
 export type Snapshot = { settings: Settings; providers: Provider[]; sites: Site[]; accounts: Account[]; jobs: Job[]; approvals: Approval[]; engine: Engine; version: string; data_location: string; credential_storage: string; browser_connected: boolean };

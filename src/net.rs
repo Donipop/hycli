@@ -75,6 +75,39 @@ pub struct Response {
     pub duration_ms: i64,
     pub defense: String,
 }
+/// A receiver factory is cloneable; each writable/sealed attempt it creates is not.
+/// Only explicit final-resource requests carry this factory. Tokens and identity
+/// responses continue through the ordinary bounded buffered path.
+#[derive(Clone)]
+pub(crate) struct FileReceiver {
+    root: std::path::PathBuf,
+}
+impl FileReceiver {
+    pub(crate) fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_owned(),
+        }
+    }
+    async fn begin(&self) -> AppResult<crate::artifacts::WritableArtifact> {
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || crate::artifacts::ArtifactStore::open(&root)?.begin())
+            .await
+            .map_err(|_| AppError::api("internal", 500))?
+    }
+}
+pub(crate) struct FileResponse {
+    pub response: Response,
+    pub artifact: Option<crate::artifacts::SealedArtifact>,
+}
+impl FileResponse {
+    pub(crate) fn buffered(response: Response) -> Self {
+        Self {
+            response,
+            artifact: None,
+        }
+    }
+}
+
 impl Response {
     pub fn header(&self, key: &str) -> &str {
         self.headers
@@ -359,7 +392,9 @@ impl Network {
         })
     }
     pub async fn fetch(&self, input: Request) -> AppResult<Response> {
-        self.fetch_inner(input, None, None, None).await
+        self.fetch_inner(input, None, None, None, None)
+            .await
+            .map(|received| received.response)
     }
     /// The continuation key/value is supplied only by the private runtime resolver.
     pub(crate) async fn fetch_paginated(
@@ -371,7 +406,9 @@ impl Network {
             return Err(AppError::api("unsafe_target", 400));
         }
         input.follow_redirects = false;
-        self.fetch_inner(input, continuation, None, None).await
+        self.fetch_inner(input, continuation, None, None, None)
+            .await
+            .map(|received| received.response)
     }
     /// Recheck private account authority after every wait and immediately before dispatch.
     /// The callback is also run for each bounded transport retry.
@@ -381,8 +418,9 @@ impl Network {
         continuation: Option<(&str, &str)>,
         check_authority: &(dyn Fn() -> AppResult<()> + Sync),
     ) -> AppResult<Response> {
-        self.fetch_inner(input, continuation, Some(check_authority), None)
+        self.fetch_inner(input, continuation, Some(check_authority), None, None)
             .await
+            .map(|received| received.response)
     }
     pub(crate) async fn fetch_oauth_guarded(
         &self,
@@ -392,7 +430,28 @@ impl Network {
         dispatched: Option<&std::sync::atomic::AtomicBool>,
     ) -> AppResult<Response> {
         input.follow_redirects = false;
-        self.fetch_inner(input, continuation, Some(check_authority), dispatched)
+        self.fetch_inner(input, continuation, Some(check_authority), dispatched, None)
+            .await
+            .map(|received| received.response)
+    }
+    pub(crate) async fn fetch_file_guarded(
+        &self,
+        input: Request,
+        check_authority: &(dyn Fn() -> AppResult<()> + Sync),
+        receiver: &FileReceiver,
+    ) -> AppResult<FileResponse> {
+        self.fetch_inner(input, None, Some(check_authority), None, Some(receiver))
+            .await
+    }
+    pub(crate) async fn fetch_oauth_resource_guarded(
+        &self,
+        mut input: Request,
+        continuation: Option<(&str, &str)>,
+        check_authority: &(dyn Fn() -> AppResult<()> + Sync),
+        receiver: Option<&FileReceiver>,
+    ) -> AppResult<FileResponse> {
+        input.follow_redirects = false;
+        self.fetch_inner(input, continuation, Some(check_authority), None, receiver)
             .await
     }
     async fn fetch_inner(
@@ -401,7 +460,8 @@ impl Network {
         continuation: Option<(&str, &str)>,
         check_authority: Option<&(dyn Fn() -> AppResult<()> + Sync)>,
         dispatched: Option<&std::sync::atomic::AtomicBool>,
-    ) -> AppResult<Response> {
+        receiver: Option<&FileReceiver>,
+    ) -> AppResult<FileResponse> {
         input.check_read_headers()?;
         let mut initial = validate_url(&input.url)?;
         if let Some((key, value)) = continuation {
@@ -414,7 +474,7 @@ impl Network {
             }
         }
         let file_upload = input.has_file_upload();
-        let transfer_mode = if file_upload {
+        let transfer_mode = if file_upload || receiver.is_some() {
             TransferMode::File
         } else {
             TransferMode::Buffered
@@ -613,7 +673,7 @@ impl Network {
                 check()?;
             }
             progress.mark();
-            let idle_timeout = file_upload.then_some(input.timeout);
+            let idle_timeout = (transfer_mode == TransferMode::File).then_some(input.timeout);
             if let Some(dispatched) = dispatched {
                 dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
             }
@@ -693,26 +753,45 @@ impl Network {
                 host_lease.released = true;
                 return Err(after_dispatch(AppError::api("request_failed", 502)));
             }
-            if response
-                .content_length()
-                .is_some_and(|length| length > input.limit as u64)
+            let file_status = receiver.is_some() && (200..300).contains(&status);
+            if receiver.is_some()
+                && (status == 206
+                    || headers
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case("content-range")))
             {
-                self.policy
-                    .release(&scope, &token, gate_status, retry_after, false)
-                    .map_err(&after_dispatch)?;
-                lease.released = true;
-                self.policy
-                    .release(
-                        &host_scope,
-                        &host_token,
-                        if status == 429 { 429 } else { 0 },
-                        retry_after,
-                        false,
-                    )
-                    .map_err(&after_dispatch)?;
-                host_lease.released = true;
+                return Err(after_dispatch(AppError::api("response_mismatch", 502)));
+            }
+            if !file_status
+                && response
+                    .content_length()
+                    .is_some_and(|length| length > input.limit as u64)
+            {
+                release_http_leases(
+                    &mut lease,
+                    &mut host_lease,
+                    gate_status,
+                    status,
+                    retry_after,
+                    false,
+                )
+                .map_err(&after_dispatch)?;
                 return Err(after_dispatch(AppError::api("too_large", 413)));
             }
+            // A new stage belongs only to this attempt. Redirect, retry, OAuth
+            // replacement, error and cancellation all drop its cleanup owner.
+            let mut writable = if file_status {
+                Some(
+                    monitor
+                        .wait(receiver.expect("file receiver").begin(), None)
+                        .await
+                        .map_err(&after_dispatch)?
+                        .map_err(&after_dispatch)?,
+                )
+            } else {
+                None
+            };
+            progress.mark();
             let mut bytes = Vec::new();
             let mut stream = response.bytes_stream();
             while let Some(chunk) = monitor
@@ -725,25 +804,40 @@ impl Network {
                 if !chunk.is_empty() {
                     progress.mark();
                 }
-                if bytes.len() + chunk.len() > input.limit {
-                    self.policy
-                        .release(&scope, &token, gate_status, retry_after, false)
+                if let Some(file) = writable.as_mut() {
+                    monitor
+                        .wait(file.write(&chunk), None)
+                        .await
+                        .map_err(&after_dispatch)?
                         .map_err(&after_dispatch)?;
-                    lease.released = true;
-                    self.policy
-                        .release(
-                            &host_scope,
-                            &host_token,
-                            if status == 429 { 429 } else { 0 },
+                    // Awaited local writes are backpressure, not network idle.
+                    progress.mark();
+                } else {
+                    if chunk.len() > input.limit.saturating_sub(bytes.len()) {
+                        release_http_leases(
+                            &mut lease,
+                            &mut host_lease,
+                            gate_status,
+                            status,
                             retry_after,
                             false,
                         )
                         .map_err(&after_dispatch)?;
-                    host_lease.released = true;
-                    return Err(after_dispatch(AppError::api("too_large", 413)));
+                        return Err(after_dispatch(AppError::api("too_large", 413)));
+                    }
+                    bytes.extend_from_slice(&chunk);
                 }
-                bytes.extend_from_slice(&chunk);
             }
+            let artifact = match writable {
+                Some(file) => Some(
+                    monitor
+                        .wait(file.seal(), None)
+                        .await
+                        .map_err(&after_dispatch)?
+                        .map_err(&after_dispatch)?,
+                ),
+                None => None,
+            };
             if !upload.complete() {
                 return Err(after_dispatch(AppError::api("request_failed", 502)));
             }
@@ -751,8 +845,13 @@ impl Network {
             let (defense, _) = defend::classify(&defend::Observation {
                 status_code: status,
                 headers: headers.clone(),
-                body_snippet: String::from_utf8_lossy(&bytes[..bytes.len().min(16_384)])
-                    .into_owned(),
+                body_snippet: String::from_utf8_lossy(
+                    artifact
+                        .as_ref()
+                        .map(|file| file.prefix())
+                        .unwrap_or(&bytes[..bytes.len().min(16_384)]),
+                )
+                .into_owned(),
             });
             let challenged = defense != defend::Class::None && defense != defend::Class::RateLimit;
             let strategy_key =
@@ -764,20 +863,15 @@ impl Network {
             } else if (200..300).contains(&status) {
                 let _ = self.policy.clear_strategy(&strategy_key);
             }
-            self.policy
-                .release(&scope, &token, gate_status, retry_after, challenged)
-                .map_err(&after_dispatch)?;
-            lease.released = true;
-            self.policy
-                .release(
-                    &host_scope,
-                    &host_token,
-                    if status == 429 { 429 } else { 0 },
-                    retry_after,
-                    false,
-                )
-                .map_err(&after_dispatch)?;
-            host_lease.released = true;
+            release_http_leases(
+                &mut lease,
+                &mut host_lease,
+                gate_status,
+                status,
+                retry_after,
+                challenged,
+            )
+            .map_err(&after_dispatch)?;
             if input.follow_redirects
                 && input.read_only
                 && matches!(status, 301 | 302 | 303 | 307 | 308)
@@ -812,17 +906,20 @@ impl Network {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
-            return Ok(Response {
-                url: if continuation.is_some() {
-                    input.url.clone()
-                } else {
-                    target.to_string()
+            return Ok(FileResponse {
+                response: Response {
+                    url: if continuation.is_some() {
+                        input.url.clone()
+                    } else {
+                        target.to_string()
+                    },
+                    status,
+                    headers,
+                    bytes,
+                    duration_ms: start.elapsed().as_millis() as i64,
+                    defense: defense.as_str().into(),
                 },
-                status,
-                headers,
-                bytes,
-                duration_ms: start.elapsed().as_millis() as i64,
-                defense: defense.as_str().into(),
+                artifact,
             });
         }
     }
@@ -950,6 +1047,33 @@ impl<'a> TransferMonitor<'a> {
             }
         }
     }
+}
+
+fn release_http_leases(
+    account: &mut Lease<'_>,
+    host: &mut Lease<'_>,
+    gate_status: u16,
+    status: u16,
+    retry_after: Option<Duration>,
+    challenged: bool,
+) -> AppResult<()> {
+    account.policy.release(
+        account.scope,
+        account.token,
+        gate_status,
+        retry_after,
+        challenged,
+    )?;
+    account.released = true;
+    host.policy.release(
+        host.scope,
+        host.token,
+        if status == 429 { 429 } else { 0 },
+        retry_after,
+        false,
+    )?;
+    host.released = true;
+    Ok(())
 }
 
 struct Lease<'a> {
@@ -2423,5 +2547,318 @@ mod website_input_tests {
         ] {
             assert!(website_url(value).is_err(), "{value}");
         }
+    }
+}
+
+#[cfg(test)]
+mod file_receiver_tests {
+    use super::*;
+    use crate::artifacts::{ArtifactStore, Provenance, TRANSFER_CHUNK_BYTES};
+    use axum::{Router, body::Body, http::Response as HttpResponse, routing::get};
+
+    fn request(url: String) -> Request {
+        Request {
+            url,
+            method: "GET".into(),
+            headers: vec![],
+            body: None,
+            account_id: String::new(),
+            limit: 8 * 1024 * 1024,
+            timeout: Duration::from_secs(3),
+            read_only: true,
+            follow_redirects: true,
+            tls_profile: String::new(),
+            multipart: None,
+        }
+    }
+    fn empty(root: &std::path::Path) -> bool {
+        let path = root.join("artifacts");
+        !path.exists() || std::fs::read_dir(path).unwrap().next().is_none()
+    }
+    async fn fixture() -> (String, tokio::task::JoinHandle<()>) {
+        let app = Router::new()
+            .route("/known", get(|| async { large(true) }))
+            .route("/unknown", get(|| async { large(false) }))
+            .route(
+                "/idle",
+                get(|| async {
+                    HttpResponse::builder()
+                        .header("content-type", "application/octet-stream")
+                        .body(Body::from_stream(futures_util::stream::unfold(
+                            0,
+                            |n| async move {
+                                if n > 0 {
+                                    tokio::time::sleep(Duration::from_secs(60)).await;
+                                }
+                                Some((Ok::<_, std::io::Error>(vec![1; 1024]), n + 1))
+                            },
+                        )))
+                        .unwrap()
+                }),
+            )
+            .route(
+                "/diagnostic",
+                get(|| async {
+                    HttpResponse::builder()
+                        .status(401)
+                        .body(Body::from_stream(futures_util::stream::iter((0..130).map(
+                            |_| Ok::<_, std::io::Error>(vec![0; TRANSFER_CHUNK_BYTES]),
+                        ))))
+                        .unwrap()
+                }),
+            )
+            .route(
+                "/partial",
+                get(|| async {
+                    HttpResponse::builder()
+                        .status(206)
+                        .header("content-range", "bytes 0-2/4")
+                        .body(Body::from("abc"))
+                        .unwrap()
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        (
+            origin,
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            }),
+        )
+    }
+    fn large(known: bool) -> HttpResponse<Body> {
+        let mut response =
+            HttpResponse::builder().header("content-type", "application/octet-stream");
+        if known {
+            response = response.header(
+                "content-length",
+                (1601u64 * TRANSFER_CHUNK_BYTES as u64).to_string(),
+            );
+        }
+        response
+            .body(Body::from_stream(futures_util::stream::iter(
+                (0..1601).map(|_| Ok::<_, std::io::Error>(vec![7; TRANSFER_CHUNK_BYTES])),
+            )))
+            .unwrap()
+    }
+    #[tokio::test]
+    async fn file_receiver_streams_known_and_unknown_lengths_above_old_ceilings() {
+        let (origin, server) = fixture().await;
+        let root = std::env::temp_dir().join(format!("hycli-net-file-{}", util::id()));
+        util::private_dir(&root).unwrap();
+        let network = Network::new(
+            Arc::new(Policy::with_limits(&root.join("policy.db"), 0, 100).unwrap()),
+            true,
+        );
+        for path in ["known", "unknown"] {
+            let received = network
+                .fetch_file_guarded(
+                    request(format!("{origin}/{path}")),
+                    &|| Ok(()),
+                    &FileReceiver::new(&root),
+                )
+                .await
+                .unwrap();
+            assert!(
+                received.response.bytes.is_empty(),
+                "file bytes are not a diagnostic buffer"
+            );
+            let file = received.artifact.unwrap();
+            assert_eq!(file.byte_count(), 1601 * TRANSFER_CHUNK_BYTES as u64);
+            let published = file
+                .publish(
+                    "large.bin",
+                    "application/octet-stream",
+                    Provenance {
+                        site: "fixture".into(),
+                        action: "download".into(),
+                        source_origin: origin.clone(),
+                    },
+                )
+                .unwrap();
+            let opened = ArtifactStore::open(&root)
+                .unwrap()
+                .open_completed(&published.manifest().artifact_id)
+                .unwrap();
+            let stream = opened.into_stream();
+            futures_util::pin_mut!(stream);
+            let mut count = 0u64;
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.unwrap();
+                assert!(chunk.len() <= TRANSFER_CHUNK_BYTES);
+                assert!(chunk.iter().all(|byte| *byte == 7));
+                count += chunk.len() as u64;
+            }
+            assert_eq!(count, 1601 * TRANSFER_CHUNK_BYTES as u64);
+            drop(published);
+            assert!(empty(&root));
+        }
+        server.abort();
+        drop(network);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn file_receiver_idle_cancellation_partial_and_diagnostic_failure_clean_owned_stage() {
+        let (origin, server) = fixture().await;
+        let root = std::env::temp_dir().join(format!("hycli-net-file-{}", util::id()));
+        util::private_dir(&root).unwrap();
+        let network = Arc::new(Network::new(
+            Arc::new(Policy::with_limits(&root.join("policy.db"), 0, 100).unwrap()),
+            true,
+        ));
+        for (path, code) in [
+            ("partial", "response_mismatch"),
+            ("diagnostic", "too_large"),
+            ("idle", "timeout"),
+        ] {
+            let mut input = request(format!("{origin}/{path}"));
+            input.timeout = Duration::from_millis(100);
+            assert_eq!(
+                network
+                    .fetch_file_guarded(input, &|| Ok(()), &FileReceiver::new(&root))
+                    .await
+                    .err()
+                    .unwrap()
+                    .public_code,
+                code
+            );
+            assert!(empty(&root));
+        }
+        let core = network.clone();
+        let path = root.clone();
+        let url = format!("{origin}/idle");
+        let transfer = tokio::spawn(async move {
+            core.fetch_file_guarded(request(url), &|| Ok(()), &FileReceiver::new(&path))
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while empty(&root) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        transfer.abort();
+        let _ = transfer.await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !empty(&root) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        server.abort();
+        drop(network);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn file_receiver_redirect_and_service_retry_use_fresh_attempt_state() {
+        let root = std::env::temp_dir().join(format!("hycli-net-file-{}", util::id()));
+        util::private_dir(&root).unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let count = attempts.clone();
+        let blocked_attempts = Arc::new(AtomicUsize::new(0));
+        let blocked_count = blocked_attempts.clone();
+        let app = Router::new()
+            .route(
+                "/redirect",
+                get(|| async {
+                    HttpResponse::builder()
+                        .status(302)
+                        .header("location", "/final")
+                        .body(Body::from("redirect diagnostic, not file bytes"))
+                        .unwrap()
+                }),
+            )
+            .route(
+                "/retry",
+                get(move || {
+                    let count = count.clone();
+                    async move {
+                        if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                            HttpResponse::builder()
+                                .status(503)
+                                .header("content-type", "application/json")
+                                .body(Body::from(r#"{"error":"temporarily unavailable"}"#))
+                                .unwrap()
+                        } else {
+                            HttpResponse::builder()
+                                .header("content-type", "application/octet-stream")
+                                .body(Body::from("final"))
+                                .unwrap()
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/blocked",
+                get(move || {
+                    let count = blocked_count.clone();
+                    async move {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        HttpResponse::builder()
+                            .status(503)
+                            .body(Body::from("unclassified rejection"))
+                            .unwrap()
+                    }
+                }),
+            )
+            .route(
+                "/final",
+                get(|| async {
+                    HttpResponse::builder()
+                        .header("content-type", "application/octet-stream")
+                        .body(Body::from("final"))
+                        .unwrap()
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let network = Network::new(
+            Arc::new(Policy::with_limits(&root.join("policy.db"), 0, 100).unwrap()),
+            true,
+        );
+        for path in ["redirect", "retry"] {
+            let received = network
+                .fetch_file_guarded(
+                    request(format!("{origin}/{path}")),
+                    &|| Ok(()),
+                    &FileReceiver::new(&root),
+                )
+                .await
+                .unwrap();
+            assert_eq!(received.response.status, 200);
+            assert!(received.response.bytes.is_empty());
+            let sealed = received.artifact.unwrap();
+            assert_eq!(sealed.byte_count(), 5);
+            assert_eq!(sealed.prefix(), b"final");
+            assert_eq!(
+                std::fs::read_dir(root.join("artifacts")).unwrap().count(),
+                1
+            );
+            drop(sealed);
+            assert!(empty(&root));
+        }
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        let blocked = network
+            .fetch_file_guarded(
+                request(format!("{origin}/blocked")),
+                &|| Ok(()),
+                &FileReceiver::new(&root),
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.response.status, 503);
+        assert_eq!(blocked.response.defense, "unknown");
+        assert_eq!(blocked.response.bytes, b"unclassified rejection");
+        assert!(blocked.artifact.is_none());
+        assert_eq!(blocked_attempts.load(Ordering::SeqCst), 1);
+        assert!(empty(&root));
+        server.abort();
+        drop(network);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

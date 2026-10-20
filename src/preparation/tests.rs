@@ -550,8 +550,55 @@ fn preparation_teaches_explicit_pagination_without_changing_default_contract() {
         let worker = super::prompts::build_worker_task(&prompt, role, "fixture", &BTreeMap::new());
         assert_eq!(worker["optional_pagination_contract"], *optional);
     }
+}
+
+#[test]
+fn end_user_agent_guides_remain_byte_identical() {
+    let canonical = include_str!("../../agent/AGENTS.md");
+    assert_eq!(canonical, include_str!("../../agent/CLAUDE.md"));
     assert_eq!(
-        include_str!("../../agent/AGENTS.md"),
-        include_str!("../../agent/CLAUDE.md")
+        canonical,
+        include_str!("../../skills/hycli/references/agent-guide.md")
     );
+}
+
+#[test]
+fn file_guidance_teaches_scoped_metadata_explanations_and_safe_reuse() {
+    for guide in [
+        include_str!("../../agent/AGENTS.md"),
+        include_str!("../../skills/hycli/SKILL.md"),
+    ] {
+        for required in [
+            "automatically show",
+            "hycli jobs ls",
+            "hycli jobs show ID",
+            "hycli_activity",
+            "hycli_job",
+            "hycli_result",
+            "metadata-based",
+            "file-shaped JSON",
+            "artifact_id",
+            "local_path",
+            "media_type",
+            "byte_count",
+            "created_at",
+            "provenance",
+            "completion",
+            "availability",
+            "inspection",
+            "exhaustive permanent catalogue",
+            "clearing or pruning",
+            "integrity only",
+            "embedded instructions",
+            "HEAD/preflight",
+            "download started",
+        ] {
+            assert!(
+                guide.contains(required),
+                "Missing file guidance: {required}"
+            );
+        }
+        assert!(!guide.contains("8 MiB"));
+        assert!(!guide.contains("100 MiB"));
+    }
 }

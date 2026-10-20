@@ -198,6 +198,8 @@ fn is_zero_pid(pid: &u32) -> bool {
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct Job {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<crate::artifacts::CompletedArtifact>,
     #[serde(skip)]
     pub(crate) account_selection: Option<crate::runtime::SelectionSnapshot>,
     pub id: String,
@@ -249,6 +251,7 @@ fn default_progress_total() -> usize {
 impl Job {
     pub fn new(kind: &str, locale: &str) -> Self {
         Self {
+            artifact: None,
             id: util::id(),
             kind: kind.into(),
             site_id: String::new(),

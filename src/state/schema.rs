@@ -115,6 +115,7 @@ impl SiteRow {
 }
 
 pub(super) struct JobRow {
+    pub(super) artifact_json: Option<String>,
     pub(super) id: String,
     pub(super) kind: String,
     pub(super) site_id: String,
@@ -146,6 +147,7 @@ pub(super) struct JobRow {
 impl JobRow {
     pub(super) fn from_row(r: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
+            artifact_json: r.get(27)?,
             id: r.get(0)?,
             kind: r.get(1)?,
             site_id: r.get(2)?,
@@ -187,6 +189,11 @@ impl JobRow {
             _ => crate::policy::Effect::Read,
         };
         Ok(Job {
+            artifact: self
+                .artifact_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
             account_selection: None,
             id: self.id,
             kind: self.kind,
@@ -309,7 +316,8 @@ pub(super) fn init_schema(conn: &Connection) -> AppResult<()> {
              parent_id TEXT NOT NULL DEFAULT '',
              effect TEXT NOT NULL DEFAULT 'read',
              dispatch_phase TEXT NOT NULL DEFAULT 'pending',
-             owner_pid INTEGER NOT NULL DEFAULT 0
+             owner_pid INTEGER NOT NULL DEFAULT 0,
+             artifact_json TEXT
          );
          CREATE INDEX IF NOT EXISTS idx_jobs_ord ON jobs(ord ASC);
          CREATE INDEX IF NOT EXISTS idx_jobs_status_kind_site
@@ -351,6 +359,7 @@ pub(super) fn init_schema(conn: &Connection) -> AppResult<()> {
         "ALTER TABLE jobs ADD COLUMN effect TEXT NOT NULL DEFAULT 'read'",
         "ALTER TABLE jobs ADD COLUMN dispatch_phase TEXT NOT NULL DEFAULT 'pending'",
         "ALTER TABLE jobs ADD COLUMN owner_pid INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN artifact_json TEXT",
     ] {
         let _ = conn.execute(ddl, []);
     }

@@ -55,6 +55,59 @@ impl Operation {
         }
         Some(parsed)
     }
+    pub(crate) fn matches_file_response(&self, received: &crate::net::FileResponse) -> bool {
+        let Some(artifact) = received.artifact.as_ref() else {
+            return false;
+        };
+        let response = &received.response;
+        if !response.successful()
+            || response.status == 206
+            || !response.header("content-range").is_empty()
+        {
+            return false;
+        }
+        let Some(expected) = self
+            .response
+            .as_ref()
+            .filter(|expected| expected.format == "file")
+        else {
+            return false;
+        };
+        let Some(file) = expected.file.as_ref() else {
+            return false;
+        };
+        let media = response
+            .header("content-type")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let prefix = String::from_utf8_lossy(artifact.prefix())
+            .trim_start()
+            .to_ascii_lowercase();
+        let html = media == "text/html" || media == "application/xhtml+xml";
+        let looks_html = ["<!doctype html", "<html", "<form"]
+            .iter()
+            .any(|start| prefix.starts_with(start));
+        // Headers and a finite prefix detect obvious mismatches, not whole-file
+        // safety or semantics. Every saved file remains untrusted and uninspected.
+        let matches_type = if html {
+            response
+                .header("content-disposition")
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .eq_ignore_ascii_case("attachment")
+        } else {
+            !looks_html
+        };
+        file.media_types.contains(&media)
+            && (file.allow_empty || artifact.byte_count() != 0)
+            && matches_type
+    }
+
     pub fn matches_response(&self, response: &crate::net::Response) -> bool {
         if !response.successful() {
             return false;
@@ -63,6 +116,9 @@ impl Operation {
             return true;
         };
         match expected.format.as_str() {
+            // File contracts require EOF-sealed reception, never a buffered JSON
+            // shape or an inspection prefix pretending to be a complete file.
+            "file" => false,
             "json" => self.parse_json_response(response).is_some_and(|body| {
                 expected
                     .required_pointers

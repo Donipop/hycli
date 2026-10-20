@@ -56,4 +56,28 @@ export async function download(path: string, name: string) {
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+// HEAD has no error body. Renewal retries only this read-only availability check.
+export async function checkArtifact(jobId: string, artifactId: string, signal: AbortSignal): Promise<void> {
+  const path = artifactPath(jobId, artifactId);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Response;
+    try { response = await fetch(path, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store', signal, headers: { 'Accept-Language': locale } }); }
+    catch (error) { if (signal.aborted) throw error; throw new ApiError('connection_lost', 0); }
+    signal.throwIfAborted();
+    if (response.ok) return;
+    if (attempt === 0 && response.status === 401) { await session(); signal.throwIfAborted(); continue; }
+    throw new ApiError(response.status === 404 ? 'not_found' : [400, 409].includes(response.status) ? 'data_invalid' : response.status === 401 ? 'session_expired' : 'internal', response.status);
+  }
+}
+function artifactPath(jobId: string, artifactId: string) {
+  return `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}`;
+}
+export async function downloadArtifact(jobId: string, artifactId: string, name: string, signal: AbortSignal): Promise<void> {
+  await checkArtifact(jobId, artifactId, signal);
+  signal.throwIfAborted();
+  const link = document.createElement('a');
+  link.href = artifactPath(jobId, artifactId); link.download = name;
+  document.body.appendChild(link);
+  try { link.click(); } finally { link.remove(); }
+}
 export async function copyText(value: string) { await navigator.clipboard.writeText(value); }

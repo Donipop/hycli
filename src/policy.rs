@@ -1075,7 +1075,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             }
         }
         if let Some(response) = &op.response {
-            if !["json", "html", "text", "xml", "empty"].contains(&response.format.as_str())
+            if !["json", "html", "text", "xml", "empty", "file"].contains(&response.format.as_str())
                 || response.required_pointers.len() > 30
                 || response.strip_prefix.len() > 128
                 || response.ssr_json.len() > 128

@@ -181,6 +181,14 @@ jobs:
           path: test-results/accepted-command/
           if-no-files-found: error
           retention-days: 7
+      - name: Retain synthetic file-download dashboard evidence
+        if: always() && matrix.browser_tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: file-download-regression
+          path: test-results/file-download/
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic upload dashboard evidence
         if: always() && matrix.browser_tests
         uses: actions/upload-artifact@v7
