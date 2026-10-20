@@ -188,8 +188,7 @@ impl Runtime {
             self.execute_observed(request, &self.state.settings()?.locale)
                 .await
         } else {
-            self.execute_definition(sp, request, None, false, None)
-                .await
+            Box::pin(self.execute_definition(sp, request, None, false, None)).await
         }
     }
     /// Approval IDs are validated when supplied by the dashboard handler; direct CLI/MCP calls execute when writes are enabled.
@@ -207,8 +206,7 @@ impl Runtime {
         job_id: Option<&str>,
     ) -> AppResult<(OpResult, i64)> {
         let sp = self.spec(&request.site_id)?;
-        self.execute_definition(&sp, request, approval, true, job_id)
-            .await
+        Box::pin(self.execute_definition(&sp, request, approval, true, job_id)).await
     }
     /// Verify a proposed read without replacing the user's installed definition.
     pub async fn verify_candidate_with_inputs(
@@ -224,9 +222,10 @@ impl Runtime {
             return Err(AppError::api("approval_required", 409));
         }
         let request = self.request(sp, action, inputs, Some(account))?;
-        self.execute_definition(sp, request, None, false, None)
-            .await
+        Box::pin(self.execute_definition(sp, request, None, false, None)).await
     }
+    // Callers heap-own this large operation state so it is not embedded in every
+    // outer CLI/MCP future. The box stays in the same task and drops with its owner.
     async fn execute_definition(
         &self,
         sp: &Spec,
@@ -779,5 +778,47 @@ impl Runtime {
             },
             attempt,
         ))
+    }
+}
+
+#[cfg(test)]
+mod stack_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn action_adapters_do_not_embed_the_operation_state_machine() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/action-future")
+            .join(util::id());
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        let sp = crate::spec::parse(
+            br#"{"site":{"name":"future-fixture","base_url":"https://example.test"},"operations":[{"name":"read","method":"GET","path":"/items","effect":"read"}]}"#,
+        )
+        .unwrap();
+        let request = core
+            .request(&sp, "read", BTreeMap::new(), Some(""))
+            .unwrap();
+        let inputs = BTreeMap::new();
+        {
+            let operation = core.execute_definition(&sp, request.clone(), None, false, None);
+            let installed = core.execute_for_job(request, None, None);
+            let direct = core.run_op(&sp, "read", &inputs);
+            let candidate = core.verify_candidate_with_inputs(&sp, "read", "", BTreeMap::new());
+            let operation_bytes = std::mem::size_of_val(&operation);
+            for adapter_bytes in [
+                std::mem::size_of_val(&installed),
+                std::mem::size_of_val(&direct),
+                std::mem::size_of_val(&candidate),
+            ] {
+                assert!(
+                    adapter_bytes < operation_bytes,
+                    "adapter embeds the operation state: {adapter_bytes} >= {operation_bytes}"
+                );
+            }
+            // Construction and dropping do not poll a command or detach work.
+        }
+        assert!(core.state.read().unwrap().jobs.is_empty());
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
