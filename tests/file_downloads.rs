@@ -29,7 +29,7 @@ fn assert_no_artifacts(root: &Path) {
     assert!(!directory.exists() || std::fs::read_dir(directory).unwrap().next().is_none());
 }
 fn definition(origin: &str) -> hycli::spec::Spec {
-    hycli::spec::parse(json!({"spec_version":3,"site":{"name":"files-fixture","base_url":origin},"operations":[{"name":"download","method":"GET","path":"/file","effect":"read","evidence":"Owned binary fixture","response":{"format":"file","file":{"media_types":["application/pdf"]}}},{"name":"json","method":"GET","path":"/json","effect":"read","response":{"format":"json"}}]}).to_string().as_bytes()).unwrap()
+    hycli::spec::parse(json!({"spec_version":3,"site":{"name":"files-fixture","base_url":origin},"operations":[{"name":"download","method":"GET","path":"/file","effect":"read","evidence":"Owned binary fixture","response":{"format":"file","file":{"media_types":["application/pdf"]}}},{"name":"json","method":"GET","path":"/json","effect":"read","evidence":"Owned JSON read fixture","response":{"format":"json"}}]}).to_string().as_bytes()).unwrap()
 }
 async fn server() -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new()
