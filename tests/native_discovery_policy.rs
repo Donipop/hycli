@@ -39,6 +39,45 @@ fn native_discovery_policy_migrates_old_settings_without_enabling_macos() {
 }
 
 #[test]
+fn concurrent_legacy_settings_migration_preserves_native_discovery_default() {
+    let root = root();
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("state.json");
+    let connection = rusqlite::Connection::open(path.with_extension("db")).unwrap();
+    connection.execute_batch("CREATE TABLE settings (id INTEGER PRIMARY KEY, locale TEXT NOT NULL, theme TEXT NOT NULL, reduce_motion INTEGER NOT NULL, notifications INTEGER NOT NULL, default_provider TEXT NOT NULL, engine_path TEXT NOT NULL); INSERT INTO settings VALUES (1, 'ko', 'dark', 0, 0, '', '');").unwrap();
+    drop(connection);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let store = StateStore::open(&path).unwrap();
+                let settings = store.settings().unwrap();
+                assert_eq!(
+                    settings.native_browser_discovery,
+                    !cfg!(target_os = "macos")
+                );
+                assert_eq!(settings.locale, "ko");
+                assert_eq!(settings.theme, "dark");
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    assert_eq!(
+        StateStore::open(&path)
+            .unwrap()
+            .settings()
+            .unwrap()
+            .native_browser_discovery,
+        !cfg!(target_os = "macos")
+    );
+}
+
+#[test]
 fn native_discovery_policy_is_visible_to_already_open_process_connections() {
     let path = root().join("state.json");
     let first = StateStore::open(&path).unwrap();
