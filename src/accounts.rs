@@ -296,6 +296,9 @@ pub(crate) fn collect_redaction_secrets(store: &crate::store::Store) -> Vec<Stri
         .cloned()
         .collect();
     for (name, value) in store.entries() {
+        if name.starts_with("@oauth/") {
+            values.extend(crate::runtime::oauth::redaction_values(value));
+        }
         if name.starts_with("accounts/") {
             if let Ok(credential) = serde_json::from_str::<Credential>(value) {
                 values.extend(credential.redaction_values());

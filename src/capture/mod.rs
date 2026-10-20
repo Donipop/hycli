@@ -243,6 +243,7 @@ pub fn draft_spec(
     let selected = &clusters[..clusters.len().min(limit)];
     let any_browser_auth = selected.iter().any(|c| c.needs_browser_auth);
     let mut auth = vec![spec::AuthStrategy {
+        oauth_refresh: None,
         name: "public".into(),
         kind: "none".into(),
         header: String::new(),
@@ -252,6 +253,7 @@ pub fn draft_spec(
     }];
     if any_browser_auth {
         auth.push(spec::AuthStrategy {
+            oauth_refresh: None,
             name: "browser".into(),
             kind: "browser".into(),
             header: String::new(),

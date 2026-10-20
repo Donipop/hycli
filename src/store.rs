@@ -30,6 +30,8 @@ pub struct Store {
     protection: String,
     keyring_allowed: bool,
     raw_hash: String,
+    #[cfg(test)]
+    pub(crate) oauth_fail_after: Option<(usize, bool)>,
 }
 
 impl Store {
@@ -44,6 +46,22 @@ impl Store {
             protection: "file_permissions_only".into(),
             keyring_allowed,
             raw_hash: String::new(),
+            #[cfg(test)]
+            oauth_fail_after: None,
+        };
+        store.load_if_changed()?;
+        Ok(store)
+    }
+    #[cfg(test)]
+    pub(crate) fn open_oauth_test(path: &Path, key: [u8; 32]) -> AppResult<Self> {
+        let mut store = Self {
+            path: path.to_owned(),
+            data: BTreeMap::new(),
+            key: Some(key.to_vec()),
+            protection: "os_keyring".into(),
+            keyring_allowed: true,
+            raw_hash: String::new(),
+            oauth_fail_after: None,
         };
         store.load_if_changed()?;
         Ok(store)
@@ -206,13 +224,15 @@ impl Store {
         self.data
             .keys()
             .filter(|key| {
-                !key.starts_with("@pagination/") && !key.starts_with("@read-observation/")
+                !key.starts_with("@oauth/")
+                    && !key.starts_with("@pagination/")
+                    && !key.starts_with("@read-observation/")
             })
             .cloned()
             .collect()
     }
     pub fn set(&mut self, site: &str, key: &str, value: &str) -> AppResult<()> {
-        if site.is_empty() || key.is_empty() || value.len() > 2 * 1024 * 1024 {
+        if site == "@oauth" || site.is_empty() || key.is_empty() || value.len() > 2 * 1024 * 1024 {
             return Err(AppError::api("bad_request", 400));
         }
         let _lock = util::file_lock(&self.path.with_extension("vault-lock"), false)?;
@@ -230,6 +250,9 @@ impl Store {
         Ok(())
     }
     pub fn delete(&mut self, site: &str, key: &str) -> AppResult<()> {
+        if site == "@oauth" {
+            return Err(AppError::api("bad_request", 400));
+        }
         let _lock = util::file_lock(&self.path.with_extension("vault-lock"), false)?;
         self.reload()?;
         let name = format!("{site}/{key}");
@@ -285,6 +308,61 @@ impl Store {
         Ok(result)
     }
 
+    pub(crate) fn oauth_replace(
+        &mut self,
+        key: &str,
+        expected: Option<&str>,
+        replacement: Option<&str>,
+    ) -> AppResult<()> {
+        let _lock = util::file_lock(&self.path.with_extension("vault-lock"), false)?;
+        self.reload()?;
+        if self.get("@oauth", key) != expected {
+            return Err(AppError::api("conflict", 409));
+        }
+        #[cfg(test)]
+        let fault = match self.oauth_fail_after {
+            Some((0, after)) => {
+                self.oauth_fail_after = None;
+                Some(after)
+            }
+            Some((remaining, after)) => {
+                self.oauth_fail_after = Some((remaining - 1, after));
+                None
+            }
+            None => None,
+        };
+        #[cfg(test)]
+        if fault == Some(false) {
+            return Err(AppError::api("internal", 500));
+        }
+        let name = format!("@oauth/{key}");
+        match replacement {
+            Some(value) => {
+                self.data.insert(name, value.into());
+            }
+            None => {
+                self.data.remove(&name);
+            }
+        }
+        let committed = self.save();
+        #[cfg(test)]
+        let committed = committed.and_then(|()| {
+            if fault == Some(true) {
+                Err(AppError::api("internal", 500))
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(error) = committed {
+            // Rename can succeed before directory sync fails. Disk, not the old
+            // in-memory snapshot, owns the outcome of an uncertain commit.
+            self.raw_hash.clear();
+            self.reload()?;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn save(&mut self) -> AppResult<()> {
         self.prepare_key();
         let file = if let Some(key) = &self.key {
@@ -314,6 +392,7 @@ impl Store {
         let bytes = serde_json::to_vec(&file)?;
         util::atomic_file(&self.path, &bytes)?;
         self.raw_hash = util::hash(&bytes);
+        self.protection = file.protection;
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 //! The single execution boundary used by the dashboard, CLI and MCP.
 mod account_read;
 mod accounts;
+pub(crate) mod oauth;
 mod selection;
 pub(crate) use selection::SelectionSnapshot;
 mod execution;
@@ -139,6 +140,30 @@ impl Runtime {
         allow_local: bool,
         keyring: bool,
     ) -> AppResult<Arc<Self>> {
+        Self::open_with_vault(
+            root,
+            specs_dir,
+            kb_path,
+            recover,
+            allow_local,
+            keyring,
+            None,
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn open_oauth_test(root: &Path) -> AppResult<Arc<Self>> {
+        let store = Store::open_oauth_test(&root.join("store.json"), [42; 32])?;
+        Self::open_with_vault(root, None, None, false, true, false, Some(store))
+    }
+    fn open_with_vault(
+        root: &Path,
+        specs_dir: Option<PathBuf>,
+        kb_path: Option<PathBuf>,
+        recover: bool,
+        allow_local: bool,
+        keyring: bool,
+        supplied_vault: Option<Store>,
+    ) -> AppResult<Arc<Self>> {
         util::private_dir(root)?;
         let instance = if recover {
             Some(util::file_lock(&root.join("dashboard-process.lock"), true)?)
@@ -166,7 +191,10 @@ impl Runtime {
             root: root.into(),
             specs_dir,
             state,
-            vault: Mutex::new(Store::open_with_keyring(&root.join("store.json"), keyring)?),
+            vault: Mutex::new(match supplied_vault {
+                Some(store) => store,
+                None => Store::open_with_keyring(&root.join("store.json"), keyring)?,
+            }),
             policy: policy.clone(),
             network: Network::new(policy, allow_local),
             ai: ai::Client::new(codex),

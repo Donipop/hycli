@@ -517,5 +517,9 @@
   "errors.work_in_progress": "Terminez ou annulez les tâches en cours dans Activité, puis quittez à nouveau.",
   "errors.shutting_down": "Hycli est en cours de fermeture.",
   "errors.pagination_expired": "Ce curseur de page a expiré ou ne correspond plus à cette requête. Recommencez à la première page.",
-  "errors.pagination_invalid": "Le site a renvoyé un curseur non pris en charge. Il faut au moins 8 caractères et au plus 4096 octets, sans identifiants ni numéros de page courts."
+  "errors.pagination_invalid": "Le site a renvoyé un curseur non pris en charge. Il faut au moins 8 caractères et au plus 4096 octets, sans identifiants ni numéros de page courts.",
+  "errors.oauth_recovery_required": "Ces identifiants OAuth ne peuvent pas être renouvelés en toute sécurité. Utilisez auth set avec de nouvelles données d’autorisation JSON via l’entrée standard. Ne réutilisez pas l’ancien jeton de renouvellement.",
+  "errors.oauth_verification_pending": "La vérification du compte est incomplète. Réessayez la lecture pour vérifier les identifiants enregistrés sans nouvel échange de jetons.",
+  "errors.oauth_configuration_invalid": "La configuration OAuth est incorrecte. Vérifiez vos paramètres OAuth.",
+  "errors.oauth_stdin_required": "Transmettez les identifiants OAuth via l’entrée standard, et non comme arguments de ligne de commande."
 }

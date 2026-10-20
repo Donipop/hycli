@@ -300,7 +300,7 @@ impl Network {
         })
     }
     pub async fn fetch(&self, input: Request) -> AppResult<Response> {
-        self.fetch_inner(input, None, None).await
+        self.fetch_inner(input, None, None, None).await
     }
     /// The continuation key/value is supplied only by the private runtime resolver.
     pub(crate) async fn fetch_paginated(
@@ -312,7 +312,7 @@ impl Network {
             return Err(AppError::api("unsafe_target", 400));
         }
         input.follow_redirects = false;
-        self.fetch_inner(input, continuation, None).await
+        self.fetch_inner(input, continuation, None, None).await
     }
     /// Recheck private account authority after every wait and immediately before dispatch.
     /// The callback is also run for each bounded transport retry.
@@ -322,7 +322,18 @@ impl Network {
         continuation: Option<(&str, &str)>,
         check_authority: &(dyn Fn() -> AppResult<()> + Sync),
     ) -> AppResult<Response> {
-        self.fetch_inner(input, continuation, Some(check_authority))
+        self.fetch_inner(input, continuation, Some(check_authority), None)
+            .await
+    }
+    pub(crate) async fn fetch_oauth_guarded(
+        &self,
+        mut input: Request,
+        continuation: Option<(&str, &str)>,
+        check_authority: &(dyn Fn() -> AppResult<()> + Sync),
+        dispatched: Option<&std::sync::atomic::AtomicBool>,
+    ) -> AppResult<Response> {
+        input.follow_redirects = false;
+        self.fetch_inner(input, continuation, Some(check_authority), dispatched)
             .await
     }
     async fn fetch_inner(
@@ -330,6 +341,7 @@ impl Network {
         input: Request,
         continuation: Option<(&str, &str)>,
         check_authority: Option<&(dyn Fn() -> AppResult<()> + Sync)>,
+        dispatched: Option<&std::sync::atomic::AtomicBool>,
     ) -> AppResult<Response> {
         input.check_read_headers()?;
         let mut initial = validate_url(&input.url)?;
@@ -497,10 +509,20 @@ impl Network {
             if let Some(check) = check_authority {
                 check()?;
             }
+            if let Some(dispatched) = dispatched {
+                dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             let response = request.send().await;
             let response = match response {
                 Ok(response) => response,
                 Err(error) => {
+                    // This no-retry OAuth POST failed before an HTTP request could
+                    // be sent. Other transport failures remain dispatch-uncertain.
+                    if !input.read_only && !input.follow_redirects && error.is_connect() {
+                        if let Some(dispatched) = dispatched {
+                            dispatched.store(false, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
                     let is_timeout = error.is_timeout();
                     drop(lease);
                     if input.read_only && retries < 1 && (is_timeout || error.is_connect()) {
@@ -889,8 +911,8 @@ mod website_input_tests {
     #[test]
     fn website_input_normalizes_domains_without_weakening_request_validation() {
         assert_eq!(
-            website_url("  blog.naver.com  ").unwrap().as_str(),
-            "https://blog.naver.com/"
+            website_url("  blog.example.com  ").unwrap().as_str(),
+            "https://blog.example.com/"
         );
         assert_eq!(
             website_url("//example.org/path").unwrap().as_str(),

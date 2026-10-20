@@ -517,5 +517,9 @@
   "errors.work_in_progress": "Conclua ou cancele as tarefas em andamento em Atividade e tente sair novamente.",
   "errors.shutting_down": "O Hycli está sendo encerrado.",
   "errors.pagination_expired": "Este cursor de página expirou ou não corresponde mais à solicitação. Recomece na primeira página.",
-  "errors.pagination_invalid": "O site retornou um cursor não compatível. São necessários pelo menos 8 caracteres e no máximo 4096 bytes, sem credenciais ou números de página curtos."
+  "errors.pagination_invalid": "O site retornou um cursor não compatível. São necessários pelo menos 8 caracteres e no máximo 4096 bytes, sem credenciais ou números de página curtos.",
+  "errors.oauth_recovery_required": "Não é possível renovar estas credenciais do OAuth com segurança. Use auth set com novos dados de autorização em JSON pela entrada padrão. Não reutilize o token de renovação anterior.",
+  "errors.oauth_verification_pending": "A verificação da conta está incompleta. Tente a leitura novamente para verificar as credenciais salvas sem outra troca de tokens.",
+  "errors.oauth_configuration_invalid": "A configuração do OAuth é inválida. Verifique as configurações do OAuth.",
+  "errors.oauth_stdin_required": "Forneça as credenciais do OAuth pela entrada padrão, não como argumentos de linha de comando."
 }

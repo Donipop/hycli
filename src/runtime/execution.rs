@@ -59,6 +59,7 @@ impl Runtime {
                 account.clear();
             }
         }
+        super::oauth::validate_operation(sp, op, &inputs, &account)?;
         let (headers, secrets) = self.headers(sp, op, &url, &account)?;
         let request = ExecutionRequest {
             site_id: sp.site.name.clone(),
@@ -66,7 +67,9 @@ impl Runtime {
             account_id: account,
             inputs,
             spec_hash: Self::spec_hash(sp)?,
-            credential_hash: util::hash(&serde_json::to_vec(&headers)?),
+            credential_hash: self
+                .oauth_credential_hash(sp, op)?
+                .unwrap_or(util::hash(&serde_json::to_vec(&headers)?)),
         };
         // Validate opaque capability before any dashboard job persists its inputs.
         self.resolve_cursor(&request, op, &url, &secrets)?;
@@ -247,6 +250,7 @@ impl Runtime {
         if origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
+        super::oauth::validate_operation(sp, op, &request.inputs, &request.account_id)?;
         let (mut headers, mut secrets, credential_snapshot) =
             self.headers_snapshot(sp, op, &url, &request.account_id)?;
         effect = effect.combine(policy::request_headers_effect(
@@ -254,7 +258,9 @@ impl Runtime {
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_str())),
         ));
-        checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
+        checked.credential_hash = self
+            .oauth_credential_hash(sp, op)?
+            .unwrap_or(util::hash(&serde_json::to_vec(&headers)?));
         let cursor = self.resolve_cursor(&checked, op, &url, &secrets)?;
         if let Some(value) = &cursor {
             if super::pagination::continuation_effect(op, &request.inputs, &url, value)
@@ -367,7 +373,22 @@ impl Runtime {
                         .flatten()
                         .as_deref()
                         == Some("browser-fetch")));
-        let response = if let Some(p) = &op.pagination {
+        let response = if sp
+            .find_auth(&op.auth)
+            .is_some_and(|auth| auth.oauth_refresh.is_some())
+        {
+            self.fetch_oauth_operation(
+                sp,
+                op,
+                req_input,
+                op.pagination
+                    .as_ref()
+                    .and_then(|p| cursor.as_deref().map(|v| (p.query.as_str(), v))),
+                &mut secrets,
+                &checked.credential_hash,
+            )
+            .await
+        } else if let Some(p) = &op.pagination {
             self.network
                 .fetch_paginated(req_input, cursor.as_deref().map(|v| (p.query.as_str(), v)))
                 .await
