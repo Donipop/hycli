@@ -371,6 +371,7 @@
   "safety.approvalExpired": "Xác nhận này đã hết hạn. Hãy xem lại thao tác.",
   "errors.approval_required": "Thao tác này cần bạn xác nhận.",
   "errors.approval_expired": "Xem lại thao tác này trước khi chạy.",
+  "errors.api_denied": "Điểm cuối đã từ chối yêu cầu này. Hãy kiểm tra quyền truy cập, cấu hình, phạm vi quyền và dữ liệu đầu vào.",
   "errors.blocked_by_site": "Trang web đã từ chối yêu cầu. Kiểm tra tài khoản của bạn trong trình duyệt.",
   "errors.engine_unavailable": "Bộ chạy công cụ trang web không khả dụng. Kiểm tra kết nối trong Cài đặt.",
   "errors.engine_incompatible": "Cập nhật bộ chạy công cụ trang web để kết nối với Hycli.",

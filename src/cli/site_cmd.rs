@@ -1,7 +1,7 @@
 use super::{
     actions,
     args::{AuthCmd, Deps, SpecCmd},
-    dispatch::{blocked_err, open_kb, runner},
+    dispatch::{open_kb, runner},
 };
 use crate::{
     apperr::{self, AppError},
@@ -349,10 +349,8 @@ pub(super) async fn try_run(
         sp.op(&op)?;
         runner.run_op(&sp, &op, &args).await?
     };
+    res.ensure_success()?;
     emit.data(&res);
-    if res.defense != "none" && !res.defense.is_empty() {
-        return Err(blocked_err(&res.defense, &res.signal));
-    }
     Ok(())
 }
 
@@ -505,6 +503,7 @@ pub(super) fn job_outcome(job: &crate::state::Job) -> Result<(), AppError> {
             };
             let status = match code {
                 "auth_required" | "identity_unavailable" => 401,
+                "api_denied" => 403,
                 "blocked_by_site" | "site_rate_limited" => 429,
                 _ => 500,
             };

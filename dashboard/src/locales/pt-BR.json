@@ -358,6 +358,7 @@
   "safety.approvalExpired": "Esta confirmação expirou. Revise a ação novamente.",
   "errors.approval_required": "Esta ação precisa da sua confirmação.",
   "errors.approval_expired": "Revise esta ação novamente antes de executá-la.",
+  "errors.api_denied": "O endpoint recusou esta solicitação. Verifique o acesso, a configuração, as permissões e os dados de entrada.",
   "errors.blocked_by_site": "O site recusou esta solicitação. Verifique sua conta no navegador.",
   "errors.engine_unavailable": "O mecanismo de ferramentas dos sites não está disponível. Verifique a conexão em Configurações.",
   "errors.engine_incompatible": "Atualize o mecanismo de ferramentas dos sites para conectá-lo ao Hycli.",

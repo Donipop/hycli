@@ -357,6 +357,7 @@
   "safety.approvalExpired": "Konfirmasi ini sudah kedaluwarsa. Tinjau tindakan kembali.",
   "errors.approval_required": "Tindakan ini memerlukan konfirmasi Anda.",
   "errors.approval_expired": "Tinjau kembali tindakan ini sebelum menjalankannya.",
+  "errors.api_denied": "Endpoint menolak permintaan ini. Periksa akses, konfigurasi, izin, dan masukan.",
   "errors.blocked_by_site": "Situs menolak permintaan ini. Periksa akun Anda di browser.",
   "errors.engine_unavailable": "Mesin alat situs web tidak tersedia. Periksa koneksinya di Pengaturan.",
   "errors.engine_incompatible": "Perbarui mesin alat situs web agar dapat terhubung ke Hycli.",

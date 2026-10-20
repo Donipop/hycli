@@ -357,6 +357,7 @@
   "safety.approvalExpired": "Bu onayın süresi doldu. İşlemi yeniden inceleyin.",
   "errors.approval_required": "Bu işlem onayınızı gerektiriyor.",
   "errors.approval_expired": "Çalıştırmadan önce bu işlemi yeniden inceleyin.",
+  "errors.api_denied": "Uç nokta bu isteği reddetti. Erişimi, yapılandırmayı, izinleri ve girdileri kontrol edin.",
   "errors.blocked_by_site": "Web sitesi bu isteği reddetti. Hesabınızı tarayıcıda kontrol edin.",
   "errors.engine_unavailable": "Web sitesi araç motoru kullanılamıyor. Ayarlar'dan bağlantısını kontrol edin.",
   "errors.engine_incompatible": "Hycli'ye bağlamak için web sitesi araç motorunu güncelleyin.",

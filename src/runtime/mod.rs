@@ -4,6 +4,7 @@ mod accounts;
 mod selection;
 pub(crate) use selection::SelectionSnapshot;
 mod execution;
+mod failure;
 mod identity;
 mod pagination;
 mod preflight;
@@ -95,6 +96,8 @@ pub struct SiteView {
 #[derive(Clone, Serialize)]
 pub struct OpResult {
     #[serde(skip)]
+    pub diagnostic: Option<crate::apperr::SafeHttpDiagnostic>,
+    #[serde(skip)]
     pub paginated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
@@ -119,18 +122,12 @@ impl OpResult {
     }
 
     pub fn ensure_success(&self) -> AppResult<()> {
-        if self.signal == "query_failed" || self.signal == "action_outcome_unknown" {
-            return Err(AppError::api(&self.signal, 502));
-        }
-        let (code, status) = match self.status {
-            401 => ("auth_required", 401),
-            429 => ("site_rate_limited", 429),
-            403 => ("blocked_by_site", 403),
-            _ if self.defense != "none" && !self.defense.is_empty() => ("blocked_by_site", 403),
-            200..300 => return Ok(()),
-            _ => ("request_failed", 502),
-        };
-        Err(AppError::api(code, status))
+        failure::ensure_success(
+            self.status,
+            &self.defense,
+            &self.signal,
+            self.diagnostic.clone(),
+        )
     }
 }
 impl Runtime {

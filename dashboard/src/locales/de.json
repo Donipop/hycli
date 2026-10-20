@@ -358,6 +358,7 @@
   "safety.approvalExpired": "Diese Bestätigung ist abgelaufen. Prüfe die Aktion erneut.",
   "errors.approval_required": "Diese Aktion braucht deine Bestätigung.",
   "errors.approval_expired": "Prüfe diese Aktion vor dem Ausführen erneut.",
+  "errors.api_denied": "Der Endpunkt hat diese Anfrage abgelehnt. Prüfe Zugriff, Konfiguration, Berechtigungen und Eingaben.",
   "errors.blocked_by_site": "Die Website hat die Anfrage abgelehnt. Prüfe dein Konto im Browser.",
   "errors.engine_unavailable": "Die Ausführungssoftware für Website-Tools ist nicht verfügbar. Prüfe ihre Verbindung in den Einstellungen.",
   "errors.engine_incompatible": "Aktualisiere die Ausführungssoftware für Website-Tools, um sie mit Hycli zu verbinden.",

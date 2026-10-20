@@ -371,6 +371,7 @@
   "safety.approvalExpired": "這次確認已過期。請重新檢查操作。",
   "errors.approval_required": "這項操作需要你確認。",
   "errors.approval_expired": "執行前請重新檢查這項操作。",
+  "errors.api_denied": "端點拒絕了此請求。請檢查端點存取權限、設定、權限範圍和輸入。",
   "errors.blocked_by_site": "網站拒絕了這項請求。請在瀏覽器中檢查帳號。",
   "errors.engine_unavailable": "網站工具引擎無法使用。請在設定中檢查連線。",
   "errors.engine_incompatible": "請更新網站工具引擎，以連接到 Hycli。",

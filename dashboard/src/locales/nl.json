@@ -358,6 +358,7 @@
   "safety.approvalExpired": "Deze bevestiging is verlopen. Controleer de actie opnieuw.",
   "errors.approval_required": "Deze actie heeft je bevestiging nodig.",
   "errors.approval_expired": "Controleer deze actie opnieuw voordat je haar uitvoert.",
+  "errors.api_denied": "Het eindpunt heeft dit verzoek geweigerd. Controleer de toegang, configuratie, machtigingen en invoer.",
   "errors.blocked_by_site": "De website heeft dit verzoek geweigerd. Controleer je account in de browser.",
   "errors.engine_unavailable": "De uitvoersoftware voor websitetools is niet beschikbaar. Controleer de verbinding in Instellingen.",
   "errors.engine_incompatible": "Werk de uitvoersoftware voor websitetools bij om deze met Hycli te verbinden.",

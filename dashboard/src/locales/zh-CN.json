@@ -371,6 +371,7 @@
   "safety.approvalExpired": "此确认已过期。请重新检查操作。",
   "errors.approval_required": "此操作需要你确认。",
   "errors.approval_expired": "执行前请重新检查此操作。",
+  "errors.api_denied": "端点拒绝了此请求。请检查端点访问权限、配置、权限范围和输入。",
   "errors.blocked_by_site": "网站拒绝了此请求。请在浏览器中检查账号。",
   "errors.engine_unavailable": "网站工具引擎不可用。请在设置中检查连接。",
   "errors.engine_incompatible": "请更新网站工具引擎，以连接到 Hycli。",

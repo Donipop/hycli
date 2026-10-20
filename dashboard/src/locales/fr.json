@@ -358,6 +358,7 @@
   "safety.approvalExpired": "Cette confirmation a expiré. Vérifiez à nouveau l’action.",
   "errors.approval_required": "Cette action nécessite votre confirmation.",
   "errors.approval_expired": "Vérifiez à nouveau cette action avant de l’exécuter.",
+  "errors.api_denied": "Le point de terminaison a refusé cette requête. Vérifiez son accès, sa configuration, les autorisations et les paramètres saisis.",
   "errors.blocked_by_site": "Le site a refusé cette requête. Vérifiez votre compte dans le navigateur.",
   "errors.engine_unavailable": "Le moteur des outils web n’est pas disponible. Vérifiez sa connexion dans les Paramètres.",
   "errors.engine_incompatible": "Mettez à jour le moteur des outils web pour le connecter à Hycli.",

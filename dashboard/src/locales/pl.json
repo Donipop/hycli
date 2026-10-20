@@ -357,6 +357,7 @@
   "safety.approvalExpired": "To potwierdzenie wygasło. Sprawdź działanie ponownie.",
   "errors.approval_required": "To działanie wymaga Twojego potwierdzenia.",
   "errors.approval_expired": "Sprawdź to działanie ponownie przed uruchomieniem.",
+  "errors.api_denied": "Punkt końcowy odrzucił to żądanie. Sprawdź dostęp, konfigurację, uprawnienia i dane wejściowe.",
   "errors.blocked_by_site": "Strona odrzuciła tę prośbę. Sprawdź swoje konto w przeglądarce.",
   "errors.engine_unavailable": "Mechanizm narzędzi stron jest niedostępny. Sprawdź jego połączenie w Ustawieniach.",
   "errors.engine_incompatible": "Zaktualizuj mechanizm narzędzi stron, aby połączyć go z Hycli.",
