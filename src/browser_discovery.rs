@@ -7,8 +7,11 @@ use crate::{
     runtime::Runtime,
     util,
 };
+use rookie_cookies::CancellationHandle;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 pub fn discover() -> Vec<BrowserProfile> {
     crate::environment::inspect().profiles
@@ -225,14 +228,42 @@ fn native_cookies(
         Err(_) => Err(()),
     }
 }
+struct ScanPermit(&'static AtomicBool);
+impl Drop for ScanPermit {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+async fn run_native_scan<T, F>(
+    scanning: &'static AtomicBool,
+    budget: Duration,
+    work: F,
+) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(CancellationHandle) -> T + Send + 'static,
+{
+    if scanning.swap(true, Ordering::SeqCst) {
+        return Err(AppError::api("browser_busy", 409));
+    }
+    let permit = ScanPermit(scanning);
+    let cancellation = CancellationHandle::new();
+    let scan = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work(cancellation)
+    });
+    tokio::time::timeout(budget, scan)
+        .await
+        .map_err(|_| AppError::api("browser_unavailable", 408))?
+        .map_err(|_| AppError::api("browser_unavailable", 422))
+}
+
 fn scan_site(
     target: &url::Url,
     wanted_profile: &str,
     profiles: Option<Vec<BrowserProfile>>,
 ) -> (usize, usize, Vec<ImportedSession>) {
-    let mut checked = 0;
-    let mut unavailable = 0;
-    let mut found = vec![];
     // Local fixture/development servers do not inherit unrelated browser credentials.
     if target
         .host_str()
@@ -240,20 +271,36 @@ fn scan_site(
     {
         return (0, 0, vec![]);
     }
-    for profile in profiles
-        .unwrap_or_else(discover)
-        .into_iter()
-        .filter(|p| wanted_profile.is_empty() || p.id == wanted_profile)
-        .take(24)
-    {
+    scan_profiles(
+        profiles
+            .unwrap_or_else(discover)
+            .into_iter()
+            .filter(|p| wanted_profile.is_empty() || p.id == wanted_profile)
+            .take(24),
+        &CancellationHandle::new(),
+        |profile| {
+            let cookies = load_site_cookies(&profile, target);
+            let storage = crate::browser_storage::load(
+                &profile.path,
+                profile.browser == "Firefox",
+                &target.origin().ascii_serialization(),
+            );
+            ImportedSession::from_results(profile, cookies, storage)
+        },
+    )
+}
+
+fn scan_profiles(
+    profiles: impl IntoIterator<Item = BrowserProfile>,
+    _cancellation: &CancellationHandle,
+    mut read: impl FnMut(BrowserProfile) -> ImportedSession,
+) -> (usize, usize, Vec<ImportedSession>) {
+    let mut checked = 0;
+    let mut unavailable = 0;
+    let mut found = vec![];
+    for profile in profiles {
         checked += 1;
-        let cookies = load_site_cookies(&profile, target);
-        let storage = crate::browser_storage::load(
-            &profile.path,
-            profile.browser == "Firefox",
-            &target.origin().ascii_serialization(),
-        );
-        let session = ImportedSession::from_results(profile, cookies, storage);
+        let session = read(profile);
         if !session.complete {
             unavailable += 1;
         }
@@ -261,6 +308,7 @@ fn scan_site(
     }
     (checked, unavailable, found)
 }
+
 impl Runtime {
     /// A failed local read is not a logout. Keep the old snapshot whole rather
     /// than mixing cookies and storage that may belong to different sign-ins.
@@ -334,28 +382,12 @@ impl Runtime {
         };
         let target_copy = target.clone();
         let wanted_profile = profile_id.to_string();
-        // Serialise native keyring access. A timeout does not start competing background scans.
-        static SCANNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if SCANNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            return Err(crate::apperr::AppError::api("browser_busy", 409));
-        }
-        let scan = tokio::task::spawn_blocking(move || {
-            struct Release;
-            impl Drop for Release {
-                fn drop(&mut self) {
-                    SCANNING.store(false, std::sync::atomic::Ordering::SeqCst);
-                }
-            }
-            let _release = Release;
-            scan_site(&target_copy, &wanted_profile, profiles)
-        });
-        // Up to 24 profiles may each wait eight seconds for their OS key store.
-        // Leave room for snapshots on a busy disk instead of discarding a valid full scan.
+        static SCANNING: AtomicBool = AtomicBool::new(false);
         let (checked, unavailable, sessions) =
-            tokio::time::timeout(std::time::Duration::from_secs(300), scan)
-                .await
-                .map_err(|_| crate::apperr::AppError::api("browser_unavailable", 408))?
-                .map_err(|_| crate::apperr::AppError::api("browser_unavailable", 422))?;
+            run_native_scan(&SCANNING, Duration::from_secs(300), move |_| {
+                scan_site(&target_copy, &wanted_profile, profiles)
+            })
+            .await?;
         for session in sessions {
             let existing = self
                 .state
@@ -634,6 +666,115 @@ fn identity_key(account: &crate::accounts::AccountView) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_scan_cancellation_stops_before_another_profile_and_discards_partial_result() {
+        let cancellation = CancellationHandle::new();
+        let mut calls = 0;
+        let (checked, _, sessions) = scan_profiles(
+            (0..4).map(|_| BrowserProfile::default()),
+            &cancellation,
+            |profile| {
+                calls += 1;
+                cancellation.cancel();
+                ImportedSession::from_results(profile, Ok(vec![]), Ok(Default::default()))
+            },
+        );
+        assert_eq!(calls, 1, "cancellation must stop further profile work");
+        assert_eq!(checked, 1);
+        assert!(sessions.is_empty(), "cancelled work must not be published");
+    }
+
+    #[test]
+    fn native_scan_already_cancelled_never_reads_profiles() {
+        let cancellation = CancellationHandle::new();
+        cancellation.cancel();
+        let (checked, unavailable, sessions) =
+            scan_profiles([BrowserProfile::default()], &cancellation, |_| {
+                panic!("cancelled scan must never read a profile")
+            });
+        assert_eq!((checked, unavailable), (0, 0));
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn native_scan_caller_abort_cancels_owned_worker_without_releasing_gate() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run_native_scan(
+            &GATE,
+            Duration::from_secs(10),
+            move |cancel| {
+                started.send(cancel.clone()).unwrap();
+                wait.recv().unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        let cancellation = ready.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            GATE.load(Ordering::SeqCst),
+            "worker still owns the scan permit"
+        );
+        let second = run_native_scan(&GATE, Duration::from_secs(1), |_| ()).await;
+        assert_eq!(second.unwrap_err().public_code, "browser_busy");
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert!(
+            cancellation.is_cancelled(),
+            "dropping the caller must cancel its native request"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_scan_timeout_cancels_owned_worker() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run_native_scan(
+            &GATE,
+            Duration::from_millis(100),
+            move |cancel| {
+                started.send(cancel.clone()).unwrap();
+                wait.recv().unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        let cancellation = ready.await.unwrap();
+        assert_eq!(task.await.unwrap().unwrap_err().http_status, 408);
+        assert!(
+            GATE.load(Ordering::SeqCst),
+            "timeout must not release a running worker's permit"
+        );
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert!(
+            cancellation.is_cancelled(),
+            "timeout must cancel its native request"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_scan_completion_releases_gate_and_preserves_result() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        assert_eq!(
+            run_native_scan(&GATE, Duration::from_secs(1), |_| 7)
+                .await
+                .unwrap(),
+            7
+        );
+        assert!(!GATE.load(Ordering::SeqCst));
+        assert_eq!(
+            run_native_scan(&GATE, Duration::from_secs(1), |_| 9)
+                .await
+                .unwrap(),
+            9
+        );
+    }
+
     #[test]
     fn native_reimport_read_failures_preserve_the_whole_verified_session() {
         use crate::accounts::{Credential, Identity};
