@@ -997,6 +997,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_scan_http_disconnect_cancels_worker_without_releasing_admission() {
+        use crate::native_scan_admission::{NativeScanIntent, NativeScanPermit};
+        use tokio::io::AsyncWriteExt;
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let root = std::env::temp_dir().join(format!("hycli-disconnect-{}", util::id()));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let fixture = std::sync::Arc::new(std::sync::Mutex::new(Some((started, wait, finished))));
+        let worker_root = root.clone();
+        let app = axum::Router::new().route(
+            "/synthetic-scan",
+            axum::routing::get(move || {
+                let fixture = fixture.clone();
+                let worker_root = worker_root.clone();
+                async move {
+                    let (started, wait, finished) = fixture.lock().unwrap().take().unwrap();
+                    let result = run_native_scan(
+                        &GATE,
+                        Duration::from_secs(10),
+                        || Ok(()),
+                        move |cancel| {
+                            let mut reads = 0;
+                            let mut published = 0;
+                            let result = with_native_admission(
+                                &worker_root,
+                                NativeScanIntent::Preparation,
+                                &cancel,
+                                || {
+                                    let mut started = Some(started);
+                                    let (_, _, sessions) = scan_profiles(
+                                        (0..2).map(|_| BrowserProfile::default()),
+                                        &cancel,
+                                        |profile| {
+                                            read_native_profile(
+                                                profile,
+                                                &cancel,
+                                                || true,
+                                                |_| {
+                                                    reads += 1;
+                                                    if let Some(started) = started.take() {
+                                                        started.send(cancel.clone()).unwrap();
+                                                        wait.recv().unwrap();
+                                                    }
+                                                    Ok(vec![])
+                                                },
+                                                |_| panic!("disconnected caller must not continue to storage"),
+                                            )
+                                        },
+                                    );
+                                    published = sessions.len();
+                                },
+                            );
+                            finished
+                                .send((reads, published, result.err().map(|e| e.public_code)))
+                                .unwrap();
+                        },
+                    )
+                    .await;
+                    if result.is_ok() {
+                        axum::http::StatusCode::OK
+                    } else {
+                        axum::http::StatusCode::CONFLICT
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut connection = tokio::net::TcpStream::connect(address).await.unwrap();
+        connection
+            .write_all(
+                b"GET /synthetic-scan HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let cancellation = tokio::time::timeout(Duration::from_secs(2), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(connection);
+        let cancelled = tokio::time::timeout(Duration::from_secs(2), async {
+            while !cancellation.is_cancelled() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok();
+        let held = NativeScanPermit::acquire(&root, NativeScanIntent::UserRequested)
+            .err()
+            .map(|e| e.public_code);
+        let gate_held = GATE.load(Ordering::SeqCst);
+        release.send(()).unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(2), done).await;
+        server.abort();
+        assert!(
+            cancelled,
+            "HTTP disconnect must drop the caller and cancel native work"
+        );
+        assert_eq!(held.as_deref(), Some("browser_busy"));
+        assert!(gate_held);
+        assert_eq!(
+            outcome.unwrap().unwrap(),
+            (1, 0, Some("native_discovery_retry_required".into()))
+        );
+        assert_eq!(
+            NativeScanPermit::acquire(&root, NativeScanIntent::Preparation)
+                .err()
+                .unwrap()
+                .public_code,
+            "native_discovery_retry_required"
+        );
+    }
+
+    #[tokio::test]
     async fn native_scan_policy_revocation_cancels_pending_worker() {
         static GATE: AtomicBool = AtomicBool::new(false);
         let root = std::env::temp_dir().join(format!("hycli-native-policy-{}", crate::util::id()));
