@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "AI 服务商报告了计费问题。请检查服务商账号中的计费设置。",
   "errors.auth_required": "请登录此网站后重试。",
   "errors.request_failed": "网站没有响应，请检查地址后重试。",
+  "errors.request_lease_lost": "此请求已失去执行资格。请等待其他活动完成，然后发起新请求。",
   "errors.timeout": "耗时超出预期，请重试。",
   "errors.unsafe_target": "请输入有效的网站地址。",
   "errors.operation_failed": "网站未能完成此操作。",

@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "AI 服務供應商回報了帳務問題。請檢查服務供應商帳號的帳務設定。",
   "errors.auth_required": "請登入此網站後重試。",
   "errors.request_failed": "網站沒有回應，請檢查網址後重試。",
+  "errors.request_lease_lost": "此請求已失去執行資格。請等待其他活動完成，再發起新請求。",
   "errors.timeout": "耗時超出預期，請重試。",
   "errors.unsafe_target": "請輸入有效的網站網址。",
   "errors.operation_failed": "網站無法完成此操作。",

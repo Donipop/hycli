@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "Der KI-Anbieter hat ein Abrechnungsproblem gemeldet. Prüfe die Abrechnungseinstellungen in deinem Anbieterkonto.",
   "errors.auth_required": "Melde dich bei dieser Website an und versuche es erneut.",
   "errors.request_failed": "Die Website hat nicht geantwortet. Prüfe die Adresse und versuche es erneut.",
+  "errors.request_lease_lost": "Diese Anfrage hat ihren Ausführungsplatz verloren. Warte, bis andere Aktivitäten abgeschlossen sind, und starte dann eine neue Anfrage.",
   "errors.timeout": "Das dauert länger als erwartet. Versuche es erneut.",
   "errors.unsafe_target": "Verwende eine gültige Website-Adresse.",
   "errors.operation_failed": "Die Website konnte diese Aktion nicht abschließen.",

@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "Il fornitore di IA ha segnalato un problema di fatturazione. Controlla le impostazioni di fatturazione del tuo account presso il fornitore.",
   "errors.auth_required": "Accedi a questo sito web, poi riprova.",
   "errors.request_failed": "Il sito web non ha risposto. Controlla l’indirizzo e riprova.",
+  "errors.request_lease_lost": "Questa richiesta ha perso il proprio turno di esecuzione. Attendi che le altre attività terminino, poi avvia una nuova richiesta.",
   "errors.timeout": "Sta impiegando più tempo del previsto. Riprova.",
   "errors.unsafe_target": "Usa un indirizzo web valido.",
   "errors.operation_failed": "Il sito web non ha potuto completare questa azione.",

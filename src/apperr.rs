@@ -178,6 +178,7 @@ impl AppError {
                 "unsafe_target" | "local_target" => "Check the destination. For a trusted local website, use --allow-local explicitly.",
                 "browser_diagnostic_unsupported" => "Browser observation is unavailable because read-only, exact-origin enforcement is not verified for every browser network channel. Use accounts observe without --browser for a known same-origin endpoint. No browser was launched or session changed.",
                 "cancelled" | "interrupted" => "Review the activity entry in the dashboard before retrying.",
+                "request_lease_lost" => "This request lost its execution slot. Wait for other activity to finish, then start a new request.",
                 "request_failed" | "timeout" => "Check the website and your connection, then retry the read or prepare the website again.",
                 "no_actions" => "Open the website in your browser and connect its account, then retry preparation with the available evidence.",
                 _ => "",

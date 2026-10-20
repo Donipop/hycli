@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "AI sağlayıcısı bir faturalandırma sorunu bildirdi. Sağlayıcı hesabınızdaki faturalandırma ayarlarını kontrol edin.",
   "errors.auth_required": "Bu web sitesine giriş yapıp yeniden deneyin.",
   "errors.request_failed": "Web sitesi yanıt vermedi. Adresi kontrol edip yeniden deneyin.",
+  "errors.request_lease_lost": "Bu istek yürütme sırasını kaybetti. Diğer işlemlerin bitmesini bekleyin, ardından yeni bir istek başlatın.",
   "errors.timeout": "Bu işlem beklenenden uzun sürüyor. Lütfen yeniden deneyin.",
   "errors.unsafe_target": "Geçerli bir web sitesi adresi kullanın.",
   "errors.operation_failed": "Web sitesi bu işlemi tamamlayamadı.",

@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "Nhà cung cấp AI báo cáo sự cố thanh toán. Hãy kiểm tra cài đặt thanh toán trong tài khoản nhà cung cấp.",
   "errors.auth_required": "Đăng nhập vào trang web này rồi thử lại.",
   "errors.request_failed": "Trang web không phản hồi. Kiểm tra địa chỉ và thử lại.",
+  "errors.request_lease_lost": "Yêu cầu này đã mất lượt thực thi. Hãy chờ hoạt động khác kết thúc rồi bắt đầu yêu cầu mới.",
   "errors.timeout": "Tác vụ mất nhiều thời gian hơn dự kiến. Vui lòng thử lại.",
   "errors.unsafe_target": "Sử dụng địa chỉ trang web hợp lệ.",
   "errors.operation_failed": "Trang web không thể hoàn tất thao tác này.",

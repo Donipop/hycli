@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "De AI-aanbieder heeft een factureringsprobleem gemeld. Controleer de factureringsinstellingen in je account bij de aanbieder.",
   "errors.auth_required": "Log in op deze website en probeer het opnieuw.",
   "errors.request_failed": "De website heeft niet gereageerd. Controleer het adres en probeer het opnieuw.",
+  "errors.request_lease_lost": "Dit verzoek is zijn uitvoeringsplek kwijtgeraakt. Wacht tot andere activiteiten klaar zijn en start dan een nieuw verzoek.",
   "errors.timeout": "Dit duurt langer dan verwacht. Probeer het opnieuw.",
   "errors.unsafe_target": "Gebruik een geldig websiteadres.",
   "errors.operation_failed": "De website kon deze actie niet afronden.",

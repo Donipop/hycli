@@ -145,8 +145,13 @@ label, search-style method/path, or an otherwise empty body. Existing write and
 approval gates apply. HTTP is the supported multipart transport; explicit
 browser transports fail before preflight instead of silently omitting the body.
 The sender generates the multipart Content-Type boundary, replacing inherited
-Content-Type headers. Files must be regular files and share a 100 MiB aggregate
-budget, enforced against actual bytes read from their opened handles.
+Content-Type headers. Explicit file paths are opened as regular files and streamed
+from those same handles in bounded-memory chunks, without a fixed file-size ceiling
+or a second full-file snapshot. Each stream sends only its initial length; early
+EOF, read failures, and observed metadata changes fail the attempt. This does not
+make an in-place file immutable. Files should remain unchanged until the request
+finishes. Failures after dispatch are reported as an unknown action outcome and
+are never automatically replayed; check the destination before trying again.
 
 `derived_target: true` permits an evidenced destination resolved from preflight.
 A templated `base_url` must resolve fully before dispatch; a missing or invalid

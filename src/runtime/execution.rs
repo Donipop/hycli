@@ -649,6 +649,9 @@ impl Runtime {
                         | "blocked_by_site"
                         | "data_invalid"
                         | "auth_required"
+                        // Network maps lease loss after any write dispatch to
+                        // action_outcome_unknown; this label is pre-dispatch.
+                        | "request_lease_lost"
                 );
                 return Err(if effect != Effect::Read && !pre_dispatch_err {
                     AppError::api("action_outcome_unknown", 502)

@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "The AI provider reported a billing issue. Check billing settings in your provider account.",
   "errors.auth_required": "Sign in to this website, then try again.",
   "errors.request_failed": "The website did not respond. Check the address and try again.",
+  "errors.request_lease_lost": "This request lost its execution slot. Wait for other activity to finish, then start a new request.",
   "errors.timeout": "This is taking longer than expected. Please try again.",
   "errors.unsafe_target": "Use a valid website address.",
   "errors.operation_failed": "The website could not complete this action.",

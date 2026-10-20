@@ -277,6 +277,7 @@
   "errors.ai_billing_error": "Dostawca AI zgłosił problem z rozliczeniami. Sprawdź ustawienia rozliczeń na koncie u dostawcy.",
   "errors.auth_required": "Zaloguj się do tej strony i spróbuj ponownie.",
   "errors.request_failed": "Strona nie odpowiedziała. Sprawdź adres i spróbuj ponownie.",
+  "errors.request_lease_lost": "To żądanie utraciło prawo do wykonania. Poczekaj na zakończenie innych działań, a następnie rozpocznij nowe żądanie.",
   "errors.timeout": "To trwa dłużej niż oczekiwano. Spróbuj ponownie.",
   "errors.unsafe_target": "Podaj prawidłowy adres strony.",
   "errors.operation_failed": "Strona nie mogła wykonać tego działania.",

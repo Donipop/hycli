@@ -546,6 +546,8 @@ pub struct Approval {
     pub request: Option<ExecutionRequest>,
 }
 
+const REQUEST_LEASE_MS: i64 = 120_000;
+
 pub struct Policy {
     conn: Mutex<Connection>,
     interval_ms: i64,
@@ -770,7 +772,12 @@ impl Policy {
                     };
                     tx.execute(
                         "UPDATE request_gate SET lease=?2,lease_until=?3,next_at=?4 WHERE scope=?1",
-                        params![scope, token, now + 120_000, now + self.interval_ms + jitter],
+                        params![
+                            scope,
+                            token,
+                            now + REQUEST_LEASE_MS,
+                            now + self.interval_ms + jitter
+                        ],
                     )?;
                     tx.execute(
                         "INSERT INTO request_event(scope,at) VALUES(?1,?2)",
@@ -789,6 +796,27 @@ impl Policy {
             }
             tokio::time::sleep(Duration::from_millis(wait.min(500) as u64)).await;
         }
+    }
+    /// Extend only an unexpired lease still owned by this exact token. Never
+    /// reacquire or revive an expired lease: the caller must stop its attempt.
+    pub(crate) fn renew(&self, scope: &str, token: &str) -> AppResult<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        // Get the SQLite write lock before sampling time. Otherwise a busy
+        // database could let a stale pre-wait timestamp revive an expired lease.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now = util::unix_ms();
+        let changed = tx.execute(
+            "UPDATE request_gate SET lease_until=?3 WHERE scope=?1 AND lease=?2 AND lease<>'' AND lease_until>?4",
+            params![scope, token, now + REQUEST_LEASE_MS, now],
+        )?;
+        if changed != 1 {
+            return Err(AppError::api("request_lease_lost", 409));
+        }
+        tx.commit()?;
+        Ok(())
     }
     pub fn release(
         &self,
@@ -1694,5 +1722,48 @@ mod bounded_graphql_tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod transfer_lease_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn renewal_requires_the_current_unexpired_token_and_never_revives_it() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/transfer-lease-tests")
+            .join(util::id());
+        let policy = Policy::with_limits(&root.join("policy.db"), 0, 100).unwrap();
+        let scope = "https://fixture.test|account";
+        let token = policy.acquire(scope).await.unwrap();
+        policy.renew(scope, &token).unwrap();
+        assert_eq!(
+            policy.renew(scope, "wrong-token").unwrap_err().public_code,
+            "request_lease_lost"
+        );
+        policy
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE request_gate SET lease_until=?2 WHERE scope=?1",
+                params![scope, util::unix_ms() - 1],
+            )
+            .unwrap();
+        assert_eq!(
+            policy.renew(scope, &token).unwrap_err().public_code,
+            "request_lease_lost"
+        );
+        let replacement = policy.acquire(scope).await.unwrap();
+        assert_ne!(replacement, token);
+        assert!(policy.renew(scope, &token).is_err());
+        // Dropping the old owner must not release a replacement lease.
+        policy.release(scope, &token, 0, None, false).unwrap();
+        policy.renew(scope, &replacement).unwrap();
+        policy.release(scope, &replacement, 0, None, false).unwrap();
+        assert!(policy.renew(scope, &replacement).is_err());
+        drop(policy);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

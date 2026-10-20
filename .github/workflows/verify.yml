@@ -108,6 +108,10 @@ jobs:
           cargo fmt --all --check
           cargo test --all-targets --locked
           cargo build --locked --bin hycli --example dashboard_fixture --example binding_dashboard_fixture
+      - name: Active file transfer across timeout and lease boundaries
+        if: matrix.platform == 'linux-x64'
+        timeout-minutes: 8
+        run: cargo test --locked --lib active_file_transfer_renews_leases_across_old_total_deadlines -- --ignored --nocapture
       - name: Private pagination CLI and MCP
         run: node scripts/test-pagination.mjs
       - name: Native companion popup dependencies
