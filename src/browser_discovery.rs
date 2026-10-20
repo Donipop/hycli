@@ -400,11 +400,11 @@ fn scan_profiles(
         }
         checked += 1;
         let session = read(profile);
-        if cancellation.is_cancelled() {
-            return (checked, unavailable, vec![]);
-        }
         if !session.complete {
             unavailable += 1;
+        }
+        if cancellation.is_cancelled() {
+            return (checked, unavailable, vec![]);
         }
         found.push(session);
     }
@@ -1134,6 +1134,7 @@ mod tests {
             };
             std::fs::create_dir_all(broken.parent().unwrap()).unwrap();
             std::fs::write(&broken, b"not a sqlite database").unwrap();
+            let cancellation = CancellationHandle::new();
             let (checked, unavailable, sessions) = scan_site(
                 &url::Url::parse("https://example.com/").unwrap(),
                 "",
@@ -1142,13 +1143,26 @@ mod tests {
                     browser: "Firefox".into(),
                     ..profile()
                 }]),
-                &CancellationHandle::new(),
+                &cancellation,
                 || true,
             );
-            assert_eq!((checked, unavailable, sessions.len()), (1, 1, 1));
-            let accepted = core
-                .replace_imported_account(&account.id, &sessions[0])
-                .unwrap();
+            assert_eq!((checked, unavailable), (1, 1));
+            let accepted = if cookie_failure {
+                assert!(
+                    cancellation.is_cancelled(),
+                    "unresolved native read stops the entire scan"
+                );
+                assert!(
+                    sessions.is_empty(),
+                    "unresolved native reads must not publish partial snapshots"
+                );
+                false
+            } else {
+                assert!(!cancellation.is_cancelled());
+                assert_eq!(sessions.len(), 1);
+                core.replace_imported_account(&account.id, &sessions[0])
+                    .unwrap()
+            };
             assert_eq!(
                 snapshot(),
                 before,
