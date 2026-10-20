@@ -16,7 +16,7 @@ impl Operation {
                 .as_ref()?
                 .as_str()
         });
-        query.is_some_and(|query| graphql_parser::parse_query::<&str>(query).is_ok())
+        query.is_some_and(|query| crate::policy::parse_graphql_bounded(query).is_some())
     }
     pub fn parse_json_response(&self, response: &crate::net::Response) -> Option<Value> {
         let expected = self.response.as_ref();

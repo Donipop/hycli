@@ -270,6 +270,16 @@ pub enum AuthCmd {
 
 #[derive(Subcommand)]
 pub enum AccountsCmd {
+    /// Read one evidenced JSON page with a verified account, without installing a website action.
+    Read {
+        account: String,
+        /// Version 1 request/evidence JSON. Never include credentials.
+        #[arg(long)]
+        request: String,
+        /// Opaque next_cursor from the same account and unchanged request file.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     /// Inspect cookie/header names and storage structure, never sign-in values.
     Inspect { account: String },
     /// Observe one same-site GET before identity verification; private values stay local.

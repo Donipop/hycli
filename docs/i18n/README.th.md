@@ -251,3 +251,5 @@ Hycli เผยแพร่ภายใต้สัญญาอนุญาต [
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+สำหรับการอ่าน JSON หรือ GraphQL หนึ่งหน้าด้วยบัญชีที่ยืนยันแล้ว โปรดดู [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

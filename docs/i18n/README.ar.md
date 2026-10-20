@@ -251,3 +251,5 @@ node scripts/test-e2e.mjs --full
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+لقراءة JSON أو GraphQL مرة واحدة باستخدام حساب تم التحقق منه، راجع [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

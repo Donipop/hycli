@@ -251,3 +251,5 @@ Hycli को [Apache-2.0](../../LICENSE) के अंतर्गत लाइ�
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+सत्यापित खाते से एक JSON या GraphQL पेज पढ़ने के लिए देखें [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

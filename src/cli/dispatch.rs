@@ -439,7 +439,8 @@ async fn accounts_cmd(
     let core = runner(deps)?;
     if let Some(site) = site {
         let id = match &cmd {
-            AccountsCmd::Inspect { account }
+            AccountsCmd::Read { account, .. }
+            | AccountsCmd::Inspect { account }
             | AccountsCmd::Observe { account, .. }
             | AccountsCmd::Verify { account, .. }
             | AccountsCmd::Refresh { account } => account,
@@ -453,6 +454,21 @@ async fn accounts_cmd(
         }
     }
     match cmd {
+        AccountsCmd::Read {
+            account,
+            request,
+            cursor,
+        } => {
+            emit.data(
+                &core
+                    .read_account_request(
+                        &account,
+                        std::path::Path::new(&request),
+                        cursor.as_deref(),
+                    )
+                    .await?,
+            );
+        }
         AccountsCmd::Inspect { account } => {
             emit.data(&core.inspect_account_session(&account)?);
         }

@@ -251,3 +251,5 @@ Hycliは [Apache-2.0](../../LICENSE) ライセンスのもとで提供されて�
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+検証済みアカウントで JSON・GraphQL を1ページずつ読み取る方法は、次を参照してください。 [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

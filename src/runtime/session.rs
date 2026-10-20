@@ -35,7 +35,7 @@ impl Runtime {
             // Reject before launching a browser, sending a request or changing saved state.
             return Err(AppError::api("browser_diagnostic_unsupported", 422));
         }
-        let (observations, result) = {
+        let (observations, result, json_response) = {
             self.policy
                 .resume_auth(&format!("{}|{id}", target.origin().ascii_serialization()))?;
             // A diagnostic is one request: every next URL needs its own validation.
@@ -65,9 +65,19 @@ impl Runtime {
                 observed_at: crate::util::now(),
                 ..Default::default()
             };
+            let mime = response
+                .header("content-type")
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let json_response = (mime == "application/json" || mime.ends_with("+json"))
+                && response.json().is_some();
             (
                 vec![observation],
                 json!({"status":response.status,"successful":response.successful(),"response_shape":response.json().as_ref().map(|body|crate::session_recipe::shape(body,0)),"values_exposed":false}),
+                json_response,
             )
         };
         let _guard = crate::util::file_lock(&self.root.join("account-selection.lock"), false)?;
@@ -96,10 +106,12 @@ impl Runtime {
             }
             Ok(())
         })?;
+        let read_evidence =
+            self.save_account_read_observation(id, &credential, target.as_str(), json_response)?;
         self.changed();
         Self::session_output(
             &credential,
-            json!({"account_id":id,"observation":result,"requests":observations}),
+            json!({"account_id":id,"observation":result,"requests":observations,"read_evidence":read_evidence}),
         )
     }
 

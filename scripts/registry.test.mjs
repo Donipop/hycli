@@ -219,7 +219,7 @@ test('native packager streams archives without drive-letter tar operands and pre
     const {dir} = await fixture(t);
     await fs.copyFile(path.join(root, 'scripts/package.mjs'), path.join(dir, 'scripts/package.mjs'));
     const files = ['dist/hycli.exe', 'dist/hycli-desktop.exe', 'dist/README.md', 'LICENSE',
-      'agent/AGENTS.md', 'agent/CLAUDE.md', 'docs/SITESPEC.md', 'docs/BUILD.md', 'docs/RELEASING.md',
+      'agent/AGENTS.md', 'agent/CLAUDE.md', 'docs/SITESPEC.md', 'docs/ACCOUNT_READ.md', 'docs/BUILD.md', 'docs/RELEASING.md',
       'skills/hycli/SKILL.md', 'packaging/install-windows.ps1', 'packaging/icons/hycli.ico'];
     for (const file of files) {
       await fs.mkdir(path.dirname(path.join(dir, file)), {recursive: true});

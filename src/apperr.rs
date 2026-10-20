@@ -71,6 +71,8 @@ impl AppError {
                 "ai_refused" => "The AI provider declined this request. Retrying will not help; choose another model or AI connection in `hycli open`.",
                 "pagination_invalid" => "The website returned an unsupported continuation. Use an opaque cursor of at least 8 characters, at most 4096 bytes, and never an authentication credential. Short page numbers are not supported by private pagination.",
                 "pagination_expired" => "Start this read again without its cursor, then use the returned next_cursor for the same account and inputs within 15 minutes.",
+                "unsupported_evidence" => "Use an exact observed request or HAR entry. Persisted reads need an APQ document hash with matching Apollo/Relay JSON evidence, or an opaque Relay ID from a supported executable static artifact. Supply matching deployed evidence or the full observed query. This request-evidence error does not require logout or reauthentication.",
+                "read_redirect" => "This read did not follow the redirect. Observe and verify the intended exact-origin endpoint instead.",
                 "query_failed" => "The website reported query errors. Check the inputs and the action definition before retrying.",
                 "response_mismatch" => "The website returned a different response than this action expects. Reconnect if signed out, or prepare the website again.",
                 "site_rate_limited" | "rate_limited" => "Wait for the website's request limit to clear before retrying.",

@@ -251,3 +251,5 @@ O Hycli é licenciado sob a [Apache-2.0](../../LICENSE). Use-o apenas com sites 
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+Para ler uma página JSON ou GraphQL com uma conta verificada, consulte [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.

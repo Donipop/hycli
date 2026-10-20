@@ -251,3 +251,5 @@ Hycli, [Apache-2.0](../../LICENSE) lisansı altında lisanslanmıştır. Yalnız
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Hybirdss/Hycli&type=Date" />
  </picture>
 </a>
+
+Doğrulanmış hesapla tek bir JSON veya GraphQL sayfası okumak için bkz. [Account reads](../ACCOUNT_READ.md): `hycli accounts read ACCOUNT --request REQUEST.json`.
