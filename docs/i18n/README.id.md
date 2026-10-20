@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Masuk melalui peramban
 
+Penemuan browser native bersifat opsional dan dinonaktifkan secara default di macOS, termasuk pembaruan tanpa pilihan tersimpan. Pengaturan juga berlaku untuk CLI dan MCP dengan direktori data yang sama; akun dan koneksi browser yang ada tetap tersedia. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli menemukan profil Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale, dan Firefox lokal (beserta biner Chromium siluman lokal jika terpasang) di Windows, macOS, dan Linux, serta hanya mengimpor sesi situs web yang diminta ke dalam brankas lokal. Profil yang berbagi akun situs web terverifikasi yang sama akan digabungkan secara otomatis.
 
 Jika sesi dikunci oleh enkripsi Windows App-Bound, container privat, atau peramban yang belum diimpor, gunakan **Akun → Hubungkan akun** untuk masuk melalui peramban Anda, hubungkan [ekstensi pendamping peramban](../../browser-companion/guide.html), atau impor berkas cookie JSON/Netscape di dasbor (jangan pernah menempelkan cookie ke dalam obrolan AI).

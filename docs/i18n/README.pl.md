@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Logowanie przez przeglądarkę
 
+Natywne wykrywanie jest opcjonalne i domyślnie wyłączone w macOS, również po aktualizacji bez zapisanej decyzji. Ustawienie obejmuje CLI i MCP korzystające z tego samego katalogu danych; istniejące konta i połączenia przeglądarki pozostają dostępne. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli wykrywa lokalne profile przeglądarek Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale i Firefox (oraz zainstalowane lokalnie binaria ukrytego Chromium) w systemach Windows, macOS i Linux, importując do lokalnego sejfu wyłącznie sesję żądanej strony. Profile współdzielące to samo zweryfikowane konto na stronie są automatycznie łączone.
 
 Jeśli sesja jest zablokowana przez szyfrowanie Windows App-Bound, prywatne kontenery lub niezaimportowaną przeglądarkę, użyj **Konta → Połącz konto**, aby zalogować się przez przeglądarkę, połącz [rozszerzenie towarzyszące przeglądarki](../../browser-companion/guide.html) albo zaimportuj plik cookie JSON/Netscape w panelu (nigdy nie wklejaj plików cookie do czatu z AI).

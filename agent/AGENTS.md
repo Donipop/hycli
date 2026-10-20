@@ -11,6 +11,12 @@ Use the connection from **Coding agents → View connection settings**. Its exec
 - Reuse a working installed action. If preparation produces only part of the requested workflow, inspect its actual findings and error, then continue from the missing capability. Do not treat a generated definition as proof of successful execution.
 - If AI or browser access is missing, direct the user to the relevant **AI connections** or **Accounts** screen. Ask only for a decision or access the user actually needs to supply. Do not ask them to research endpoints, write schemas, or paste session secrets.
 
+### Native discovery choice and recovery
+
+The dashboard's native browser discovery setting is persisted per local data directory. CLI and MCP processes using that same directory (`HYCLI_DATA_DIR` when configured) observe the same choice, including changes made after they started. macOS defaults to disabled, including upgrades without an existing choice; Windows and Linux retain native discovery unless disabled. Enabling the setting does not itself start a dashboard scan. Use the existing **Find/Recheck** action when the user wants native discovery; it may request OS keychain approval.
+
+`native_discovery_disabled` is a choice, not a signed-out account. Use the browser companion or existing imported accounts without forcing logout or reauthentication. Do not repeatedly retry native discovery or silently enable it. `native_discovery_retry_required` means a previous native attempt did not complete; automatic preparation pauses native attempts until an explicit retry. Finish or dismiss outstanding OS prompts before choosing **Find/Recheck** again. An active worker must finish before another scan can start (`browser_busy`). Disabling cancels further work cooperatively, but cannot remove OS dialogs already shown. Never suggest persistent OS approval, exporting keys, or changing access-control settings as a workaround.
+
 ## Complete the task
 
 Read and search actions run autonomously through Hycli. Use exact typed inputs and the intended account. MCP `hycli_run` can execute an installed action by site and action ID even when the client has not refreshed its tool list. CLI equivalents are `hycli SITE ACTION --input value` and `hycli run SITE ACTION --arg name=value --account ID`. Discover saved account IDs with `hycli_accounts` or `hycli accounts --site SITE`.

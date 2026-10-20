@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Đăng nhập qua trình duyệt
 
+Khám phá trình duyệt gốc là tùy chọn và mặc định tắt trên macOS, kể cả khi nâng cấp mà chưa lưu lựa chọn. Cài đặt dùng chung cho CLI và MCP có cùng thư mục dữ liệu; tài khoản và kết nối trình duyệt hiện có vẫn được giữ nguyên. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli tự động phát hiện các hồ sơ Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale và Firefox cục bộ (cùng các tệp thực thi Chromium ẩn danh cục bộ nếu đã cài đặt) trên Windows, macOS và Linux, chỉ nhập phiên của đúng trang web được yêu cầu vào kho lưu trữ mã hóa cục bộ. Các hồ sơ dùng chung cùng một tài khoản trang web đã xác minh sẽ tự động được gộp lại.
 
 Nếu phiên bị khóa bởi cơ chế mã hóa Windows App-Bound, vùng chứa riêng tư (container) hoặc trình duyệt chưa được hỗ trợ nhập trực tiếp, hãy vào **Tài khoản → Kết nối tài khoản** để đăng nhập qua trình duyệt, kết nối [tiện ích mở rộng đồng hành trên trình duyệt](../../browser-companion/guide.html), hoặc nhập tệp cookie JSON/Netscape trong bảng điều khiển (tuyệt đối không dán nội dung cookie trực tiếp vào cửa sổ trò chuyện AI).

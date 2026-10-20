@@ -225,6 +225,10 @@ See the [Hycli skill](skills/hycli/SKILL.md) and [agent guide](agent/AGENTS.md) 
 
 Hycli discovers local Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale, and Firefox profiles (plus local stealth Chromium binaries when installed) on Windows, macOS, and Linux, importing only the requested website's session into the local vault. Profiles sharing the same verified website account are deduplicated automatically.
 
+**Native discovery is optional.** In **Settings**, choose whether Hycli may scan local browser sessions. It defaults off on macOS, including upgrades without a saved choice; Windows and Linux retain the enabled default. The choice applies to the dashboard, CLI and MCP using the same data directory (`HYCLI_DATA_DIR` when configured), including already-running processes. Enabling it does not start a scan: use **Find/Recheck** explicitly. Native access may request OS keychain approval.
+
+Turning it off preserves imported accounts and the browser companion connection. If a native attempt does not complete, automatic retries pause. Finish or dismiss any existing OS prompts before choosing **Find/Recheck** again; a still-running scan must finish first. Cancellation prevents further work cooperatively but cannot dismiss dialogs the OS already displayed. See [recovery guidance](agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 If a session is locked by Windows App-Bound encryption, private containers, or an unimported browser, use **Accounts → Connect an account** to sign in via your browser, connect the [browser companion extension](browser-companion/guide.html), or import a JSON/Netscape cookie file in the dashboard (never paste cookies into an AI chat).
 
 <a id="languages"></a>

@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Accesso tramite browser
 
+Il rilevamento nativo è facoltativo e disattivato per impostazione predefinita su macOS, anche negli aggiornamenti senza una scelta salvata. La scelta vale anche per CLI e MCP con la stessa directory dati; account e connessioni browser esistenti restano disponibili. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli rileva i profili locali di Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale e Firefox (oltre ai binari locali di Chromium stealth quando installati) su Windows, macOS e Linux, importando nella cassaforte locale solo la sessione del sito web richiesto. I profili che condividono lo stesso account verificato di un sito vengono deduplicati automaticamente.
 
 Se una sessione è protetta dalla crittografia App-Bound di Windows, da container privati o da un browser non importato, usa **Account → Connetti un account** per accedere tramite il browser, collega l'[estensione companion per il browser](../../browser-companion/guide.html) oppure importa un file di cookie JSON/Netscape nella dashboard (non incollare mai i cookie in una chat con l'IA).

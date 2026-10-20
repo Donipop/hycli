@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Tarayıcı ile oturum açma
 
+Yerel tarayıcı keşfi isteğe bağlıdır ve kayıtlı seçim olmayan güncellemeler dahil macOS’ta varsayılan olarak kapalıdır. Ayar, aynı veri dizinini kullanan CLI ve MCP için de geçerlidir; mevcut hesaplar ve tarayıcı bağlantıları korunur. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli; Windows, macOS ve Linux'ta yerel Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale ve Firefox profillerini (ve kurulu olduğunda yerel gizli Chromium ikili dosyalarını) keşfederek yalnızca istenen web sitesinin oturumunu yerel şifreli kasaya aktarır. Aynı doğrulanmış web sitesi hesabını paylaşan profiller otomatik olarak tekilleştirilir.
 
 Bir oturum Windows App-Bound şifrelemesi, özel kapsayıcılar veya içe aktarılmamış bir tarayıcı tarafından kilitlenmişse, tarayıcınız üzerinden oturum açmak için **Hesaplar → Hesap bağla** seçeneğini kullanın, [tarayıcı eşlikçi uzantısını](../../browser-companion/guide.html) bağlayın veya kontrol panelinde bir JSON/Netscape çerez dosyası içe aktarın (çerezleri asla bir yapay zekâ sohbetine yapıştırmayın).
