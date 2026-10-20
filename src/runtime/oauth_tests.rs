@@ -237,7 +237,21 @@ async fn forbidden_never_refreshes_and_expired_bearer_has_one_budget() {
         let (url, state, server) = fixture().await;
         state.mode.store(mode, Ordering::SeqCst);
         let (core, sp) = configured(&url, expired);
-        let _ = read(&core, &sp).await;
+        let result = read(&core, &sp).await;
+        if mode == 10 {
+            assert_eq!(
+                result.err().expect("rejected rotated token").public_code,
+                "oauth_recovery_required"
+            );
+            assert_eq!(
+                read(&core, &sp)
+                    .await
+                    .err()
+                    .expect("recovery required")
+                    .public_code,
+                "oauth_recovery_required"
+            );
+        }
         assert_eq!(state.exchanges.load(Ordering::SeqCst), exchanges);
         assert_eq!(state.reads.load(Ordering::SeqCst), reads);
         server.abort();
@@ -539,7 +553,11 @@ async fn connection_refusal_preserves_grant_for_a_later_explicit_retry() {
     let previous = serde_json::to_string(&stored(&core, &sp)).unwrap();
     drop(listener);
     assert_eq!(
-        read(&core, &sp).await.unwrap_err().public_code,
+        read(&core, &sp)
+            .await
+            .err()
+            .expect("expected connection failure")
+            .public_code,
         "request_failed"
     );
     assert_eq!(
@@ -553,4 +571,27 @@ async fn connection_refusal_preserves_grant_for_a_later_explicit_retry() {
     assert_eq!(state.reads.load(Ordering::SeqCst), 1);
     assert!(matches!(stored(&core, &sp).phase, Phase::Ready));
     server.abort();
+}
+
+#[test]
+fn unnamed_oauth_credentials_are_rejected_before_storage() {
+    let (core, mut sp) = configured("https://example.com", false);
+    let previous = serde_json::to_string(&stored(&core, &sp)).unwrap();
+    sp.auth[0].name.clear();
+    sp.operations[0].auth.clear();
+    assert!(
+        sp.validate()
+            .iter()
+            .any(|issue| issue.field == "auth..oauth_refresh")
+    );
+    assert_eq!(
+        core.set_oauth_credential(&sp, &sp.auth[0], Some(&grant_input(false)))
+            .unwrap_err()
+            .public_code,
+        "oauth_configuration_invalid"
+    );
+    assert_eq!(
+        serde_json::to_string(&stored(&core, &sp)).unwrap(),
+        previous
+    );
 }

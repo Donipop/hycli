@@ -222,13 +222,18 @@ impl Store {
     }
     pub fn keys(&self) -> Vec<String> {
         self.data
-            .keys()
-            .filter(|key| {
-                !key.starts_with("@oauth/")
-                    && !key.starts_with("@pagination/")
-                    && !key.starts_with("@read-observation/")
+            .iter()
+            .filter_map(|(key, value)| {
+                if key.starts_with("@oauth/") {
+                    crate::runtime::oauth::credential_ref(value)
+                } else if key.starts_with("@pagination/") || key.starts_with("@read-observation/") {
+                    None
+                } else {
+                    Some(key.clone())
+                }
             })
-            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect()
     }
     pub fn set(&mut self, site: &str, key: &str, value: &str) -> AppResult<()> {
@@ -250,6 +255,15 @@ impl Store {
         Ok(())
     }
     pub fn delete(&mut self, site: &str, key: &str) -> AppResult<()> {
+        self.delete_website_credential(site, key, None, None)
+    }
+    pub(crate) fn delete_website_credential(
+        &mut self,
+        site: &str,
+        key: &str,
+        current_oauth_key: Option<&str>,
+        legacy_key: Option<&str>,
+    ) -> AppResult<()> {
         if site == "@oauth" {
             return Err(AppError::api("bad_request", 400));
         }
@@ -257,10 +271,19 @@ impl Store {
         self.reload()?;
         let name = format!("{site}/{key}");
         let snapshot = self.data.clone();
-        if self.data.contains_key(&name) {
+        let current_oauth_name = current_oauth_key.map(|key| format!("@oauth/{key}"));
+        let legacy_name = legacy_key.map(|key| format!("{site}/{key}"));
+        self.data.retain(|stored_key, value| {
+            stored_key != &name
+                && legacy_name.as_ref() != Some(stored_key)
+                && !(current_oauth_name.as_ref() == Some(stored_key)
+                    && crate::runtime::oauth::credential_ref(value).is_none())
+                && !(stored_key.starts_with("@oauth/")
+                    && crate::runtime::oauth::credential_ref(value).as_ref() == Some(&name))
+        });
+        if self.data != snapshot {
             self.invalidate_pagination(site, key);
         }
-        self.data.remove(&name);
         if let Err(error) = self.save() {
             self.data = snapshot;
             return Err(error);

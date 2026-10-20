@@ -285,3 +285,147 @@ async fn legacy_auth_fallback_survives_unrelated_runtime_failure() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn orphaned_grants_stay_listed_and_removable_without_affecting_siblings() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".cache/oauth-cli")
+        .join(util::id());
+    let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+    let definition = |site: &str, auth: &str, grant_ref: &str| {
+        hycli::spec::parse(json!({"spec_version":3,"site":{"name":site,"base_url":"https://example.com"},"auth":[{"name":auth,"kind":"header","header":"authorization","prefix":"Bearer ","origin":"https://example.com","oauth_refresh":{"grant_ref":grant_ref,"token_endpoint":"https://example.com/token","identity_endpoint":"https://example.com/identity","subject_pointer":"/sub","resource":"fixture","scopes":["read"]}}],"operations":[{"name":"read-items","method":"GET","path":"/items","auth":auth,"effect":"read","evidence":"Synthetic OAuth definition; no network use"}]}).to_string().as_bytes()).unwrap()
+    };
+    let first = definition("orphan", "api", "one");
+    let sibling = definition("sibling", "api", "one");
+    for sp in [&first, &sibling] {
+        core.install(sp).unwrap();
+        successful(
+            input(
+                &root,
+                &["auth", "set", &format!("{}/api", sp.site.name)],
+                &grant(),
+            )
+            .await,
+        );
+    }
+    // Removing the definition preserves credentials, but must not strand them.
+    successful(input(&root, &["spec", "rm", "orphan"], "").await);
+    let listed = successful(input(&root, &["auth", "ls"], "").await);
+    assert_eq!(listed, json!(["orphan/api", "sibling/api"]));
+    successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!(["sibling/api"])
+    );
+    assert!(
+        core.sites("en")
+            .unwrap()
+            .iter()
+            .find(|s| s.id == "sibling")
+            .unwrap()
+            .credentials[0]
+            .configured
+    );
+    core.install(&first).unwrap();
+    assert!(
+        !core
+            .sites("en")
+            .unwrap()
+            .iter()
+            .find(|s| s.id == "orphan")
+            .unwrap()
+            .credentials[0]
+            .configured
+    );
+
+    // Same public reference, new grant key: removal must delete both generations.
+    successful(input(&root, &["auth", "set", "orphan/api"], &grant()).await);
+    let rebound = definition("orphan", "api", "two");
+    core.install(&rebound).unwrap();
+    successful(input(&root, &["auth", "set", "orphan/api"], &grant()).await);
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!(["orphan/api", "sibling/api"])
+    );
+    successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
+    for sp in [&first, &rebound] {
+        core.install(sp).unwrap();
+        assert!(
+            !core
+                .sites("en")
+                .unwrap()
+                .iter()
+                .find(|s| s.id == "orphan")
+                .unwrap()
+                .credentials[0]
+                .configured
+        );
+    }
+
+    // An auth rename keeps the old reference removable without deleting the new one.
+    core.install(&first).unwrap();
+    successful(input(&root, &["auth", "set", "orphan/api"], &grant()).await);
+    let renamed = definition("orphan", "other", "two");
+    core.install(&renamed).unwrap();
+    successful(input(&root, &["auth", "set", "orphan/other"], &grant()).await);
+    successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!(["orphan/other", "sibling/api"])
+    );
+    assert!(
+        core.sites("en")
+            .unwrap()
+            .iter()
+            .find(|s| s.id == "orphan")
+            .unwrap()
+            .credentials[0]
+            .configured
+    );
+    // A reused private grant_ref must not let one public auth name delete another.
+    core.install(&rebound).unwrap();
+    successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
+    core.install(&renamed).unwrap();
+    assert!(
+        core.sites("en")
+            .unwrap()
+            .iter()
+            .find(|s| s.id == "orphan")
+            .unwrap()
+            .credentials[0]
+            .configured
+    );
+
+    // A replacement legacy strategy may use a different private store key.
+    let mut legacy = renamed.clone();
+    legacy.auth[0].oauth_refresh = None;
+    legacy.auth[0].value_from = "store:orphan/static-key".into();
+    core.install(&legacy).unwrap();
+    successful(input(&root, &["auth", "set", "orphan/other"], "legacy-value").await);
+    successful(input(&root, &["auth", "rm", "orphan/other"], "").await);
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!(["sibling/api"])
+    );
+    core.install(&renamed).unwrap();
+    assert!(
+        !core
+            .sites("en")
+            .unwrap()
+            .iter()
+            .find(|s| s.id == "orphan")
+            .unwrap()
+            .credentials[0]
+            .configured
+    );
+    // Removal remains usable when unrelated runtime state cannot be opened.
+    std::fs::write(root.join("dashboard.json"), "invalid synthetic state").unwrap();
+    std::fs::remove_file(root.join("specs/sibling.yaml")).unwrap();
+    successful(input(&root, &["auth", "rm", "sibling/api"], "").await);
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!([])
+    );
+    drop(core);
+    std::fs::remove_dir_all(root).unwrap();
+}

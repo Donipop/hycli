@@ -36,11 +36,24 @@ enum Phase {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Grant {
+    #[serde(default)]
+    site: String,
+    #[serde(default)]
+    auth_name: String,
     owner: String,
     generation: u64,
     binding_hash: String,
     phase: Phase,
     input: GrantInput,
+}
+
+/// Public credential reference, without exposing the private grant or its storage key.
+pub(crate) fn credential_ref(raw: &str) -> Option<String> {
+    let grant: Grant = serde_json::from_str(raw).ok()?;
+    if !crate::util::valid_id(&grant.site) || grant.auth_name.is_empty() {
+        return None;
+    }
+    Some(format!("{}/{}", grant.site, grant.auth_name))
 }
 
 pub(crate) fn configured(store: &crate::store::Store, sp: &Spec, auth: &AuthStrategy) -> bool {
@@ -214,7 +227,8 @@ impl Runtime {
     ) -> AppResult<()> {
         let binding = auth.oauth_refresh.as_ref().ok_or_else(invalid)?;
         binding.check()?;
-        if auth.kind != "header"
+        if auth.name.is_empty()
+            || auth.kind != "header"
             || !auth.header.eq_ignore_ascii_case("authorization")
             || auth.prefix != "Bearer "
             || auth.origin.is_empty()
@@ -248,6 +262,8 @@ impl Runtime {
                 return Err(invalid());
             }
             Some(Grant {
+                site: sp.site.name.clone(),
+                auth_name: auth.name.clone(),
                 owner: util::id(),
                 generation: 0,
                 binding_hash: binding.hash(&sp.site.name, auth)?,
@@ -257,7 +273,14 @@ impl Runtime {
         } else {
             None
         };
-        self.oauth_commit(&key, previous.as_deref(), next.as_ref())?;
+        if let Some(next) = next.as_ref() {
+            self.oauth_commit(&key, previous.as_deref(), Some(next))?;
+        } else {
+            self.vault
+                .lock()
+                .map_err(|_| AppError::api("internal", 500))?
+                .delete_website_credential(&sp.site.name, &auth.name, Some(&key), None)?;
+        }
         self.policy.invalidate(Some(&sp.site.name), None)?;
         self.changed();
         Ok(())
@@ -624,7 +647,7 @@ impl Runtime {
                 grant.phase = Phase::RecoveryRequired;
                 self.oauth_commit(&key, Some(&raw), Some(&grant))?;
             }
-            return Ok(response);
+            return Err(failure());
         }
         Err(failure())
     }

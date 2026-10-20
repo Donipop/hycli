@@ -92,7 +92,8 @@ impl Spec {
             let mut grants = std::collections::HashSet::new();
             for a in &self.auth {
                 if let Some(binding) = &a.oauth_refresh {
-                    if !grants.insert(&binding.grant_ref)
+                    if a.name.is_empty()
+                        || !grants.insert(&binding.grant_ref)
                         || !a.value_from.is_empty()
                         || binding.check().is_err()
                         || a.kind != "header"

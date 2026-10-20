@@ -158,7 +158,7 @@ impl Runtime {
             }
             vault.set(site, key, value)?;
         } else {
-            vault.delete(site, key)?;
+            vault.delete_website_credential(site, name, None, Some(key))?;
         }
         drop(vault);
         if value.is_some() {
