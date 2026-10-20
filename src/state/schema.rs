@@ -355,14 +355,21 @@ pub(super) fn init_schema(conn: &Connection) -> AppResult<()> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS identity_generations (account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE, generation TEXT NOT NULL);")?;
     // Missing consent on macOS must not silently enable OS keychain prompts.
     let native_default = i64::from(!cfg!(target_os = "macos"));
-    let has_native_policy = conn
-        .prepare("PRAGMA table_info(settings)")?
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .any(|name| name == "native_browser_discovery");
-    if !has_native_policy {
-        conn.execute(&format!("ALTER TABLE settings ADD COLUMN native_browser_discovery INTEGER NOT NULL DEFAULT {native_default}"), [])?;
+    let has_native_policy = || -> rusqlite::Result<bool> {
+        Ok(conn
+            .prepare("PRAGMA table_info(settings)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == "native_browser_discovery"))
+    };
+    if !has_native_policy()? {
+        if let Err(error) = conn.execute(&format!("ALTER TABLE settings ADD COLUMN native_browser_discovery INTEGER NOT NULL DEFAULT {native_default}"), []) {
+            // A second process may have completed the same migration meanwhile.
+            if !has_native_policy()? {
+                return Err(error.into());
+            }
+        }
     }
     for ddl in [
         "ALTER TABLE sites ADD COLUMN account_binding_json TEXT NOT NULL DEFAULT 'null'",
