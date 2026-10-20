@@ -74,6 +74,12 @@ async fn browser_pairing_is_single_use_origin_bound_and_verifies_actual_identity
         } else { (StatusCode::UNAUTHORIZED, Json(json!({"error":"signed_out"}))) }
     }))).await;
     let core = runtime();
+    core.state
+        .update(|data| {
+            data.settings.native_browser_discovery = false;
+            Ok(())
+        })
+        .unwrap();
     core.install(&spec_for(&website)).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
