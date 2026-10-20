@@ -17,7 +17,7 @@ const json = {message:'Original JSON result retained',count:3};
 const jobs = ['file','json'].map(id => ({id,kind:'action',status:'completed',site_id:'site',site_title:'Example',action_title:id === 'file' ? 'Binary download' : 'Ordinary JSON',started_at:timestamp,updated_at:timestamp,finished_at:timestamp,found:[],notes:[],result:id === 'file' ? artifact : json,...(id === 'file' ? {artifact} : {})}));
 const state = {settings:{locale:'en',theme:'light'},providers:[],sites:[{id:'site',title:'Example',url:'https://example.test',host:'example.test',status:'ready',actions:[],updated_at:timestamp}],accounts:[],jobs,approvals:[],engine:{available:true,compatible:true,version:'1'},version:'test'};
 const requests = [], checks = [];
-let exportFails = false, detailFails = false;
+let exportFails = false, detailFails = false, holdExport = false, releaseExport;
 const server = createServer(async (req,res) => {
   if (req.url === '/api/events') { res.writeHead(200,{'Content-Type':'text/event-stream'}); res.end(': ready\n\n'); return; }
   if (req.url.startsWith('/api/')) {
@@ -27,7 +27,9 @@ const server = createServer(async (req,res) => {
     if (req.url === '/api/state') { send(200,{...state,jobs:jobs.map(({result,...snapshot}) => snapshot)}); return; }
     const target = jobs.find(job => job.id === req.url.split('/')[3]);
     if (req.method === 'GET' && target && req.url.endsWith('/result')) {
-      send(exportFails ? 503 : 200,exportFails ? {error:{code:'connection_lost'}} : target.result); return;
+      const failed = exportFails;
+      if (holdExport) await new Promise(resolve => { releaseExport = resolve; });
+      send(failed ? 503 : 200,failed ? {error:{code:'connection_lost'}} : target.result); return;
     }
     if (req.method === 'GET' && target && req.url === `/api/jobs/${target.id}`) {
       send(detailFails ? 409 : 200,detailFails ? {error:{code:'data_invalid'}} : target); return;
@@ -48,8 +50,10 @@ try {
   await context.addInitScript(() => {
     window.fixtureClipboard = {mode:'fail',writes:[]};
     window.installFixtureClipboard = () => Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value => {
-      window.fixtureClipboard.writes.push({mode:window.fixtureClipboard.mode,value});
-      if (window.fixtureClipboard.mode === 'fail') throw new Error('Synthetic clipboard rejection');
+      const mode = window.fixtureClipboard.mode;
+      window.fixtureClipboard.writes.push({mode,value});
+      if (window.fixtureClipboard.hold) await new Promise(resolve => { window.fixtureClipboard.release = resolve; });
+      if (mode === 'fail') throw new Error('Synthetic clipboard rejection');
     }}});
     window.installFixtureClipboard();
   });
@@ -128,6 +132,33 @@ try {
       await expect(alert('connection_lost')).toHaveCount(0);
       await expect(alert('internal')).toHaveCount(1);
       checks.push(`${id} recovery preserves the other action error in both directions`);
+    }
+    for (const id of ['file','json']) {
+      await open(id);
+      await page.evaluate(() => { window.fixtureClipboard.hold = true; });
+      await button(id === 'file' ? 'files.copyManifest' : 'actions.copy').dblclick();
+      await expect.poll(() => page.evaluate(() => window.fixtureClipboard.writes.length)).toBe(1);
+      await page.evaluate(() => { window.fixtureClipboard.hold = false; window.fixtureClipboard.release(); });
+      await expect(alert('internal')).toHaveCount(1);
+      assert.equal(await page.evaluate(() => window.fixtureClipboard.writes.length),1,'Pending repeated copy has one external side effect');
+      await page.evaluate(() => { window.fixtureClipboard.mode = 'success'; });
+      await button(id === 'file' ? 'files.copyManifest' : 'actions.copy').click();
+      await expect.poll(() => page.evaluate(() => window.fixtureClipboard.writes.length)).toBe(2);
+      await expect(alert('internal')).toHaveCount(0);
+      assert.deepEqual(JSON.parse(await page.evaluate(() => window.fixtureClipboard.writes[1].value)),id === 'file' ? artifact : json);
+
+      exportFails = true; holdExport = true; releaseExport = undefined;
+      const before = requests.filter(request => request.path === `/api/jobs/${id}/result`).length;
+      await button(id === 'file' ? 'files.exportManifest' : 'actions.download').dblclick();
+      await expect.poll(() => typeof releaseExport).toBe('function');
+      holdExport = false; releaseExport();
+      await expect(alert('connection_lost')).toHaveCount(1);
+      assert.equal(requests.filter(request => request.path === `/api/jobs/${id}/result`).length,before+1,'Pending repeated export has one external request');
+      exportFails = false;
+      await exportResult(id);
+      await expect(alert('connection_lost')).toHaveCount(0);
+      assert.equal(requests.filter(request => request.path === `/api/jobs/${id}/result`).length,before+2,'Only the deliberate settled retry starts another export');
+      checks.push(`${id} repeated pending copy and export are guarded, then settled failures can retry`);
     }
     detailFails = true;
     await open('file');
