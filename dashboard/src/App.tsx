@@ -5,9 +5,10 @@ import { I18n, initialLocale, languages, useI18n } from './i18n';
 import { AccountDialog, ActionDialog, ApprovalDialog, HandoffDialog, ProviderDialog, ResultDialog, useSummaryRequests, WebsiteDialog } from './dialogs';
 import { Badge, Bird, Button, EmptyState, ErrorNotice, Field, IconButton, Modal, ProviderMark, SearchField, Select, SiteIcon, Toggle, Wordmark } from './ui';
 import { Progress, RunningIndicator, providerName } from './work';
+import { snapshotCoordinator } from './snapshot';
 import type { Account, Action, Approval, Job, Provider, Settings, Site, Snapshot, Toast, View } from './types';
 
-export type Operations = { refresh: () => Promise<void>; act: <T>(path: string, method?: string, body?: unknown) => Promise<T>; toast: (key: string, kind?: 'success' | 'error') => void };
+export type Operations = { refresh: () => Promise<Snapshot | null>; freshSnapshot: () => Snapshot | null; act: <T>(path: string, method?: string, body?: unknown) => Promise<T>; toast: (key: string, kind?: 'success' | 'error') => void };
 export function App() {
   const [locale, setLocale] = useState(initialLocale);
   return <I18n locale={locale}><Workspace locale={locale} setLocale={setLocale} /></I18n>;
@@ -16,7 +17,9 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
   const { t } = useI18n();
   const [data, setData] = useState<Snapshot | null>(null);
   const [error, setError] = useState('');
-  const [online, setOnline] = useState(true);
+  const [transportOnline, setOnline] = useState(true);
+  const [snapshotFresh, setSnapshotFresh] = useState(true);
+  const online = transportOnline && snapshotFresh;
   const [closed, setClosed] = useState(false);
   const [view, setView] = useState<View>(() => ['activity', 'accounts', 'connections', 'settings', 'agents'].includes(location.hash.slice(1)) ? location.hash.slice(1) as View : 'websites');
   const [mobile, setMobile] = useState(false);
@@ -27,7 +30,11 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
   const [accountResume, setAccountResume] = useState<{url:string;provider?:string;intent?:string} | null>(null);
   const [action, setAction] = useState<{ site: Site; action: Action } | null>(null);
   const [handoff, setHandoff] = useState<Site | true | null>(null);
-  const [jobID, setJobID] = useState('');
+  const [selection, setSelection] = useState<{ id: string; receipt?: Job }>({ id: '' });
+  const openJob = (job: Job) => setSelection({ id: job.id, receipt: job });
+  const closeJob = () => setSelection({ id: '' });
+  const [resolvedApprovals, setResolvedApprovals] = useState<Set<string>>(() => new Set());
+  const resolveApproval = (id: string) => { setResolvedApprovals(current => new Set(current).add(id)); setApproval(null); };
   const summaries = useSummaryRequests(data?.jobs || []);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; description: string; run: () => Promise<unknown> } | null>(null);
@@ -38,24 +45,35 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
     const id = Date.now() + Math.random(); setToasts(x => [...x.slice(-2), { id, text: key, kind }]);
     window.setTimeout(() => setToasts(x => x.filter(n => n.id !== id)), 5000);
   }, []);
-  const refresh = useCallback(async () => {
-    const next = await request<Snapshot>('/api/state');
-    if (!snapshotRef.current && languages.some(([id]) => id === next.settings.locale)) setLocale(next.settings.locale);
-    snapshotRef.current = next; setData(next); setError(''); setOnline(true);
-  }, []);
-  const act = useCallback(async <T,>(path: string, method = 'POST', body?: unknown) => {
-    const result = await request<T>(path, method, body); await refresh(); return result;
-  }, [refresh]);
-  const ops: Operations = { refresh, act, toast };
-  useEffect(() => { setApiLocale(locale); document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'; localStorage.setItem('hycli.locale', locale); if (snapshotRef.current) void refresh().catch(() => setOnline(false)); }, [locale, refresh]);
+  const coordinator = useRef<ReturnType<typeof snapshotCoordinator<Snapshot>> | null>(null);
+  if (!coordinator.current) coordinator.current = snapshotCoordinator(
+    () => request<Snapshot>('/api/state'),
+    next => {
+      if (!snapshotRef.current && languages.some(([id]) => id === next.settings.locale)) setLocale(next.settings.locale);
+      snapshotRef.current = next; setData(next); setError('');
+      setResolvedApprovals(current => new Set([...current].filter(id => next.approvals.some(approval => approval.id === id && approval.status === 'pending'))));
+    },
+    setSnapshotFresh,
+  );
+  const refresh = useCallback(() => coordinator.current!.refresh(), []);
+  const freshSnapshot = useCallback(() => coordinator.current!.freshSnapshot(), []);
+  const act = useCallback(<T,>(path: string, method = 'POST', body?: unknown) =>
+    coordinator.current!.act(() => request<T>(path, method, body)), []);
+  const ops: Operations = { refresh, freshSnapshot, act, toast };
+  useEffect(() => {
+    if (selection.receipt && data?.jobs.some(job => job.id === selection.id)) {
+      setSelection(current => current.id === selection.id ? { id: current.id } : current);
+    }
+  }, [data, selection]);
+  useEffect(() => { setApiLocale(locale); document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'; localStorage.setItem('hycli.locale', locale); if (snapshotRef.current) void refresh().catch(() => {}); }, [locale, refresh]);
   useEffect(() => {
     if (closed) return;
     let stopped = false; let stream: EventSource | null = null; let retry: number | undefined;
     const connect = async () => {
       try {
-        await session(); if (stopped) return; await refresh(); if (stopped) return;
+        await session(); if (stopped) return; await refresh(); if (stopped) return; setError('');
         stream = new EventSource('/api/events');
-        stream.onmessage = () => { void refresh().catch(() => setOnline(false)); };
+        stream.onmessage = () => { void refresh().catch(() => {}); };
         stream.onopen = () => setOnline(true);
         stream.onerror = () => { stream?.close(); if (!stopped) { setOnline(false); retry = window.setTimeout(() => { void connect(); }, 3000); } };
       } catch (e) {
@@ -63,7 +81,7 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
       }
     };
     void connect();
-    const polling = window.setInterval(() => { void refresh().catch(() => setOnline(false)); }, 15000);
+    const polling = window.setInterval(() => { void refresh().catch(() => {}); }, 15000);
     return () => { stopped = true; stream?.close(); clearTimeout(retry); clearInterval(polling); };
   }, [refresh, closed]);
   useEffect(() => {
@@ -84,8 +102,8 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
   const catchAction = (run: () => Promise<unknown>) => { void run().catch(e => toast(`errors.${e instanceof ApiError ? e.code : 'internal'}`, 'error')); };
   const removeSite = (site: Site) => setConfirm({ title: t('sites.removeTitle'), description: t('sites.removeDescription'), run: async () => { await act(`/api/sites/${site.id}`, 'DELETE'); setSiteID(''); } });
   const activeSite = data?.sites.find(s => s.id === siteID);
-  const activeJob = data?.jobs.find(j => j.id === jobID);
-  const pending = data?.approvals.filter(a => a.status === 'pending') || [];
+  const activeJob = data?.jobs.find(j => j.id === selection.id) || selection.receipt;
+  const pending = data?.approvals.filter(a => a.status === 'pending' && !resolvedApprovals.has(a.id)) || [];
   const nav: { id: View; icon: ReactNode }[] = [{ id: 'websites', icon: <LayoutGrid /> }, { id: 'accounts', icon: <UsersRound /> }, { id: 'activity', icon: <Clock3 /> }, { id: 'connections', icon: <Sparkles /> }, { id: 'settings', icon: <Settings2 /> }];
   const quit = () => setConfirm({ title: t('settings.quit'), description: t('settings.quitConfirm'), run: async () => { await request('/api/shutdown', 'POST'); setClosed(true); } });
   if (closed) return <main className="loading-screen"><Bird /><h1>{t('settings.stopped')}</h1><p>{t('settings.stoppedHint')}</p></main>;
@@ -103,8 +121,8 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
         {!data && !error && <div className="loading-screen"><Bird mood="working" /><p>{t('common.loading')}</p></div>}
         {data && <>
           {pending.length > 0 && <button className="approval-banner" onClick={() => setApproval(pending[0])}><ShieldCheck size={20} /><span>{t('safety.changePending')}<small>{pending[0].action_title} · {pending[0].site_title}</small></span><ArrowRight size={18} /></button>}
-          {view === 'websites' && <Websites data={data} ops={ops} openSite={s => setSiteID(s.id)} openJob={j => setJobID(j.id)} removeSite={removeSite} connectAI={() => navigate('connections')} connectAccount={setAccountSite} />}
-          {view === 'activity' && <Activity data={data} ops={ops} openJob={j => setJobID(j.id)} openSite={s => setSiteID(s.id)} />}
+          {view === 'websites' && <Websites data={data} ops={ops} openSite={s => setSiteID(s.id)} openJob={openJob} removeSite={removeSite} connectAI={() => navigate('connections')} connectAccount={setAccountSite} />}
+          {view === 'activity' && <Activity data={data} ops={ops} openJob={openJob} openSite={s => setSiteID(s.id)} />}
           {view === 'accounts' && <Accounts data={data} ops={ops} connect={() => setAccountSite(null)} confirm={setConfirm} />}
           {view === 'agents' && <CodingAgents data={data} setup={() => setHandoff(true)} openSite={s => setSiteID(s.id)} />}
           {view === 'connections' && <Connections data={data} open={setProvider} />}
@@ -116,10 +134,10 @@ function Workspace({ locale, setLocale }: { locale: string; setLocale: (locale: 
     {activeSite && <WebsiteDialog site={activeSite} data={data!} ops={ops} onClose={() => setSiteID('')} run={a => { setAction({ site: activeSite, action: a }); setSiteID(''); }} connectAccount={() => { setAccountSite(activeSite); setSiteID(''); }} remove={() => removeSite(activeSite)} />}
     {provider && data && <ProviderDialog provider={data.providers.find(p => p.id === provider.id) || provider} data={data} ops={ops} onClose={() => setProvider(null)} />}
     {accountSite !== undefined && data && <AccountDialog site={accountSite} data={data} ops={ops} resume={accountResume} onClose={() => { setAccountSite(undefined); setAccountResume(null); }} />}
-    {action && data && <ActionDialog {...action} data={data} ops={ops} onClose={() => setAction(null)} onJob={id => { setAction(null); setJobID(id); }} onApproval={a => { setAction(null); setApproval(a); }} />}
+    {action && data && <ActionDialog {...action} data={data} ops={ops} onClose={() => setAction(null)} onJob={job => { setAction(null); openJob(job); }} onApproval={a => { setAction(null); setApproval(a); }} />}
     {handoff && <HandoffDialog site={handoff === true ? null : handoff} ops={ops} onClose={() => setHandoff(null)} />}
-    {activeJob && <ResultDialog summaries={summaries} job={activeJob} data={data!} ops={ops} onClose={() => setJobID('')} connectAccount={() => { const site = data!.sites.find(s => s.id === activeJob.site_id); const url = activeJob.url || site?.url; if (!url) return; setAccountResume({url,provider:activeJob.provider,intent:activeJob.intent}); setAccountSite(site || null); setJobID(''); }} />}
-    {approval && <ApprovalDialog approval={approval} ops={ops} onClose={() => setApproval(null)} onJob={id => { setApproval(null); setJobID(id); }} />}
+    {activeJob && <ResultDialog summaries={summaries} job={activeJob} data={data!} ops={ops} onClose={closeJob} connectAccount={() => { const site = data!.sites.find(s => s.id === activeJob.site_id); const url = activeJob.url || site?.url; if (!url) return; setAccountResume({url,provider:activeJob.provider,intent:activeJob.intent}); setAccountSite(site || null); closeJob(); }} />}
+    {approval && <ApprovalDialog approval={approval} ops={ops} onClose={() => setApproval(null)} onResolved={() => resolveApproval(approval.id)} onJob={job => { resolveApproval(approval.id); openJob(job); }} />}
     {confirm && <Modal title={confirm.title} onClose={() => setConfirm(null)}><p className="dialog-intro">{confirm.description}</p><div className="dialog-buttons"><Button variant="secondary" onClick={() => setConfirm(null)}>{t('common.cancel')}</Button><Button variant="danger" loading={busy} onClick={() => { setBusy(true); void confirm.run().then(() => setConfirm(null)).catch(e => toast(`errors.${e instanceof ApiError ? e.code : 'internal'}`, 'error')).finally(() => setBusy(false)); }}>{t('common.confirm')}</Button></div></Modal>}
     <div className="toast-stack" aria-live="polite">{toasts.map(n => <div className={`toast toast--${n.kind}`} key={n.id}>{n.kind === 'success' ? <CheckCircle2 size={18} /> : <CircleHelp size={18} />}<span>{t(n.text)}</span><button aria-label={t('common.close')} onClick={() => setToasts(x => x.filter(v => v.id !== n.id))}><X size={16} /></button></div>)}</div>
   </div>;

@@ -67,6 +67,28 @@ try {
     await close();
   }
   console.log('PASS: empty-success text only on successful completion; failure remedy unchanged');
+  state.jobs = [job('API denial','failed',{error_code:'api_denied'})];
+  await visit();
+  await open('API denial');
+  await dialog().getByRole('alert').getByText(en['errors.api_denied'],{exact:true}).waitFor();
+  assert.equal(await button(dialog(),'accounts.autoFind').count(),0,'API denial does not suggest reconnecting the account');
+  assert.equal(await dialog().getByText(en['actions.noResult'],{exact:true}).count(),0,'A denied read is not an empty success');
+  await close();
+  console.log('PASS: API denial shows its own remedy without account reconnection or empty success');
+  for (const code of ['oauth_recovery_required','oauth_verification_pending']) {
+    const title = code === 'oauth_recovery_required' ? 'OAuth recovery' : 'OAuth verification';
+    state.jobs = [job(title,'failed',{error_code:code})];
+    const before = requests.length;
+    await visit();
+    await open(title);
+    await dialog().locator('.result-heading').getByText(en['activity.failed'],{exact:true}).waitFor();
+    await dialog().getByRole('alert').getByText(en['errors.'+code],{exact:true}).waitFor();
+    assert.equal(await button(dialog(),'accounts.autoFind').count(),0,code+' does not suggest browser account discovery');
+    assert.equal(await dialog().getByText(en['actions.noResult'],{exact:true}).count(),0,code+' is not an empty success');
+    assert.equal(requests.slice(before).filter(r => r.method === 'POST' && !r.path.startsWith('/api/session')).length,0,code+' never starts automatic recovery work');
+    await close();
+  }
+  console.log('PASS: OAuth failures show their localized remedies without browser discovery, automatic recovery or empty success');
   const original = job('Read original','completed',{result:{answer:'Original read retained'}});
   state.jobs = [original,job('Other parent','completed',{result:{answer:'Independent result'}}),job('unrelated-summary','failed',{kind:'summary',parent_id:'different-parent',error_code:'ai_billing_error'})];
   await visit();
@@ -119,8 +141,11 @@ try {
   state.jobs.find(j => j.id === 'summary-3').status = 'cancelled'; changed();
   await dialog().locator('.summary-operation').getByText(en['activity.cancelled'],{exact:true}).waitFor();
   refreshFails = true;
+  const failedRefresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/state' && response.status() === 503);
   await button(dialog().locator('.summary-operation'),'common.retry').dblclick();
-  await dialog().getByRole('alert').getByText(en['errors.connection_lost'],{exact:true}).waitFor();
+  await failedRefresh;
+  await page.locator('.main-content > .notice').getByText(en['activity.connectionLost'],{exact:true}).waitFor();
+  assert.equal(await dialog().getByRole('alert').count(),0,'Accepted summary must not report a command failure when only snapshot synchronization fails');
   assert.equal(summaryCount,4,'Refresh failure never repeats accepted operation');
   assert.equal(requests.filter(r => r.path === '/api/jobs/summary-3/retry').length,0);
   await dialog().locator('.summary-operation').getByRole('progressbar').waitFor();
@@ -135,6 +160,8 @@ try {
   assert.equal(summaryCount,4);
   refreshFails = false; changed();
   await dialog().locator('.summary-operation').waitFor({state:'hidden'});
+  assert.equal(await page.getByText(en['activity.connectionLost'],{exact:true}).count(),0,'Successful reconciliation clears the separate stale notice');
+  assert.equal(await dialog().getByRole('alert').count(),0,'Reconciliation leaves no false command error');
   // A later Activity retry is authoritative once the exact accepted child was observed.
   await button(dialog(),'actions.summary').click();
   await dialog().locator('.summary-operation').getByRole('progressbar').waitFor();

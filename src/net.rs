@@ -42,6 +42,15 @@ pub struct Request {
 impl Request {
     fn check_read_headers(&self) -> AppResult<()> {
         if self.read_only
+            && self.multipart.as_ref().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .any(|part| matches!(part, crate::spec::MultipartPart::File { .. }))
+            })
+        {
+            return Err(AppError::api("approval_required", 409));
+        }
+        if self.read_only
             && crate::policy::request_headers_effect(
                 self.headers
                     .iter()
@@ -147,7 +156,20 @@ impl Network {
         credential: &crate::accounts::Credential,
         input: &Request,
     ) -> AppResult<Response> {
+        self.fetch_browser_in_page_guarded(credential, input, None)
+            .await
+    }
+
+    pub(crate) async fn fetch_browser_in_page_guarded(
+        &self,
+        credential: &crate::accounts::Credential,
+        input: &Request,
+        check_authority: Option<&(dyn Fn() -> AppResult<()> + Sync)>,
+    ) -> AppResult<Response> {
         input.check_read_headers()?;
+        if input.multipart.is_some() {
+            return Err(AppError::api("unsupported_transport", 400));
+        }
         let initial = validate_url(&input.url)?;
         let origin_str = initial.origin().ascii_serialization();
         let strategy_key = Policy::strategy_key(
@@ -175,6 +197,9 @@ impl Network {
             token: &token,
             released: false,
         };
+        if let Some(check) = check_authority {
+            check()?;
+        }
         let started = Instant::now();
         let fetched =
             crate::browser_session::fetch_in_page(crate::browser_session::InPageFetchRequest {
@@ -239,6 +264,17 @@ impl Network {
         entry: &str,
         account: &str,
     ) -> AppResult<Response> {
+        self.fetch_rendered_guarded(credential, entry, account, None)
+            .await
+    }
+
+    pub(crate) async fn fetch_rendered_guarded(
+        &self,
+        credential: &crate::accounts::Credential,
+        entry: &str,
+        account: &str,
+        check_authority: Option<&(dyn Fn() -> AppResult<()> + Sync)>,
+    ) -> AppResult<Response> {
         let initial = validate_url(entry)?;
         let origin_str = initial.origin().ascii_serialization();
         let strategy_key = Policy::strategy_key("GET", entry, "browser", account);
@@ -261,6 +297,9 @@ impl Network {
             token: &token,
             released: false,
         };
+        if let Some(check) = check_authority {
+            check()?;
+        }
         let started = Instant::now();
         let capture = crate::browser_session::capture(credential, entry, self.allow_local).await?;
         if !same_site_origin(&validate_url(&capture.final_url)?, &initial)
@@ -303,7 +342,7 @@ impl Network {
         })
     }
     pub async fn fetch(&self, input: Request) -> AppResult<Response> {
-        self.fetch_inner(input, None, None).await
+        self.fetch_inner(input, None, None, None).await
     }
     /// The continuation key/value is supplied only by the private runtime resolver.
     pub(crate) async fn fetch_paginated(
@@ -315,7 +354,7 @@ impl Network {
             return Err(AppError::api("unsafe_target", 400));
         }
         input.follow_redirects = false;
-        self.fetch_inner(input, continuation, None).await
+        self.fetch_inner(input, continuation, None, None).await
     }
     /// Recheck private account authority after every wait and immediately before dispatch.
     /// The callback is also run for each bounded transport retry.
@@ -325,7 +364,18 @@ impl Network {
         continuation: Option<(&str, &str)>,
         check_authority: &(dyn Fn() -> AppResult<()> + Sync),
     ) -> AppResult<Response> {
-        self.fetch_inner(input, continuation, Some(check_authority))
+        self.fetch_inner(input, continuation, Some(check_authority), None)
+            .await
+    }
+    pub(crate) async fn fetch_oauth_guarded(
+        &self,
+        mut input: Request,
+        continuation: Option<(&str, &str)>,
+        check_authority: &(dyn Fn() -> AppResult<()> + Sync),
+        dispatched: Option<&std::sync::atomic::AtomicBool>,
+    ) -> AppResult<Response> {
+        input.follow_redirects = false;
+        self.fetch_inner(input, continuation, Some(check_authority), dispatched)
             .await
     }
     async fn fetch_inner(
@@ -333,6 +383,7 @@ impl Network {
         input: Request,
         continuation: Option<(&str, &str)>,
         check_authority: Option<&(dyn Fn() -> AppResult<()> + Sync)>,
+        dispatched: Option<&std::sync::atomic::AtomicBool>,
     ) -> AppResult<Response> {
         input.check_read_headers()?;
         let mut initial = validate_url(&input.url)?;
@@ -491,8 +542,14 @@ impl Network {
                 }
                 headers.insert(name, value);
             }
+            if input.multipart.is_some() {
+                headers.remove(reqwest::header::CONTENT_TYPE);
+            }
             let method = Method::from_bytes(input.method.as_bytes())
                 .map_err(|_| AppError::api("data_invalid", 400))?;
+            if let Some(check) = check_authority {
+                check()?;
+            }
             let mut request = client.request(method, target.clone()).headers(headers);
             if let Some(parts) = &input.multipart {
                 request = request.multipart(build_multipart_form(parts).await?);
@@ -502,10 +559,20 @@ impl Network {
             if let Some(check) = check_authority {
                 check()?;
             }
+            if let Some(dispatched) = dispatched {
+                dispatched.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             let response = request.send().await;
             let response = match response {
                 Ok(response) => response,
                 Err(error) => {
+                    // This no-retry OAuth POST failed before an HTTP request could
+                    // be sent. Other transport failures remain dispatch-uncertain.
+                    if !input.read_only && !input.follow_redirects && error.is_connect() {
+                        if let Some(dispatched) = dispatched {
+                            dispatched.store(false, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
                     let is_timeout = error.is_timeout();
                     drop(lease);
                     if input.read_only && retries < 1 && (is_timeout || error.is_connect()) {
@@ -817,9 +884,16 @@ pub fn retry_after(headers: &[(String, String)]) -> Option<Duration> {
 }
 
 /// Build a reqwest multipart form, reading any file parts from disk. File parts
-/// are capped at 100 MiB and their media type is inferred from the extension.
+/// share a 100 MiB budget and their media type is inferred from the extension.
 async fn build_multipart_form(
     parts: &[crate::spec::MultipartPart],
+) -> AppResult<reqwest::multipart::Form> {
+    build_multipart_form_bounded(parts, 100 * 1024 * 1024).await
+}
+
+async fn build_multipart_form_bounded(
+    parts: &[crate::spec::MultipartPart],
+    mut remaining: usize,
 ) -> AppResult<reqwest::multipart::Form> {
     use crate::spec::MultipartPart;
     let mut form = reqwest::multipart::Form::new();
@@ -829,15 +903,8 @@ async fn build_multipart_form(
                 form = form.text(name.clone(), value.clone());
             }
             MultipartPart::File { name, path } => {
-                let meta = tokio::fs::metadata(path)
-                    .await
-                    .map_err(|_| AppError::api("data_invalid", 400))?;
-                if meta.len() > 100 * 1024 * 1024 {
-                    return Err(AppError::api("data_invalid", 400));
-                }
-                let bytes = tokio::fs::read(path)
-                    .await
-                    .map_err(|_| AppError::api("data_invalid", 400))?;
+                let bytes = read_upload_file(path, remaining).await?;
+                remaining -= bytes.len();
                 let filename = std::path::Path::new(path)
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -865,9 +932,141 @@ async fn build_multipart_form(
     Ok(form)
 }
 
+/// Read one regular file through the same handle used for metadata. Limit the
+/// actual bytes, not just the observed length: files can grow during a read.
+async fn read_upload_file(path: &str, limit: usize) -> AppResult<Vec<u8>> {
+    let mut options = tokio::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK);
+    let file = options
+        .open(path)
+        .await
+        .map_err(|_| AppError::api("data_invalid", 400))?;
+    let metadata = file
+        .metadata()
+        .await
+        .map_err(|_| AppError::api("data_invalid", 400))?;
+    if !metadata.is_file() || metadata.len() > limit as u64 {
+        return Err(AppError::api("data_invalid", 400));
+    }
+    read_bounded_upload(file, limit).await
+}
+
+async fn read_bounded_upload(
+    reader: impl tokio::io::AsyncRead + Unpin,
+    limit: usize,
+) -> AppResult<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut bytes = Vec::new();
+    reader
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|_| AppError::api("data_invalid", 400))?;
+    if bytes.len() > limit {
+        return Err(AppError::api("data_invalid", 400));
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod website_input_tests {
     use super::*;
+    #[tokio::test]
+    async fn file_reads_are_regular_bounded_and_share_one_multipart_budget() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/upload-file-tests")
+            .join(util::id());
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("owned-fixture.bin");
+        std::fs::write(&path, b"abcd").unwrap();
+        let path = path.to_str().unwrap();
+        assert_eq!(read_upload_file(path, 4).await.unwrap(), b"abcd");
+        assert!(read_upload_file(path, 3).await.is_err());
+        assert!(read_upload_file(root.to_str().unwrap(), 4).await.is_err());
+        // A stream that grows beyond the observed metadata is still capped.
+        assert!(read_bounded_upload(&b"abcde"[..], 4).await.is_err());
+        let parts = vec![
+            crate::spec::MultipartPart::File {
+                name: "one".into(),
+                path: path.into(),
+            },
+            crate::spec::MultipartPart::File {
+                name: "two".into(),
+                path: path.into(),
+            },
+        ];
+        assert!(build_multipart_form_bounded(&parts, 8).await.is_ok());
+        assert!(build_multipart_form_bounded(&parts, 7).await.is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fifo_is_rejected_without_waiting_for_a_writer() {
+        use std::os::unix::ffi::OsStrExt;
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/upload-file-tests")
+            .join(util::id());
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("owned-fixture.fifo");
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        // A rescue writer bounds runtime shutdown even if nonblocking open regresses.
+        let rescue_path = path.clone();
+        let (cancel, canceled) = std::sync::mpsc::channel();
+        let rescue_used = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let used = rescue_used.clone();
+        let rescue = std::thread::spawn(move || {
+            if canceled.recv_timeout(Duration::from_secs(2)).is_ok() {
+                return;
+            }
+            used.store(true, std::sync::atomic::Ordering::SeqCst);
+            use std::os::unix::fs::OpenOptionsExt;
+            let _ = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(rescue_path);
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            read_upload_file(path.to_str().unwrap(), 4),
+        )
+        .await;
+        let _ = cancel.send(());
+        rescue.join().unwrap();
+        assert!(!rescue_used.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(result.unwrap().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn read_only_file_multipart_is_rejected_before_file_resolution() {
+        let mut request = Request {
+            url: "https://fixture.example.test/search".into(),
+            method: "POST".into(),
+            headers: vec![],
+            body: None,
+            account_id: String::new(),
+            limit: 1024,
+            timeout: Duration::from_secs(1),
+            read_only: true,
+            follow_redirects: false,
+            tls_profile: String::new(),
+            multipart: Some(vec![crate::spec::MultipartPart::File {
+                name: "file".into(),
+                path: "/synthetic/never-opened".into(),
+            }]),
+        };
+        assert_eq!(
+            request.check_read_headers().unwrap_err().public_code,
+            "approval_required"
+        );
+        request.read_only = false;
+        assert!(request.check_read_headers().is_ok());
+    }
     #[test]
     fn read_headers_guard_is_pure_and_preserves_non_read_requests() {
         let mut request = Request {
@@ -945,8 +1144,8 @@ mod website_input_tests {
     #[test]
     fn website_input_normalizes_domains_without_weakening_request_validation() {
         assert_eq!(
-            website_url("  blog.naver.com  ").unwrap().as_str(),
-            "https://blog.naver.com/"
+            website_url("  blog.example.com  ").unwrap().as_str(),
+            "https://blog.example.com/"
         );
         assert_eq!(
             website_url("//example.org/path").unwrap().as_str(),

@@ -371,6 +371,7 @@
   "safety.approvalExpired": "승인이 만료되었습니다. 작업 내용을 다시 확인하세요.",
   "errors.approval_required": "이 작업은 확인이 필요합니다.",
   "errors.approval_expired": "실행하기 전에 작업 내용을 다시 확인하세요.",
+  "errors.api_denied": "엔드포인트가 요청을 거부했습니다. 엔드포인트 접근 권한, 설정, 권한 범위와 입력값을 확인하세요.",
   "errors.blocked_by_site": "웹사이트가 요청을 거절했습니다. 브라우저에서 계정을 확인하세요.",
   "errors.engine_unavailable": "웹사이트 도구 엔진을 사용할 수 없습니다. 설정에서 연결 상태를 확인하세요.",
   "errors.engine_incompatible": "웹사이트 도구 엔진을 업데이트해 Hycli에 연결하세요.",
@@ -516,5 +517,9 @@
   "errors.work_in_progress": "활동에서 진행 중인 작업을 완료하거나 취소한 뒤 다시 종료해 주세요.",
   "errors.shutting_down": "Hycli를 종료하는 중입니다.",
   "errors.pagination_expired": "페이지 이동 번호표가 만료되었거나 요청과 일치하지 않습니다. 첫 페이지부터 다시 시작하세요.",
-  "errors.pagination_invalid": "웹사이트가 지원되지 않는 페이지 이동값을 반환했습니다. 8자 이상, 4096바이트 이하의 값만 지원하며 인증정보나 짧은 페이지 번호는 사용할 수 없습니다."
+  "errors.pagination_invalid": "웹사이트가 지원되지 않는 페이지 이동값을 반환했습니다. 8자 이상, 4096바이트 이하의 값만 지원하며 인증정보나 짧은 페이지 번호는 사용할 수 없습니다.",
+  "errors.oauth_recovery_required": "이 OAuth 인증정보는 안전하게 갱신할 수 없습니다. 새 권한 부여 JSON을 표준 입력으로 전달하여 auth set을 실행하세요. 이전 갱신 토큰은 재사용하지 마세요.",
+  "errors.oauth_verification_pending": "계정 확인이 완료되지 않았습니다. 읽기를 다시 시도하여 토큰을 다시 교환하지 않고 저장된 인증정보를 확인하세요.",
+  "errors.oauth_configuration_invalid": "OAuth 설정이 올바르지 않습니다. OAuth 설정을 확인하세요.",
+  "errors.oauth_stdin_required": "OAuth 인증정보는 명령줄 인수가 아닌 표준 입력으로 전달하세요."
 }

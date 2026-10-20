@@ -358,6 +358,7 @@
   "safety.approvalExpired": "Deze bevestiging is verlopen. Controleer de actie opnieuw.",
   "errors.approval_required": "Deze actie heeft je bevestiging nodig.",
   "errors.approval_expired": "Controleer deze actie opnieuw voordat je haar uitvoert.",
+  "errors.api_denied": "Het eindpunt heeft dit verzoek geweigerd. Controleer de toegang, configuratie, machtigingen en invoer.",
   "errors.blocked_by_site": "De website heeft dit verzoek geweigerd. Controleer je account in de browser.",
   "errors.engine_unavailable": "De uitvoersoftware voor websitetools is niet beschikbaar. Controleer de verbinding in Instellingen.",
   "errors.engine_incompatible": "Werk de uitvoersoftware voor websitetools bij om deze met Hycli te verbinden.",
@@ -516,5 +517,9 @@
   "errors.work_in_progress": "Voltooi of annuleer het lopende werk in Activiteit en sluit Hycli daarna opnieuw af.",
   "errors.shutting_down": "Hycli wordt afgesloten.",
   "errors.pagination_expired": "Deze paginacursor is verlopen of past niet meer bij dit verzoek. Begin opnieuw bij de eerste pagina.",
-  "errors.pagination_invalid": "De website gaf een niet-ondersteunde paginacursor terug. Minimaal 8 tekens en maximaal 4096 bytes, zonder inloggegevens of korte paginanummers."
+  "errors.pagination_invalid": "De website gaf een niet-ondersteunde paginacursor terug. Minimaal 8 tekens en maximaal 4096 bytes, zonder inloggegevens of korte paginanummers.",
+  "errors.oauth_recovery_required": "Deze OAuth-inloggegevens kunnen niet veilig worden vernieuwd. Gebruik auth set met nieuwe autorisatiegegevens als JSON via standaardinvoer. Hergebruik het vorige vernieuwingstoken niet.",
+  "errors.oauth_verification_pending": "De accountverificatie is niet voltooid. Probeer de leesactie opnieuw om de opgeslagen inloggegevens te verifiëren zonder opnieuw tokens uit te wisselen.",
+  "errors.oauth_configuration_invalid": "De OAuth-configuratie is ongeldig. Controleer je OAuth-instellingen.",
+  "errors.oauth_stdin_required": "Geef OAuth-inloggegevens door via standaardinvoer, niet als opdrachtregelargumenten."
 }

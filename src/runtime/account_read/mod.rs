@@ -214,23 +214,24 @@ impl Runtime {
         check()?;
         if response.status == 401 {
             self.invalidate_identity_if_current(id, &snapshot.credential, true)?;
-            return Err(AppError::api("auth_required", 401));
         }
-        if response.status == 429 {
-            return Err(AppError::api("site_rate_limited", 429));
+        if (300..400).contains(&response.status) {
+            return Err(AppError::api("read_redirect", 502));
         }
-        if !response.successful() {
-            return Err(AppError::api(
-                if (300..400).contains(&response.status) {
-                    "read_redirect"
-                } else if response.status == 403 {
-                    "blocked_by_site"
-                } else {
-                    "request_failed"
-                },
-                if response.status == 403 { 403 } else { 502 },
-            ));
-        }
+        let failure_body = (!response.successful())
+            .then(|| strict_json::parse(&response.bytes).ok())
+            .flatten();
+        super::failure::ensure_success(
+            response.status,
+            &response.defense,
+            "",
+            Some(crate::apperr::SafeHttpDiagnostic::from_response(
+                response.status,
+                &response.defense,
+                failure_body.as_ref(),
+                &secrets,
+            )),
+        )?;
         let content_type = response
             .header("content-type")
             .split(';')

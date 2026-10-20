@@ -183,22 +183,8 @@ impl Runtime {
         result
     }
 
-    fn session_output(credential: &Credential, mut value: Value) -> AppResult<Value> {
+    fn session_output(credential: &Credential, value: Value) -> AppResult<Value> {
         let secrets = credential.session_redaction_values();
-        fn redact_keys(value: &mut Value, secrets: &[String]) {
-            match value {
-                Value::Object(fields) => {
-                    for (key, mut child) in std::mem::take(fields) {
-                        let clean = super::sanitized(Value::String(key), secrets);
-                        redact_keys(&mut child, secrets);
-                        fields.insert(clean.as_str().unwrap_or("[private]").into(), child);
-                    }
-                }
-                Value::Array(items) => items.iter_mut().for_each(|v| redact_keys(v, secrets)),
-                _ => {}
-            }
-        }
-        redact_keys(&mut value, &secrets);
         Ok(super::sanitized(value, &secrets))
     }
 
@@ -239,6 +225,37 @@ mod tests {
     use super::*;
     use axum::{Json, Router, routing::get};
     use std::sync::Arc;
+
+    #[test]
+    fn session_output_preserves_colliding_secret_keys_and_ordinary_entries() {
+        let credential = Credential {
+            headers: [
+                ("authorization".into(), "session-canary-one".into()),
+                ("x-session".into(), "session-canary-two".into()),
+            ]
+            .into(),
+            ..Credential::default()
+        };
+        let result = Runtime::session_output(
+            &credential,
+            json!({"nested":[{
+                "session-canary-one":"first entry",
+                "session-canary-two":"second entry",
+                "[private]":"ordinary entry",
+                "[private]#_1":"ordinary suffixed entry"
+            }]}),
+        )
+        .unwrap();
+        let text = result.to_string();
+        assert!(!text.contains("session-canary-one"));
+        assert!(!text.contains("session-canary-two"));
+        let fields = result["nested"][0].as_object().unwrap();
+        assert_eq!(fields.len(), 4);
+        assert_eq!(fields["[private]"], "ordinary entry");
+        assert_eq!(fields["[private]#_1"], "ordinary suffixed entry");
+        assert!(fields.values().any(|value| value == "first entry"));
+        assert!(fields.values().any(|value| value == "second entry"));
+    }
 
     #[tokio::test]
     async fn stale_http_observation_cannot_publish_or_expose_previous_session_metadata() {

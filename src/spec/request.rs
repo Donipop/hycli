@@ -36,6 +36,24 @@ impl Spec {
         op: &Operation,
         args: &std::collections::BTreeMap<String, String>,
     ) -> AppResult<(String, Option<Vec<u8>>)> {
+        self.build_request_inner(op, args, false)
+    }
+
+    /// Final dispatch cannot use the source placeholder for an unresolved lease.
+    pub(crate) fn build_final_request(
+        &self,
+        op: &Operation,
+        args: &std::collections::BTreeMap<String, String>,
+    ) -> AppResult<(String, Option<Vec<u8>>)> {
+        self.build_request_inner(op, args, true)
+    }
+
+    fn build_request_inner(
+        &self,
+        op: &Operation,
+        args: &std::collections::BTreeMap<String, String>,
+        final_target: bool,
+    ) -> AppResult<(String, Option<Vec<u8>>)> {
         let mut path = interpolate_path_template(&op.path, args);
         for n in path_vars(&op.path) {
             let p = op
@@ -43,7 +61,7 @@ impl Spec {
                 .get(&n)
                 .ok_or_else(|| apperr::spec(format!("Undeclared path parameter: {n}"), ""))?;
             let mut v = coerce_str(p, &n, args, true)?;
-            if v.contains("{{") {
+            if (!op.derived_target || !args.contains_key(&n)) && v.contains("{{") {
                 v = interpolate_template_str(&v, &std::collections::BTreeMap::new(), args);
             }
             path = path.replace(&format!("{{{n}}}"), &urlencode_path(&v));
@@ -53,8 +71,24 @@ impl Spec {
         let base = {
             let raw = self.operation_base(op);
             if raw.contains("{{") {
+                if final_target {
+                    let mut rest = raw;
+                    while let Some(start) = rest.find("{{") {
+                        let after = &rest[start + 2..];
+                        let end = after
+                            .find("}}")
+                            .ok_or_else(|| apperr::AppError::api("unsafe_target", 400))?;
+                        if !args.get(after[..end].trim()).is_some_and(|v| !v.is_empty()) {
+                            return Err(apperr::AppError::api("unsafe_target", 400));
+                        }
+                        rest = &after[end + 2..];
+                    }
+                }
                 let resolved =
                     interpolate_template_str(raw, &std::collections::BTreeMap::new(), args);
+                if final_target {
+                    crate::net::validate_url(&resolved)?;
+                }
                 // A derived-target base is unresolved until its preflight runs;
                 // until then fall back to the site base so the first pass still
                 // has a valid absolute URL to work with.
@@ -67,11 +101,20 @@ impl Spec {
                 raw.to_string()
             }
         };
-        let mut url_s = format!(
-            "{}/{}",
-            base.trim_end_matches('/'),
-            path.trim_start_matches('/')
-        );
+        let mut url_s = if op.derived_target && path.is_empty() {
+            base
+        } else if base.contains('?') {
+            if !path.is_empty() {
+                return Err(apperr::AppError::api("unsafe_target", 400));
+            }
+            base
+        } else {
+            format!(
+                "{}/{}",
+                base.trim_end_matches('/'),
+                path.trim_start_matches('/')
+            )
+        };
 
         let empty_resolved = std::collections::BTreeMap::new();
         let mut q = FormEncoder::default();
@@ -87,14 +130,14 @@ impl Spec {
                 continue;
             }
             let mut v = coerce_str(p, name, args, true)?;
-            if v.contains("{{") {
+            if (!op.derived_target || !args.contains_key(name)) && v.contains("{{") {
                 v = interpolate_template_str(&v, &empty_resolved, args);
             }
             q.append_pair(name, &v);
         }
         let qs = q.finish();
         if !qs.is_empty() {
-            url_s.push('?');
+            url_s.push(if url_s.contains('?') { '&' } else { '?' });
             url_s.push_str(&qs);
         }
 
@@ -113,7 +156,7 @@ impl Spec {
                         continue;
                     }
                     let mut v = coerce_str(p, name, args, true)?;
-                    if v.contains("{{") {
+                    if (!op.derived_target || !args.contains_key(name)) && v.contains("{{") {
                         v = interpolate_template_str(&v, &empty_resolved, args);
                     }
                     form.append_pair(name, &v);
@@ -151,7 +194,7 @@ impl Spec {
                     }
                     let mut val = coerce_value(p, name, args)?;
                     if let Value::String(s) = &val {
-                        if s.contains("{{") {
+                        if (!op.derived_target || !args.contains_key(name)) && s.contains("{{") {
                             val = Value::String(interpolate_template_str(s, &empty_resolved, args));
                         }
                     }
@@ -176,6 +219,12 @@ impl Spec {
         let mut parts = Vec::new();
         if let Some(b) = &op.body {
             for (name, p) in &b.multipart {
+                if p.kind == "file" && p.default.is_some() {
+                    return Err(apperr::spec(
+                        "File inputs cannot define defaults",
+                        "Provide the file path explicitly.",
+                    ));
+                }
                 if !args.contains_key(name) && p.default.is_none() {
                     if p.required {
                         return Err(apperr::usage(
@@ -192,7 +241,7 @@ impl Spec {
                         path: value,
                     });
                 } else {
-                    let value = if value.contains("{{") {
+                    let value = if !args.contains_key(name) && value.contains("{{") {
                         interpolate_template_str(&value, &empty_resolved, args)
                     } else {
                         value

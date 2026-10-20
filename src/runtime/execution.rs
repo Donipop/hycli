@@ -33,7 +33,12 @@ impl Runtime {
         if let Some(p) = &op.pagination {
             wire_inputs.remove(&p.input);
         }
-        let (url, _) = sp.build_request(op, &wire_inputs)?;
+        let (request_url, _) = sp.build_request(op, &wire_inputs)?;
+        let url = if op.derived_target {
+            sp.site.base_url.clone()
+        } else {
+            request_url
+        };
         let explicit_account = account.is_some_and(|value| !value.is_empty());
         let mut account = match account {
             Some(value) => value.to_owned(),
@@ -59,6 +64,7 @@ impl Runtime {
                 account.clear();
             }
         }
+        super::oauth::validate_operation(sp, op, &inputs, &account)?;
         let (headers, secrets) = self.headers(sp, op, &url, &account)?;
         let request = ExecutionRequest {
             site_id: sp.site.name.clone(),
@@ -66,7 +72,9 @@ impl Runtime {
             account_id: account,
             inputs,
             spec_hash: Self::spec_hash(sp)?,
-            credential_hash: util::hash(&serde_json::to_vec(&headers)?),
+            credential_hash: self
+                .oauth_credential_hash(sp, op)?
+                .unwrap_or(util::hash(&serde_json::to_vec(&headers)?)),
         };
         // Validate opaque capability before any dashboard job persists its inputs.
         self.resolve_cursor(&request, op, &url, &secrets)?;
@@ -242,26 +250,64 @@ impl Runtime {
             wire_inputs.remove(&p.input);
         }
         let (mut url, mut body) = sp.build_request(op, &wire_inputs)?;
+        let source_url = if op.derived_target {
+            sp.site.base_url.clone()
+        } else {
+            url.clone()
+        };
         let mut multipart = if op.body.as_ref().is_some_and(|b| !b.multipart.is_empty()) {
             Some(sp.build_multipart(op, &wire_inputs)?)
         } else {
             None
         };
+        if multipart.is_some() && ["browser", "browser-fetch"].contains(&op.transport.as_str()) {
+            return Err(AppError::api("unsupported_transport", 400));
+        }
         let mut effect =
             policy::rendered_request_effect(op, &request.inputs, &url, body.as_deref());
-        // A derived_target op's real URL comes from its preflight/lease response
-        // and is only resolved after preflight runs, so validate its origin there.
         if !op.derived_target && origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
+        super::oauth::validate_operation(sp, op, &request.inputs, &request.account_id)?;
         let (mut headers, mut secrets, credential_snapshot) =
-            self.headers_snapshot(sp, op, &url, &request.account_id)?;
+            self.headers_snapshot(sp, op, &source_url, &request.account_id)?;
+        let mut source_secrets = credential_snapshot
+            .as_ref()
+            .map(|credential| credential.redaction_values())
+            .unwrap_or_default();
+        for (name, value) in &headers {
+            if let Some(auth) = sp
+                .find_auth(&op.auth)
+                .filter(|auth| name.eq_ignore_ascii_case(&auth.header))
+            {
+                source_secrets.push(value.clone());
+                if let Some(token) = value.strip_prefix(&auth.prefix) {
+                    source_secrets.push(token.to_owned());
+                }
+            }
+            if !value.contains("{{")
+                && !["accept", "content-type", "user-agent", "content-md5"]
+                    .iter()
+                    .any(|public| name.eq_ignore_ascii_case(public))
+            {
+                source_secrets.push(value.clone());
+                if name.eq_ignore_ascii_case("authorization") {
+                    if let Some((_, token)) = value.split_once(' ') {
+                        source_secrets.push(token.to_owned());
+                    }
+                }
+            }
+        }
+        let source_header_hash = util::hash(&serde_json::to_vec(&headers)?);
+        let mut destination_inputs = BTreeMap::new();
         effect = effect.combine(policy::request_headers_effect(
             headers
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_str())),
         ));
-        checked.credential_hash = util::hash(&serde_json::to_vec(&headers)?);
+        checked.credential_hash = self
+            .oauth_credential_hash(sp, op)?
+            .unwrap_or(util::hash(&serde_json::to_vec(&headers)?));
         let cursor = self.resolve_cursor(&checked, op, &url, &secrets)?;
         if let Some(value) = &cursor {
             if super::pagination::continuation_effect(op, &request.inputs, &url, value)
@@ -280,18 +326,62 @@ impl Runtime {
                 self.policy.verify_consumable(approval_id, &checked)?;
             }
         }
-        if !op.preflight.is_empty() {
-            let mut effective_inputs = request.inputs.clone();
-            self.run_preflight_steps(
-                sp,
-                op,
+        let source_selection = self.state.site(&sp.site.name)?.map(|site| {
+            (
+                site.account_selection_revision,
+                site.account_id,
+                site.account_binding,
+            )
+        });
+        let check_source_authority = || {
+            let current_selection = self.state.site(&sp.site.name)?.map(|site| {
+                (
+                    site.account_selection_revision,
+                    site.account_id,
+                    site.account_binding,
+                )
+            });
+            if current_selection != source_selection {
+                return Err(AppError::api("auth_required", 401));
+            }
+            self.ensure_credential_snapshot(
+                &sp.site.name,
+                &source_url,
                 &request.account_id,
                 credential_snapshot.as_ref(),
-                &mut effective_inputs,
-                &mut secrets,
-            )
-            .await?;
-            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
+            )?;
+            let (current, _, _) =
+                self.headers_snapshot(sp, op, &source_url, &request.account_id)?;
+            if util::hash(&serde_json::to_vec(&current)?) != source_header_hash {
+                return Err(AppError::api("auth_required", 401));
+            }
+            Ok(())
+        };
+        let mut effective_inputs = request.inputs.clone();
+        if !op.preflight.is_empty() {
+            destination_inputs = self
+                .run_preflight_steps(
+                    sp,
+                    op,
+                    &request.account_id,
+                    credential_snapshot.as_ref(),
+                    &mut effective_inputs,
+                    &mut secrets,
+                    &check_source_authority,
+                )
+                .await?;
+            for step in &op.preflight {
+                for (field, expression) in &step.extract {
+                    if super::preflight::source_credential_expression(expression) {
+                        if let Some(value) =
+                            destination_inputs.get(&format!("step.{}.{field}", step.name))
+                        {
+                            source_secrets.push(value.clone());
+                        }
+                    }
+                }
+            }
+            let (rebuilt_url, rebuilt_body) = sp.build_final_request(op, &effective_inputs)?;
             let post_effect = policy::rendered_request_effect(
                 op,
                 &effective_inputs,
@@ -311,19 +401,75 @@ impl Runtime {
             url = rebuilt_url;
             body = rebuilt_body;
             if op.body.as_ref().is_some_and(|b| !b.multipart.is_empty()) {
-                multipart = Some(sp.build_multipart(op, &effective_inputs)?);
+                let mut multipart_inputs = effective_inputs.clone();
+                for (name, param) in &op.body.as_ref().expect("multipart body").multipart {
+                    if param.kind == "file" {
+                        multipart_inputs.remove(name);
+                        if let Some(path) = request.inputs.get(name) {
+                            multipart_inputs.insert(name.clone(), path.clone());
+                        }
+                    }
+                }
+                multipart = Some(sp.build_multipart(op, &multipart_inputs)?);
             }
             let empty_resolved = BTreeMap::new();
-            for (_, v) in &mut headers {
-                if v.contains("{{") {
-                    *v = crate::spec::interpolate_template_str(
-                        v,
+            let mut credential_headers: Vec<String> = credential_snapshot
+                .as_ref()
+                .map(|credential| credential.request_headers(&source_url))
+                .transpose()?
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            if let Some(auth) = sp
+                .find_auth(&op.auth)
+                .filter(|auth| matches!(auth.kind.as_str(), "header" | "derived"))
+            {
+                credential_headers.push(auth.header.clone());
+            }
+            for (name, value) in &mut headers {
+                if credential_headers
+                    .iter()
+                    .any(|private| name.eq_ignore_ascii_case(private))
+                {
+                    continue;
+                }
+                if let Some(template) = op
+                    .headers
+                    .get(name)
+                    .or_else(|| sp.defaults.headers.get(name))
+                    .filter(|template| template.contains("{{"))
+                {
+                    *value = crate::spec::interpolate_template_str(
+                        template,
                         &empty_resolved,
                         &effective_inputs,
                     );
                 }
             }
         }
+        if op.preflight.is_empty() {
+            (url, body) = sp.build_final_request(op, &wire_inputs)?;
+        }
+        if origin(&url)? != origin(&source_url)? {
+            super::preflight::validate_destination_url(
+                sp,
+                op,
+                &destination_inputs,
+                &source_secrets,
+                &url,
+            )?;
+            super::preflight::validate_generated_request(
+                op,
+                &request.inputs,
+                &effective_inputs,
+                &destination_inputs,
+                &source_secrets,
+            )?;
+            headers =
+                super::preflight::destination_headers(op, &destination_inputs, &source_secrets)?;
+        }
+        check_source_authority()?;
         // A derived_target op is the one place a request may leave the site's
         // declared origin. Validate the final URL here so it is covered whether
         // or not a preflight ran: require https (loopback for local tests) so a
@@ -352,7 +498,7 @@ impl Runtime {
         }
         self.ensure_credential_snapshot(
             &sp.site.name,
-            &url,
+            &source_url,
             &request.account_id,
             credential_snapshot.as_ref(),
         )?;
@@ -375,7 +521,9 @@ impl Runtime {
         let direct_key =
             policy::Policy::strategy_key(&op.method, &url, "http", &request.account_id);
         let prefer_browser_fetch = op.transport == "browser-fetch"
-            || (!is_local_url
+            || (req_input.multipart.is_none()
+                && !op.derived_target
+                && !is_local_url
                 && op.transport.is_empty()
                 && (self
                     .policy
@@ -390,7 +538,22 @@ impl Runtime {
                         .flatten()
                         .as_deref()
                         == Some("browser-fetch")));
-        let response = if let Some(p) = &op.pagination {
+        let response = if sp
+            .find_auth(&op.auth)
+            .is_some_and(|auth| auth.oauth_refresh.is_some())
+        {
+            self.fetch_oauth_operation(
+                sp,
+                op,
+                req_input,
+                op.pagination
+                    .as_ref()
+                    .and_then(|p| cursor.as_deref().map(|v| (p.query.as_str(), v))),
+                &mut secrets,
+                &checked.credential_hash,
+            )
+            .await
+        } else if let Some(p) = &op.pagination {
             self.network
                 .fetch_paginated(req_input, cursor.as_deref().map(|v| (p.query.as_str(), v)))
                 .await
@@ -431,7 +594,10 @@ impl Runtime {
             )
             .await
         } else {
-            let fetched = self.network.fetch(req_input.clone()).await;
+            let fetched = self
+                .network
+                .fetch_guarded(req_input.clone(), None, &check_source_authority)
+                .await;
             match fetched {
                 Ok(r)
                     if effect == Effect::Read
@@ -533,12 +699,17 @@ impl Runtime {
         {
             private_cursors.push(value.into());
         }
-        let next_cursor =
-            self.capture_cursor(&checked, op, &url, &mut raw, &mut secrets, matches_expected)?;
-        super::pagination::scrub(&mut raw, &private_cursors)?;
+        let next_cursor = if response.successful() && !query_error {
+            self.capture_cursor(&checked, op, &url, &mut raw, &mut secrets, matches_expected)?
+        } else {
+            None
+        };
+        if response.successful() && !query_error {
+            super::pagination::scrub(&mut raw, &private_cursors)?;
+        }
         secrets.extend(private_cursors.iter().cloned());
         let clean = sanitized(raw.clone(), &secrets);
-        let mapped = if op.model.is_empty() {
+        let mapped = if op.model.is_empty() || !response.successful() || query_error {
             None
         } else {
             let model_bytes = serde_json::to_vec(&raw)?;
@@ -577,6 +748,12 @@ impl Runtime {
         }
         Ok((
             OpResult {
+                diagnostic: Some(crate::apperr::SafeHttpDiagnostic::from_response(
+                    response.status,
+                    &response.defense,
+                    response.json().as_ref(),
+                    &secrets,
+                )),
                 paginated: op.pagination.is_some(),
                 next_cursor,
                 site: sp.site.name.clone(),

@@ -1,7 +1,7 @@
 use super::{
     actions,
     args::{AuthCmd, Deps, SpecCmd},
-    dispatch::{blocked_err, open_kb, runner},
+    dispatch::{open_kb, runner},
 };
 use crate::{
     apperr::{self, AppError},
@@ -171,6 +171,23 @@ pub(super) async fn spec_cmd(deps: Deps, cmd: SpecCmd, emit: &Emitter) -> Result
     }
 }
 
+fn oauth_auth_strategy(
+    site: &str,
+    key: &str,
+) -> Result<Option<crate::spec::AuthStrategy>, AppError> {
+    if !crate::util::valid_id(site)
+        || !crate::platform::specs_dir()
+            .join(format!("{site}.yaml"))
+            .exists()
+    {
+        return Ok(None);
+    }
+    Ok(find_spec(site)?
+        .auth
+        .into_iter()
+        .find(|auth| auth.name == key && auth.oauth_refresh.is_some()))
+}
+
 pub(super) fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
     let mut st = crate::store::Store::open(&crate::platform::store_path())?;
     match cmd {
@@ -178,6 +195,7 @@ pub(super) fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
             let (site, key) = r#ref.split_once('/').ok_or_else(|| {
                 apperr::usage("Format must be <site>/<key>", "Example: httpbin/token")
             })?;
+            let from_argument = value.is_some();
             let v = match value {
                 Some(v) => v,
                 None => {
@@ -193,7 +211,22 @@ pub(super) fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
                     "Provide via stdin or --value.",
                 ));
             }
-            if let Ok(core) = crate::runtime::Runtime::open(
+            let oauth = oauth_auth_strategy(site, key)?;
+            if oauth.is_some() && v.len() > 65536 {
+                return Err(AppError::api("oauth_configuration_invalid", 400));
+            }
+            let typed_oauth = serde_json::from_str::<serde_json::Value>(&v)
+                .ok()
+                .is_some_and(|v| {
+                    v.get("kind").and_then(serde_json::Value::as_str) == Some("oauth_refresh")
+                });
+            if oauth.is_some() && from_argument {
+                return Err(AppError::api("oauth_stdin_required", 400));
+            }
+            if oauth.is_none() && typed_oauth {
+                return Err(AppError::api("oauth_configuration_invalid", 400));
+            }
+            match crate::runtime::Runtime::open(
                 &crate::platform::data_dir(),
                 Some(crate::platform::specs_dir()),
                 None,
@@ -201,12 +234,16 @@ pub(super) fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
                 false,
                 true,
             ) {
-                if core.set_website_credential(site, key, Some(&v)).is_err() {
-                    st.set(site, key, &v)?;
-                    let _ = core.policy.invalidate(Some(site), None);
+                Ok(core) => {
+                    if let Some(auth) = oauth {
+                        core.set_website_credential(site, &auth.name, Some(&v))?;
+                    } else if core.set_website_credential(site, key, Some(&v)).is_err() {
+                        st.set(site, key, &v)?;
+                        let _ = core.policy.invalidate(Some(site), None);
+                    }
                 }
-            } else {
-                st.set(site, key, &v)?;
+                Err(error) if oauth.is_some() => return Err(error),
+                Err(_) => st.set(site, key, &v)?,
             }
             emit.data(&serde_json::json!({"stored": r#ref}));
             Ok(())
@@ -219,7 +256,17 @@ pub(super) fn auth_cmd(cmd: AuthCmd, emit: &Emitter) -> Result<(), AppError> {
             let (site, key) = r#ref.split_once('/').ok_or_else(|| {
                 apperr::usage("Format must be <site>/<key>", "Example: httpbin/token")
             })?;
-            if site == "accounts" || site == "providers" {
+            if let Some(auth) = oauth_auth_strategy(site, key)? {
+                let core = crate::runtime::Runtime::open(
+                    &crate::platform::data_dir(),
+                    Some(crate::platform::specs_dir()),
+                    None,
+                    false,
+                    false,
+                    true,
+                )?;
+                core.set_website_credential(site, &auth.name, None)?;
+            } else if site == "accounts" || site == "providers" {
                 let core = crate::runtime::Runtime::open(
                     &crate::platform::data_dir(),
                     Some(crate::platform::specs_dir()),
@@ -349,10 +396,8 @@ pub(super) async fn try_run(
         sp.op(&op)?;
         runner.run_op(&sp, &op, &args).await?
     };
+    res.ensure_success()?;
     emit.data(&res);
-    if res.defense != "none" && !res.defense.is_empty() {
-        return Err(blocked_err(&res.defense, &res.signal));
-    }
     Ok(())
 }
 
@@ -505,6 +550,7 @@ pub(super) fn job_outcome(job: &crate::state::Job) -> Result<(), AppError> {
             };
             let status = match code {
                 "auth_required" | "identity_unavailable" => 401,
+                "api_denied" => 403,
                 "blocked_by_site" | "site_rate_limited" => 429,
                 _ => 500,
             };

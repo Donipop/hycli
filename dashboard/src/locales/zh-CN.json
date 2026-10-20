@@ -371,6 +371,7 @@
   "safety.approvalExpired": "此确认已过期。请重新检查操作。",
   "errors.approval_required": "此操作需要你确认。",
   "errors.approval_expired": "执行前请重新检查此操作。",
+  "errors.api_denied": "端点拒绝了此请求。请检查端点访问权限、配置、权限范围和输入。",
   "errors.blocked_by_site": "网站拒绝了此请求。请在浏览器中检查账号。",
   "errors.engine_unavailable": "网站工具引擎不可用。请在设置中检查连接。",
   "errors.engine_incompatible": "请更新网站工具引擎，以连接到 Hycli。",
@@ -516,5 +517,9 @@
   "errors.work_in_progress": "请在活动中完成或取消正在进行的任务，然后再次退出。",
   "errors.shutting_down": "Hycli 正在退出。",
   "errors.pagination_expired": "分页游标已过期或不再匹配此请求。请从第一页重新开始。",
-  "errors.pagination_invalid": "网站返回了不支持的分页游标。至少需要8个字符，最多4096字节，不接受凭据或短页码。"
+  "errors.pagination_invalid": "网站返回了不支持的分页游标。至少需要8个字符，最多4096字节，不接受凭据或短页码。",
+  "errors.oauth_recovery_required": "无法安全刷新这些 OAuth 凭据。请通过标准输入向 auth set 提供新的授权 JSON。不要重复使用之前的刷新令牌。",
+  "errors.oauth_verification_pending": "账号验证尚未完成。请重试读取，以验证已保存的凭据，无需再次交换令牌。",
+  "errors.oauth_configuration_invalid": "OAuth 配置无效。请检查 OAuth 设置。",
+  "errors.oauth_stdin_required": "请通过标准输入提供 OAuth 凭据，不要使用命令行参数。"
 }

@@ -31,6 +31,9 @@ impl Emitter {
     pub fn fail(&self, err: &AppError) -> i32 {
         let mut errw = io::stderr();
         let _ = writeln!(errw, "hycli: code={} {err}", apperr::code_of(err).as_i32());
+        if err.diagnostic.is_some() {
+            let _ = writeln!(errw, "{}", err.public_error());
+        }
         apperr::code_of(err).as_i32()
     }
 }

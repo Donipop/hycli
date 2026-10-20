@@ -23,6 +23,7 @@ pub fn parse(data: &[u8]) -> AppResult<Spec> {
     }
     if s.auth.is_empty() {
         s.auth.push(AuthStrategy {
+            oauth_refresh: None,
             name: "public".into(),
             kind: "none".into(),
             header: String::new(),
@@ -88,7 +89,45 @@ impl Spec {
             }
 
             let mut auths = std::collections::HashSet::new();
+            let mut grants = std::collections::HashSet::new();
             for a in &self.auth {
+                if let Some(binding) = &a.oauth_refresh {
+                    if a.name.is_empty()
+                        || !grants.insert(&binding.grant_ref)
+                        || !a.value_from.is_empty()
+                        || binding.check().is_err()
+                        || a.kind != "header"
+                        || !a.header.eq_ignore_ascii_case("authorization")
+                        || a.prefix != "Bearer "
+                        || a.origin.is_empty()
+                    {
+                        add(
+                            &mut out,
+                            &format!("auth.{}.oauth_refresh", a.name),
+                            "Invalid explicit OAuth refresh binding".into(),
+                            "Use pinned endpoints, a stable subject pointer and a private grant reference with Bearer header auth.",
+                        );
+                    }
+                    if self
+                        .operations
+                        .iter()
+                        .filter(|op| op.auth == a.name)
+                        .any(|op| {
+                            op.effect != crate::policy::Effect::Read
+                                || !matches!(op.transport.as_str(), "" | "http")
+                                || !op.preflight.is_empty()
+                        })
+                    {
+                        add(
+                            &mut out,
+                            &format!("auth.{}.oauth_refresh", a.name),
+                            "OAuth refresh requires direct read-only operations without preflight"
+                                .into(),
+                            "Keep browser sessions and write operations separate.",
+                        );
+                    }
+                }
+
                 if !auths.insert(a.name.clone()) {
                     add(
                         &mut out,
@@ -108,7 +147,7 @@ impl Spec {
                                 "",
                             );
                         }
-                        if !a.value_from.starts_with("store:") {
+                        if a.oauth_refresh.is_none() && !a.value_from.starts_with("store:") {
                             add(
                                 &mut out,
                                 &format!("auth.{}.value_from", a.name),
@@ -160,7 +199,7 @@ impl Spec {
                         "GET|POST|PUT|PATCH|DELETE",
                     );
                 }
-                if !op.path.starts_with('/') {
+                if !op.path.starts_with('/') && !(op.derived_target && op.path.is_empty()) {
                     add(
                         &mut out,
                         &format!("{id}.path"),
@@ -298,11 +337,11 @@ impl Spec {
                                 remedy: "string|int|float|bool|json|file".into(),
                             }),
                         }
-                        if p.required && p.default.is_some() {
+                        if (p.required || p.kind == "file") && p.default.is_some() {
                             out.push(Issue {
                                 field: format!("{id}.body.multipart.{n}"),
-                                detail: "required parameter cannot also define a default".into(),
-                                remedy: "Use required or default, not both".into(),
+                                detail: "file inputs and required parameters cannot define defaults".into(),
+                                remedy: "Provide file inputs explicitly; omit defaults for required parameters".into(),
                             });
                         }
                     }

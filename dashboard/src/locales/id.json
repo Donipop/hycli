@@ -357,6 +357,7 @@
   "safety.approvalExpired": "Konfirmasi ini sudah kedaluwarsa. Tinjau tindakan kembali.",
   "errors.approval_required": "Tindakan ini memerlukan konfirmasi Anda.",
   "errors.approval_expired": "Tinjau kembali tindakan ini sebelum menjalankannya.",
+  "errors.api_denied": "Endpoint menolak permintaan ini. Periksa akses, konfigurasi, izin, dan masukan.",
   "errors.blocked_by_site": "Situs menolak permintaan ini. Periksa akun Anda di browser.",
   "errors.engine_unavailable": "Mesin alat situs web tidak tersedia. Periksa koneksinya di Pengaturan.",
   "errors.engine_incompatible": "Perbarui mesin alat situs web agar dapat terhubung ke Hycli.",
@@ -516,5 +517,9 @@
   "errors.work_in_progress": "Selesaikan atau batalkan pekerjaan yang sedang berjalan di Aktivitas, lalu keluar lagi.",
   "errors.shutting_down": "Hycli sedang ditutup.",
   "errors.pagination_expired": "Kursor halaman ini kedaluwarsa atau tidak lagi cocok dengan permintaan. Mulai lagi dari halaman pertama.",
-  "errors.pagination_invalid": "Situs mengembalikan kursor halaman yang tidak didukung. Minimal 8 karakter dan maksimal 4096 byte, tanpa kredensial atau nomor halaman pendek."
+  "errors.pagination_invalid": "Situs mengembalikan kursor halaman yang tidak didukung. Minimal 8 karakter dan maksimal 4096 byte, tanpa kredensial atau nomor halaman pendek.",
+  "errors.oauth_recovery_required": "Kredensial OAuth ini tidak dapat diperbarui dengan aman. Gunakan auth set dengan JSON otorisasi baru melalui input standar. Jangan gunakan kembali token penyegaran sebelumnya.",
+  "errors.oauth_verification_pending": "Verifikasi akun belum selesai. Coba ulang pembacaan untuk memverifikasi kredensial tersimpan tanpa pertukaran token lagi.",
+  "errors.oauth_configuration_invalid": "Konfigurasi OAuth tidak valid. Periksa pengaturan OAuth Anda.",
+  "errors.oauth_stdin_required": "Berikan kredensial OAuth melalui input standar, bukan argumen baris perintah."
 }

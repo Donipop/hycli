@@ -424,9 +424,11 @@ impl ServerHandler for Server {
         let result = tokio::select! {_ = context.ct.cancelled()=>Err(AppError::api("cancelled",409)),result=self.invoke(&request.name,request.arguments.unwrap_or_default())=>result};
         Ok(match result {
             Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(
-                json!({"error":{"code":error.public_code,"next_step":error.remedy}}).to_string(),
-            )]),
+            Err(error) => {
+                let mut payload = error.public_error();
+                payload["error"]["next_step"] = json!(error.remedy);
+                CallToolResult::error(vec![ContentBlock::text(payload.to_string())])
+            }
         }
         .into())
     }

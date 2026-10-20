@@ -133,6 +133,7 @@ async fn website_keys_are_scoped_private_and_invalidate_pending_approvals() {
     let core = runtime();
     let mut sp = spec_for(&url);
     sp.auth.push(crate::spec::AuthStrategy {
+        oauth_refresh: None,
         name: "website-key".into(),
         kind: "header".into(),
         header: "x-api-key".into(),

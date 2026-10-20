@@ -1,15 +1,19 @@
 //! The single execution boundary used by the dashboard, CLI and MCP.
 mod account_read;
 mod accounts;
+pub(crate) mod oauth;
 mod selection;
 pub(crate) use selection::SelectionSnapshot;
 mod execution;
+mod failure;
 mod identity;
 mod pagination;
 mod preflight;
 mod recon;
 mod session;
 mod transport;
+#[cfg(test)]
+mod upload_safety_tests;
 mod views;
 
 use crate::{
@@ -95,6 +99,8 @@ pub struct SiteView {
 #[derive(Clone, Serialize)]
 pub struct OpResult {
     #[serde(skip)]
+    pub diagnostic: Option<crate::apperr::SafeHttpDiagnostic>,
+    #[serde(skip)]
     pub paginated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
@@ -119,18 +125,12 @@ impl OpResult {
     }
 
     pub fn ensure_success(&self) -> AppResult<()> {
-        if self.signal == "query_failed" || self.signal == "action_outcome_unknown" {
-            return Err(AppError::api(&self.signal, 502));
-        }
-        let (code, status) = match self.status {
-            401 => ("auth_required", 401),
-            429 => ("site_rate_limited", 429),
-            403 => ("blocked_by_site", 403),
-            _ if self.defense != "none" && !self.defense.is_empty() => ("blocked_by_site", 403),
-            200..300 => return Ok(()),
-            _ => ("request_failed", 502),
-        };
-        Err(AppError::api(code, status))
+        failure::ensure_success(
+            self.status,
+            &self.defense,
+            &self.signal,
+            self.diagnostic.clone(),
+        )
     }
 }
 impl Runtime {
@@ -141,6 +141,30 @@ impl Runtime {
         recover: bool,
         allow_local: bool,
         keyring: bool,
+    ) -> AppResult<Arc<Self>> {
+        Self::open_with_vault(
+            root,
+            specs_dir,
+            kb_path,
+            recover,
+            allow_local,
+            keyring,
+            None,
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn open_oauth_test(root: &Path) -> AppResult<Arc<Self>> {
+        let store = Store::open_oauth_test(&root.join("store.json"), [42; 32])?;
+        Self::open_with_vault(root, None, None, false, true, false, Some(store))
+    }
+    fn open_with_vault(
+        root: &Path,
+        specs_dir: Option<PathBuf>,
+        kb_path: Option<PathBuf>,
+        recover: bool,
+        allow_local: bool,
+        keyring: bool,
+        supplied_vault: Option<Store>,
     ) -> AppResult<Arc<Self>> {
         util::private_dir(root)?;
         let instance = if recover {
@@ -169,7 +193,10 @@ impl Runtime {
             root: root.into(),
             specs_dir,
             state,
-            vault: Mutex::new(Store::open_with_keyring(&root.join("store.json"), keyring)?),
+            vault: Mutex::new(match supplied_vault {
+                Some(store) => store,
+                None => Store::open_with_keyring(&root.join("store.json"), keyring)?,
+            }),
             policy: policy.clone(),
             network: Network::new(policy, allow_local),
             ai: ai::Client::new(codex),

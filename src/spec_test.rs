@@ -267,3 +267,66 @@ operations:
         "clip-7"
     );
 }
+
+#[test]
+fn multipart_file_defaults_are_rejected_even_when_optional() {
+    for required in [false, true] {
+        let sp = parse(&serde_json::json!({
+            "spec_version":1,"site":{"name":"fixture","base_url":"https://example.com"},
+            "operations":[{"name":"upload","method":"POST","path":"/put","effect":"write",
+                "body":{"multipart":{"file":{"type":"file","required":required,"default":"/synthetic/not-opened"}}}}]
+        }).to_string());
+        assert!(!sp.validate().is_empty());
+        assert!(
+            sp.build_multipart(sp.op("upload").unwrap(), &BTreeMap::new())
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn multipart_file_is_write_even_for_read_search_and_missing_optional_file() {
+    let sp = parse(
+        &serde_json::json!({
+            "spec_version":1,"site":{"name":"fixture","base_url":"https://example.com"},
+            "operations":[{"name":"search","method":"POST","path":"/search","effect":"read",
+                "body":{"multipart":{"file":{"type":"file"}}}}]
+        })
+        .to_string(),
+    );
+    let op = sp.op("search").unwrap();
+    assert_eq!(
+        crate::policy::operation_effect(op, &BTreeMap::new()),
+        crate::policy::Effect::Write
+    );
+    assert!(sp.build_multipart(op, &BTreeMap::new()).unwrap().is_empty());
+}
+
+#[test]
+fn final_derived_target_is_required_and_preserves_the_exact_endpoint() {
+    let sp = parse(
+        &serde_json::json!({
+            "spec_version":3,"site":{"name":"fixture","base_url":"https://example.com"},
+            "operations":[{"name":"upload","method":"POST","path":"","derived_target":true,
+                "base_url":"{{step.lease.target}}","effect":"write"}]
+        })
+        .to_string(),
+    );
+    assert!(sp.validate().is_empty());
+    let op = sp.op("upload").unwrap();
+    assert!(sp.build_final_request(op, &BTreeMap::new()).is_err());
+    for target in [
+        "https://storage.example.test/object-id",
+        "https://storage.example.test/object-id?signature=abc%2Fdef",
+    ] {
+        let args = BTreeMap::from([("step.lease.target".into(), target.into())]);
+        assert_eq!(sp.build_final_request(op, &args).unwrap().0, target);
+    }
+    assert!(
+        sp.build_final_request(
+            op,
+            &BTreeMap::from([("step.lease.target".into(), "not-a-url".into())])
+        )
+        .is_err()
+    );
+}

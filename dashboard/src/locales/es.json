@@ -358,6 +358,7 @@
   "safety.approvalExpired": "Esta confirmación ha caducado. Revisa la acción de nuevo.",
   "errors.approval_required": "Esta acción necesita tu confirmación.",
   "errors.approval_expired": "Revisa esta acción de nuevo antes de ejecutarla.",
+  "errors.api_denied": "El endpoint rechazó esta solicitud. Revisa el acceso, la configuración, los permisos y los datos de entrada.",
   "errors.blocked_by_site": "El sitio ha rechazado esta solicitud. Comprueba tu cuenta en el navegador.",
   "errors.engine_unavailable": "El motor de herramientas web no está disponible. Comprueba su conexión en Configuración.",
   "errors.engine_incompatible": "Actualiza el motor de herramientas web para conectarlo a Hycli.",
@@ -516,5 +517,9 @@
   "errors.work_in_progress": "Termina o cancela las tareas en curso en Actividad y vuelve a salir.",
   "errors.shutting_down": "Hycli se está cerrando.",
   "errors.pagination_expired": "El cursor de página caducó o ya no coincide con esta solicitud. Vuelve a empezar desde la primera página.",
-  "errors.pagination_invalid": "El sitio devolvió un cursor no compatible. Debe tener al menos 8 caracteres y como máximo 4096 bytes, sin credenciales ni números de página cortos."
+  "errors.pagination_invalid": "El sitio devolvió un cursor no compatible. Debe tener al menos 8 caracteres y como máximo 4096 bytes, sin credenciales ni números de página cortos.",
+  "errors.oauth_recovery_required": "Estas credenciales de OAuth no se pueden renovar de forma segura. Usa auth set con un nuevo JSON de autorización por la entrada estándar. No reutilices el token de actualización anterior.",
+  "errors.oauth_verification_pending": "La verificación de la cuenta está incompleta. Reintenta la lectura para verificar las credenciales guardadas sin otro intercambio de tokens.",
+  "errors.oauth_configuration_invalid": "La configuración de OAuth no es válida. Revisa los ajustes de OAuth.",
+  "errors.oauth_stdin_required": "Proporciona las credenciales de OAuth mediante la entrada estándar, no como argumentos de la línea de comandos."
 }

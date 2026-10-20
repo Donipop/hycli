@@ -113,6 +113,13 @@ pub fn dangerous_intent(value: &str) -> bool {
             .any(|w| lower.contains(w))
 }
 pub fn operation_effect(op: &Operation, args: &BTreeMap<String, String>) -> Effect {
+    if op
+        .body
+        .as_ref()
+        .is_some_and(|body| body.multipart.values().any(|p| p.kind == "file"))
+    {
+        return Effect::Write;
+    }
     let method = op.method.to_ascii_uppercase();
     if dangerous_intent(&op.path) || dangerous_intent(&op.name) {
         return Effect::Write;
@@ -1012,6 +1019,11 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             if destination.query().is_some() || destination.fragment().is_some() {
                 return Err(AppError::api("bad_url", 400));
             }
+            let authority = if op.derived_target {
+                crate::net::validate_url(&sp.site.base_url)?
+            } else {
+                destination.clone()
+            };
             if let Some(auth) = sp.find_auth(&op.auth) {
                 if auth.kind == "header" {
                     let scope = crate::net::validate_url(if auth.origin.is_empty() {
@@ -1019,7 +1031,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
                     } else {
                         &auth.origin
                     })?;
-                    if destination.origin() != scope.origin() {
+                    if authority.origin() != scope.origin() {
                         return Err(AppError::api("unsafe_target", 400));
                     }
                 } else if matches!(auth.kind.as_str(), "browser" | "derived") {
@@ -1028,7 +1040,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
                     } else {
                         &auth.origin
                     })?;
-                    if !crate::net::same_site_origin(&destination, &scope) {
+                    if !crate::net::same_site_origin(&authority, &scope) {
                         return Err(AppError::api("unsafe_target", 400));
                     }
                 }
@@ -1129,7 +1141,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
                 return Err(AppError::api("bad_url", 400));
             }
         }
-        if auth.kind == "header" {
+        if auth.kind == "header" && auth.oauth_refresh.is_none() {
             let scope = crate::net::validate_url(if auth.origin.is_empty() {
                 &sp.site.base_url
             } else {
@@ -1158,6 +1170,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             return Err(AppError::api("data_invalid", 400));
         }
         if auth.kind == "header"
+            && auth.oauth_refresh.is_none()
             && !auth
                 .value_from
                 .starts_with(&format!("store:{}/", sp.site.name))

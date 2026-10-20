@@ -357,6 +357,7 @@
   "safety.approvalExpired": "To potwierdzenie wygasło. Sprawdź działanie ponownie.",
   "errors.approval_required": "To działanie wymaga Twojego potwierdzenia.",
   "errors.approval_expired": "Sprawdź to działanie ponownie przed uruchomieniem.",
+  "errors.api_denied": "Punkt końcowy odrzucił to żądanie. Sprawdź dostęp, konfigurację, uprawnienia i dane wejściowe.",
   "errors.blocked_by_site": "Strona odrzuciła tę prośbę. Sprawdź swoje konto w przeglądarce.",
   "errors.engine_unavailable": "Mechanizm narzędzi stron jest niedostępny. Sprawdź jego połączenie w Ustawieniach.",
   "errors.engine_incompatible": "Zaktualizuj mechanizm narzędzi stron, aby połączyć go z Hycli.",
@@ -516,5 +517,9 @@
   "errors.work_in_progress": "Zakończ lub anuluj trwające zadania w Aktywności, a następnie ponownie zamknij Hycli.",
   "errors.shutting_down": "Hycli jest zamykane.",
   "errors.pagination_expired": "Ten kursor strony wygasł lub nie pasuje już do żądania. Zacznij ponownie od pierwszej strony.",
-  "errors.pagination_invalid": "Witryna zwróciła nieobsługiwany kursor strony. Wymagane jest co najmniej 8 znaków i najwyżej 4096 bajtów, bez danych logowania i krótkich numerów stron."
+  "errors.pagination_invalid": "Witryna zwróciła nieobsługiwany kursor strony. Wymagane jest co najmniej 8 znaków i najwyżej 4096 bajtów, bez danych logowania i krótkich numerów stron.",
+  "errors.oauth_recovery_required": "Nie można bezpiecznie odświeżyć tych danych OAuth. Użyj auth set z nowymi danymi autoryzacji w formacie JSON przez standardowe wejście. Nie używaj ponownie poprzedniego tokenu odświeżania.",
+  "errors.oauth_verification_pending": "Weryfikacja konta jest nieukończona. Ponów odczyt, aby zweryfikować zapisane dane uwierzytelniające bez kolejnej wymiany tokenów.",
+  "errors.oauth_configuration_invalid": "Konfiguracja OAuth jest nieprawidłowa. Sprawdź ustawienia OAuth.",
+  "errors.oauth_stdin_required": "Przekaż dane uwierzytelniające OAuth przez standardowe wejście, a nie jako argumenty wiersza poleceń."
 }

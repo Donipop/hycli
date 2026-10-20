@@ -34,9 +34,13 @@ impl Runtime {
                     WebsiteCredentialView {
                         id: auth.name.clone(),
                         label: humanize(&auth.name),
-                        configured: vault
-                            .get(&sp.site.name, key)
-                            .is_some_and(|value| !value.is_empty()),
+                        configured: if auth.oauth_refresh.is_some() {
+                            super::oauth::configured(&vault, &sp, auth)
+                        } else {
+                            vault
+                                .get(&sp.site.name, key)
+                                .is_some_and(|value| !value.is_empty())
+                        },
                     }
                 })
                 .collect();

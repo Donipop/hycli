@@ -15,14 +15,16 @@ impl Runtime {
         browser: impl std::future::Future<Output = AppResult<Response>>,
         request: Request,
         allow_http_retry: bool,
-        check_authority: impl Fn() -> AppResult<()>,
+        check_authority: impl Fn() -> AppResult<()> + Sync,
     ) -> AppResult<Response> {
         check_authority()?;
         match browser.await {
             Ok(response) => Ok(response),
             Err(_) if allow_http_retry => {
                 check_authority()?;
-                self.network.fetch(request).await
+                self.network
+                    .fetch_guarded(request, None, &check_authority)
+                    .await
             }
             Err(error) => Err(error),
         }
@@ -33,7 +35,7 @@ impl Runtime {
         r: Response,
         keep_unsuccessful_in_page: bool,
         snapshot: Option<&crate::accounts::Credential>,
-        check_authority: impl Fn() -> AppResult<()>,
+        check_authority: impl Fn() -> AppResult<()> + Sync,
         accept_in_page: impl Fn(&Response) -> bool,
     ) -> Response {
         let req_origin = origin(&req_input.url).unwrap_or_default();
@@ -52,7 +54,7 @@ impl Runtime {
         }
         if let Ok(in_page) = self
             .network
-            .fetch_browser_in_page(&credential, req_input)
+            .fetch_browser_in_page_guarded(&credential, req_input, Some(&check_authority))
             .await
         {
             if in_page.successful() && accept_in_page(&in_page) {
@@ -68,7 +70,12 @@ impl Runtime {
             }
             if let Ok(rendered) = self
                 .network
-                .fetch_rendered(&credential, &req_input.url, &req_input.account_id)
+                .fetch_rendered_guarded(
+                    &credential,
+                    &req_input.url,
+                    &req_input.account_id,
+                    Some(&check_authority),
+                )
                 .await
             {
                 if rendered.successful() {
@@ -154,7 +161,7 @@ impl Runtime {
         account: &str,
         tls_profile: &str,
         snapshot: Option<&crate::accounts::Credential>,
-        check_authority: impl Fn() -> AppResult<()>,
+        check_authority: impl Fn() -> AppResult<()> + Sync,
     ) -> AppResult<Response> {
         let parsed = crate::net::validate_url(url)?;
         if !policy::safe_read_url(&parsed) {
@@ -210,33 +217,45 @@ impl Runtime {
             check_authority()?;
             if let Ok(in_page) = self
                 .network
-                .fetch_browser_in_page(&credential, &req_input)
+                .fetch_browser_in_page_guarded(&credential, &req_input, Some(&check_authority))
                 .await
             {
+                check_authority()?;
                 if in_page.successful() {
                     return Ok(in_page);
                 }
             }
             check_authority()?;
-            if let Ok(rendered) = self.network.fetch_rendered(&credential, url, account).await {
+            if let Ok(rendered) = self
+                .network
+                .fetch_rendered_guarded(&credential, url, account, Some(&check_authority))
+                .await
+            {
+                check_authority()?;
                 if rendered.successful() {
                     return Ok(rendered);
                 }
             }
         }
         check_authority()?;
-        let r = self.network.fetch(req_input.clone()).await?;
+        let r = self
+            .network
+            .fetch_guarded(req_input.clone(), None, &check_authority)
+            .await?;
+        check_authority()?;
         if crate::defend::is_challenge_label(&r.defense) && !is_local_url {
-            return Ok(self
+            let recovered = self
                 .escalate_challenged_read_snapshot(
                     &req_input,
                     r,
                     false,
                     snapshot,
-                    check_authority,
+                    &check_authority,
                     |_| true,
                 )
-                .await);
+                .await;
+            check_authority()?;
+            return Ok(recovered);
         }
         Ok(r)
     }

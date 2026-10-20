@@ -82,3 +82,88 @@ Run the first page through the existing action without `cursor`. Paginated direc
 The raw continuation stays in the existing private local credential store, using its existing protection level (OS-keyring encryption when available, otherwise private-file protection). It never appears in public action results, mapped output, exported definitions or job inputs. Handles expire after 15 minutes and are bound to the exact site, action, definition, account/credential context, URL and noncursor arguments. Credential or definition changes retire handles; retries may reuse a handle until its original expiry. Restart preserves unexpired handles. Expired records are cleaned on runtime startup/access, and at most 256 bounded records are retained. An expired or mismatched handle requires restarting at the first page.
 
 This initial contract supports direct HTTP GET only. It does not support bodies, preflight steps, browser transports, transformed HTML responses or redirects. Global credential redaction and request policy remain enabled; a pagination declaration cannot turn a mutation into a read or send a handle to another operation/account.
+
+## Explicit OAuth refresh bindings
+
+A header strategy can opt into bounded OAuth refresh without changing legacy API-key behavior. This is an explicit provider contract, not automatic OAuth discovery or browser login. Use only an approved existing grant. Hycli does not create grants, request additional scopes or change website write settings.
+
+```yaml
+auth:
+  - name: api
+    kind: header
+    header: authorization
+    prefix: "Bearer "
+    origin: https://api.example.test
+    oauth_refresh:
+      grant_ref: account-one
+      token_endpoint: https://auth.example.test/token
+      identity_endpoint: https://api.example.test/me
+      subject_pointer: /sub
+      resource: https://api.example.test
+      scopes: [read]
+```
+
+Do not declare `value_from` for this strategy. The opaque `grant_ref` identifies one private record within this site. Reusing it across strategies is invalid. Older binaries require `store:` for header strategies and therefore reject this definition instead of treating grant JSON as an API token. Endpoint pins, the exact resource origin and scope names are public configuration. Client credentials, access/refresh tokens and the expected stable subject stay private.
+
+Configure it with the existing `hycli auth set <site>/api` command and JSON on stdin. `--value` is rejected for an OAuth binding. The JSON shape is:
+
+```json
+{
+  "kind": "oauth_refresh",
+  "client_id": "provider-client-id",
+  "client_secret": "optional-client-secret",
+  "access_token": "current-access-token",
+  "refresh_token": "current-refresh-token",
+  "expires_at": 2000000000,
+  "subject": "stable-provider-subject"
+}
+```
+
+`expires_at` is an absolute Unix timestamp in seconds. Omit `client_secret` for a public client. This initial contract supports standard refresh-token form POSTs with client credentials in the form body and Bearer access tokens. The configured `resource` is a local continuity binding, not an OAuth extension parameter; refresh requests do not send `resource` or `audience`. It does not support arbitrary provider authentication schemes. Use a protected stdin source rather than pasting real secrets into shell arguments or history. Malformed typed input is rejected and never falls back to a raw API-key write. `hycli auth rm <site>/api` removes the grant through the same ownership lock.
+
+The configured identity endpoint must return JSON over a nonredirecting GET. The configured subject pointer must yield the expected stable string subject. Emails and unverified JWT claims are not identity evidence. Optional `client_pointer`, `resource_pointer` and `scopes_pointer` compare provider-supported identity fields against the private client ID, configured resource and approved scopes. The optional scope field is a space-separated string. Do not invent fields that the provider does not expose. Client, resource, endpoints and approved scopes otherwise remain pinned to the grant configuration. A returned token response with a changed client, resource or scope is rejected. Omitted `scope` retains the approved scope set; omitted `refresh_token` retains the preceding refresh token.
+
+Only direct read operations are supported. Browser transports, preflight steps and mixing a browser account into the operation are rejected. Token exchanges do not enable website writes. Token and identity requests never redirect. Token POSTs have no automatic transport retry. A valid verified access token makes no token exchange. An expired token or explicit Bearer `invalid_token` 401 may consume one refresh budget per operation. Only that explicit 401 can trigger one safe-read retry; ordinary 403s and challenges never trigger refresh or browser fallback.
+
+One cross-process grant lock covers pending-state persistence, one bounded exchange and atomic pair replacement. No global vault lock spans network waits. Rotation writes both tokens before identity verification or normal resource use. Temporary identity failures retain a verification-pending pair; another read verifies that pair rather than refreshing it again while it is valid. If the pending access token expires, one bounded refresh can replace it, followed by identity verification. Identity or scope changes prevent resource use. A lost response or crash after exchange dispatch requires fresh grant recovery because the old refresh token might already have been consumed. A proven failure before dispatch preserves the unconsumed grant. An uncertain local commit is read back, never rolled back from a stale in-memory snapshot or followed by another exchange.
+
+Grant storage keeps the existing vault protection contract. It uses OS-keyring encryption where available and private-file protection otherwise. An existing encrypted vault never falls back to plaintext when its key is unavailable. The actual protection mode remains visible through existing vault status. The existing store initialization behavior is unchanged; this feature adds no keyring setup flow or OS security-setting changes.
+
+Private pagination handles survive verified token rotation within the same immutable grant owner and configuration. Replacing or removing the grant, changing the definition or changing verified authority invalidates them. An unverified rotated candidate never supplies a resource request. Legacy credential and pagination behavior is unchanged.
+
+## Multipart uploads and derived destinations
+
+`body.multipart` uses the same named input map as other bodies. A `type: file`
+field is an explicitly supplied local path; other fields are text. File defaults
+are invalid, including optional defaults. Missing optional files are omitted;
+missing required files fail before preflight or filesystem access. Preflight
+responses cannot choose or replace a local file. Explicit text inputs remain
+literal, even when they contain `{{...}}`.
+
+Any operation declaring a multipart file is a write, regardless of a `read`
+label, search-style method/path, or an otherwise empty body. Existing write and
+approval gates apply. HTTP is the supported multipart transport; explicit
+browser transports fail before preflight instead of silently omitting the body.
+The sender generates the multipart Content-Type boundary, replacing inherited
+Content-Type headers. Files must be regular files and share a 100 MiB aggregate
+budget, enforced against actual bytes read from their opened handles.
+
+`derived_target: true` permits an evidenced destination resolved from preflight.
+A templated `base_url` must resolve fully before dispatch; a missing or invalid
+lease never falls back to the source website. Use an empty `path` when the lease
+returns a complete signed URL with a query string, so the signed URL is preserved.
+HTTPS is required except for explicitly enabled loopback fixtures. Existing
+DNS/IP restrictions remain enabled and write requests never follow redirects.
+
+The source account, selection revision, and credential state remain bound to the
+source website and are rechecked after waits and before dispatch. Source-bound
+preflight reads receive source authentication, not destination header templates.
+Cookie-backed source reads retain guarded browser recovery. Static header-auth
+source reads use guarded HTTP, without dropping or mixing their credentials in
+a browser fallback. Final multipart dispatch remains HTTP-only.
+For cross-origin destinations, default and source credential headers are not
+forwarded. Destination signing headers must reference actual, qualified
+non-cookie preflight fields such as `{{step.lease.signature}}`; ambiguous aliases,
+cookie/auth-header extraction, and source-secret echoes are rejected. Generated
+URL, form, JSON, and multipart text fields follow the same provenance boundary.
+File contents are never scanned; explicitly supplied body text remains literal.
