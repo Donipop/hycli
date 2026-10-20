@@ -291,7 +291,7 @@ async fn orphaned_grants_stay_listed_and_removable_without_affecting_siblings() 
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(".cache/oauth-cli")
         .join(util::id());
-    let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+    let core = Runtime::open(&root, None, None, false, true, true).unwrap();
     let definition = |site: &str, auth: &str, grant_ref: &str| {
         hycli::spec::parse(json!({"spec_version":3,"site":{"name":site,"base_url":"https://example.com"},"auth":[{"name":auth,"kind":"header","header":"authorization","prefix":"Bearer ","origin":"https://example.com","oauth_refresh":{"grant_ref":grant_ref,"token_endpoint":"https://example.com/token","identity_endpoint":"https://example.com/identity","subject_pointer":"/sub","resource":"fixture","scopes":["read"]}}],"operations":[{"name":"read-items","method":"GET","path":"/items","auth":auth,"effect":"read","evidence":"Synthetic OAuth definition; no network use"}]}).to_string().as_bytes()).unwrap()
     };
