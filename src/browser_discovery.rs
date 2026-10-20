@@ -98,13 +98,24 @@ fn chromium_isolation_known(connection: &rusqlite::Connection) -> Result<(), ()>
         .map_err(|_| ())?;
     if invalid == 0 { Ok(()) } else { Err(()) }
 }
+#[derive(Debug, PartialEq, Eq)]
+enum CookieLoadFailure {
+    Unavailable,
+    Unresolved,
+}
+impl From<()> for CookieLoadFailure {
+    fn from(_: ()) -> Self {
+        Self::Unavailable
+    }
+}
+
 fn load_site_cookies(
     profile: &BrowserProfile,
     target: &url::Url,
     cancellation: &CancellationHandle,
-) -> Result<Vec<crate::accounts::Cookie>, ()> {
+) -> Result<Vec<crate::accounts::Cookie>, CookieLoadFailure> {
     if cancellation.is_cancelled() {
-        return Err(());
+        return Err(CookieLoadFailure::Unavailable);
     }
     use rookie_cookies::{AppBoundPolicy, FromPathRequest};
     let db = if profile.browser == "Firefox" {
@@ -149,8 +160,8 @@ fn load_site_cookies(
         }
     }
     // No app-bound bypass feature is compiled. Respect OS protection and skip unsupported rows.
-    let result =
-        rookie_cookies::from_path(request.app_bound(AppBoundPolicy::Disabled)).map_err(|_| ())?;
+    let result = rookie_cookies::from_path(request.app_bound(AppBoundPolicy::Disabled))
+        .map_err(|_| CookieLoadFailure::Unresolved)?;
     let mut entries = result.into_detailed_cookies();
     if snapshot.is_some() {
         for entry in &mut entries {
@@ -160,7 +171,7 @@ fn load_site_cookies(
                 .get_or_insert_with(String::new);
         }
     }
-    native_cookies(entries, target, browser_id == "firefox")
+    native_cookies(entries, target, browser_id == "firefox").map_err(Into::into)
 }
 fn native_cookies(
     entries: Vec<rookie_cookies::enums::DetailedCookie>,
@@ -287,6 +298,24 @@ where
     }
 }
 
+fn with_native_admission<T>(
+    root: &Path,
+    intent: crate::native_scan_admission::NativeScanIntent,
+    cancellation: &CancellationHandle,
+    work: impl FnOnce() -> T,
+) -> AppResult<T> {
+    if cancellation.is_cancelled() {
+        return Err(AppError::api("native_discovery_retry_required", 409));
+    }
+    let admission = crate::native_scan_admission::NativeScanPermit::acquire(root, intent)?;
+    let result = work();
+    if cancellation.is_cancelled() {
+        return Err(AppError::api("native_discovery_retry_required", 409));
+    }
+    admission.clean_complete()?;
+    Ok(result)
+}
+
 fn scan_site(
     target: &url::Url,
     wanted_profile: &str,
@@ -313,23 +342,48 @@ fn scan_site(
             .take(24),
         cancellation,
         |profile| {
-            if !permitted() {
-                cancellation.cancel();
-                return ImportedSession::from_results(profile, Err(()), Err(()));
-            }
-            let cookies = load_site_cookies(&profile, target, cancellation);
-            if cancellation.is_cancelled() || !permitted() {
-                cancellation.cancel();
-                return ImportedSession::from_results(profile, Err(()), Err(()));
-            }
-            let storage = crate::browser_storage::load(
-                &profile.path,
-                profile.browser == "Firefox",
-                &target.origin().ascii_serialization(),
-            );
-            ImportedSession::from_results(profile, cookies, storage)
+            read_native_profile(
+                profile,
+                cancellation,
+                &permitted,
+                |profile| load_site_cookies(profile, target, cancellation),
+                |profile| {
+                    crate::browser_storage::load(
+                        &profile.path,
+                        profile.browser == "Firefox",
+                        &target.origin().ascii_serialization(),
+                    )
+                },
+            )
         },
     )
+}
+
+fn read_native_profile(
+    profile: BrowserProfile,
+    cancellation: &CancellationHandle,
+    permitted: impl Fn() -> bool,
+    load_cookies: impl FnOnce(
+        &BrowserProfile,
+    ) -> Result<Vec<crate::accounts::Cookie>, CookieLoadFailure>,
+    load_storage: impl FnOnce(&BrowserProfile) -> Result<crate::browser_storage::Storage, ()>,
+) -> ImportedSession {
+    if cancellation.is_cancelled() || !permitted() {
+        cancellation.cancel();
+        return ImportedSession::from_results(profile, Err(()), Err(()));
+    }
+    let cookies = load_cookies(&profile);
+    if matches!(cookies, Err(CookieLoadFailure::Unresolved)) {
+        // Native access errors have no reliable denial discriminator. Do not fan out
+        // to another profile or prompt after an unresolved native request.
+        cancellation.cancel();
+    }
+    if cancellation.is_cancelled() || !permitted() {
+        cancellation.cancel();
+        return ImportedSession::from_results(profile, Err(()), Err(()));
+    }
+    let storage = load_storage(&profile);
+    ImportedSession::from_results(profile, cookies.map_err(|_| ()), storage)
 }
 
 fn scan_profiles(
@@ -411,8 +465,15 @@ impl Runtime {
         raw_url: &str,
         profile_id: &str,
     ) -> AppResult<BrowserSearch> {
-        self.import_browser_accounts(site_id, raw_url, profile_id, true, None)
-            .await
+        self.import_browser_accounts(
+            site_id,
+            raw_url,
+            profile_id,
+            true,
+            None,
+            crate::native_scan_admission::NativeScanIntent::UserRequested,
+        )
+        .await
     }
     pub(crate) async fn import_browser_accounts(
         self: &std::sync::Arc<Self>,
@@ -421,6 +482,7 @@ impl Runtime {
         profile_id: &str,
         render: bool,
         profiles: Option<Vec<BrowserProfile>>,
+        intent: crate::native_scan_admission::NativeScanIntent,
     ) -> AppResult<BrowserSearch> {
         let target = crate::net::website_url(raw_url)?;
         if !crate::policy::safe_read_url(&target) {
@@ -451,16 +513,19 @@ impl Runtime {
             Duration::from_secs(300),
             || self.native_discovery_permitted(),
             move |cancellation| {
-                scan_site(
-                    &target_copy,
-                    &wanted_profile,
-                    profiles,
-                    &cancellation,
-                    || policy_core.native_discovery_permitted().is_ok(),
-                )
+                policy_core.native_discovery_permitted()?;
+                with_native_admission(&policy_core.root, intent, &cancellation, || {
+                    scan_site(
+                        &target_copy,
+                        &wanted_profile,
+                        profiles,
+                        &cancellation,
+                        || policy_core.native_discovery_permitted().is_ok(),
+                    )
+                })
             },
         )
-        .await?;
+        .await??;
         for session in sessions {
             self.native_discovery_permitted()?;
             let existing = self
@@ -768,6 +833,104 @@ mod tests {
             });
         assert_eq!((checked, unavailable), (0, 0));
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn native_scan_unresolved_native_read_stops_profile_fanout_and_storage() {
+        let cancellation = CancellationHandle::new();
+        let mut reads = 0;
+        let (checked, _, sessions) = scan_profiles(
+            (0..3).map(|_| BrowserProfile::default()),
+            &cancellation,
+            |profile| {
+                read_native_profile(
+                    profile,
+                    &cancellation,
+                    || true,
+                    |_| {
+                        reads += 1;
+                        Err(CookieLoadFailure::Unresolved)
+                    },
+                    |_| panic!("unresolved native access must not continue to storage"),
+                )
+            },
+        );
+        assert_eq!(reads, 1);
+        assert_eq!(checked, 1);
+        assert!(sessions.is_empty());
+        assert!(cancellation.is_cancelled());
+    }
+
+    #[test]
+    fn native_scan_unresolved_result_requires_explicit_clean_retry() {
+        use crate::native_scan_admission::{NativeScanIntent, NativeScanPermit};
+        let root =
+            std::env::temp_dir().join(format!("hycli-native-unresolved-{}", crate::util::id()));
+        let cancellation = CancellationHandle::new();
+        let mut calls = 0;
+        let result =
+            with_native_admission(&root, NativeScanIntent::Preparation, &cancellation, || {
+                scan_profiles(
+                    (0..3).map(|_| BrowserProfile::default()),
+                    &cancellation,
+                    |profile| {
+                        read_native_profile(
+                            profile,
+                            &cancellation,
+                            || true,
+                            |_| {
+                                calls += 1;
+                                Err(CookieLoadFailure::Unresolved)
+                            },
+                            |_| panic!("unresolved native read must not continue to storage"),
+                        )
+                    },
+                )
+            });
+        assert_eq!(
+            result.err().unwrap().public_code,
+            "native_discovery_retry_required"
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(
+            NativeScanPermit::acquire(&root, NativeScanIntent::Preparation)
+                .err()
+                .unwrap()
+                .public_code,
+            "native_discovery_retry_required"
+        );
+        with_native_admission(
+            &root,
+            NativeScanIntent::UserRequested,
+            &CancellationHandle::new(),
+            || (),
+        )
+        .unwrap();
+        NativeScanPermit::acquire(&root, NativeScanIntent::Preparation)
+            .unwrap()
+            .clean_complete()
+            .unwrap();
+    }
+
+    #[test]
+    fn native_scan_local_unavailable_does_not_trip_native_retry_breaker() {
+        let cancellation = CancellationHandle::new();
+        let (checked, unavailable, sessions) = scan_profiles(
+            (0..2).map(|_| BrowserProfile::default()),
+            &cancellation,
+            |profile| {
+                read_native_profile(
+                    profile,
+                    &cancellation,
+                    || true,
+                    |_| Err(CookieLoadFailure::Unavailable),
+                    |_| Ok(Default::default()),
+                )
+            },
+        );
+        assert_eq!((checked, unavailable), (2, 2));
+        assert_eq!(sessions.len(), 2);
+        assert!(!cancellation.is_cancelled());
     }
 
     #[tokio::test]

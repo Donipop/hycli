@@ -170,6 +170,7 @@ impl Runtime {
                         profile,
                         false,
                         Some(context.environment.profiles.clone()),
+                        crate::native_scan_admission::NativeScanIntent::Preparation,
                     )
                     .await?;
                 let imported: Vec<_> = search
