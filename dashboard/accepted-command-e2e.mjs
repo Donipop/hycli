@@ -38,7 +38,6 @@ const server = createServer(async (req,res) => {
       posts.push({path:req.url,body:body?JSON.parse(body):null});
       if(holdPost)await new Promise(resolve=>{releasePost=resolve;});
       if(command==='reject')return reply(res,{error:{code:'ai_unavailable'}},503);
-      if(command==='ambiguous'){req.socket.destroy();return;}
       let accepted = job(`accepted-${posts.length}`);
       if(req.url.endsWith('/summarize')) accepted=job(`summary-${posts.length}`,{kind:'summary',parent_id:req.url.split('/')[3],phase:'summarize'});
       if(!req.url.endsWith('/reject'))state.jobs.unshift(accepted);
@@ -56,7 +55,18 @@ let browser, page;
 try {
   browser=await chromium.launch({headless:true,chromiumSandbox:true,executablePath:process.env.BROWSER_BIN});
   const context=await browser.newContext();const origin=`http://127.0.0.1:${server.address().port}`;
-  await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
+  let prepareAttempts = 0;
+  await context.route('**/*',route => {
+    const request = route.request();
+    const target = new URL(request.url());
+    if(target.origin !== origin)return route.abort();
+    if(target.pathname === '/api/sites/prepare' && request.method() === 'POST') {
+      prepareAttempts++;
+      // Reject fetch deterministically, without HTTP socket retry behavior.
+      if(command === 'ambiguous')return route.abort('failed');
+    }
+    return route.continue();
+  });
   page=await context.newPage();page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const button=(scope,key)=>scope.getByRole('button',{name:en[key],exact:true});
   const url=()=>page.getByRole('textbox',{name:en['sites.urlLabel'],exact:true});
@@ -65,7 +75,7 @@ try {
   const frame=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const record=name=>{results.push(name);console.log(`PASS: ${name}`);};
   async function reset(next=initial(), hash='', deferStream=false) {
-    capturedRead?.res.destroy();capturedRead=undefined;captureRead=false;for(const res of heldReads)res.destroy();heldReads.clear();sync='ok';command='accept';holdPost=false;releasePost=undefined;posts.length=0;state=next;holdStreamOpen=deferStream;
+    capturedRead?.res.destroy();capturedRead=undefined;captureRead=false;for(const res of heldReads)res.destroy();heldReads.clear();sync='ok';command='accept';holdPost=false;releasePost=undefined;posts.length=0;prepareAttempts=0;state=next;holdStreamOpen=deferStream;
     await page.goto(origin+'/'+hash);await page.locator('.local-status').getByText('vinitial',{exact:true}).waitFor();await wait(()=>streams.size>0);await frame();
   }
   async function prepare(mode, edit=false) {
@@ -98,8 +108,22 @@ try {
     await prepare('hang');await wait(()=>connect().isEnabled());assert.equal(await url().inputValue(),'');assert.equal(posts.length,1);assert.ok(heldReads.size);record('Hanging GET does not hold accepted command or busy state hostage');
     await prepare('fail',true);await wait(()=>connect().isEnabled());assert.equal(await url().inputValue(),'https://example.test');assert.equal(await intent().inputValue(),'Newer edited draft');assert.equal(await page.getByRole('alert').count(),0);record('Accepted command preserves draft edits made while POST was pending');
     for(const outcome of ['reject','ambiguous']) {
-      await reset();command=outcome;await url().fill('https://example.test');await intent().fill('Keep rejected draft');await connect().click();await wait(()=>posts.length===1);await wait(()=>connect().isEnabled());
-      await page.getByRole('alert').getByText(en[outcome==='reject'?'errors.ai_unavailable':'errors.connection_lost'],{exact:true}).waitFor();assert.equal(await intent().inputValue(),'Keep rejected draft');changed();await frame();assert.equal(posts.length,1);record(`${outcome} command preserves error and draft without automatic replay`);
+      await reset();command=outcome;await url().fill('https://example.test');await intent().fill('Keep rejected draft');await connect().click();
+      await page.getByRole('alert').getByText(en[outcome==='reject'?'errors.ai_unavailable':'errors.connection_lost'],{exact:true}).waitFor().catch(error => {
+        throw new Error(`${outcome}: expected command error; observed ${prepareAttempts} browser POST attempts and ${posts.length} server POSTs`, {cause:error});
+      });
+      await wait(()=>connect().isEnabled());
+      const assertAttempts = () => {
+        assert.equal(prepareAttempts,1,`${outcome}: expected exactly one browser POST attempt, observed ${prepareAttempts}`);
+        const expectedServerPosts = outcome === 'reject' ? 1 : 0;
+        assert.equal(posts.length,expectedServerPosts,`${outcome}: expected ${expectedServerPosts} server POSTs, observed ${posts.length}`);
+      };
+      assertAttempts();assert.equal(await intent().inputValue(),'Keep rejected draft');
+      const reconciled = page.waitForResponse(response => new URL(response.url()).pathname === '/api/state' && response.status() === 200);
+      changed();await reconciled;await frame();assertAttempts();
+      assert.equal(await page.getByRole('alert').getByText(en[outcome==='reject'?'errors.ai_unavailable':'errors.connection_lost'],{exact:true}).count(),1);
+      assert.equal(await intent().inputValue(),'Keep rejected draft');
+      record(`${outcome} command preserves error and draft without automatic replay`);
     }
     await reset();captureRead=true;changed();await wait(()=>capturedRead);
     await url().fill('https://example.test');await connect().click();await wait(()=>connect().isEnabled());await page.locator('.local-status').getByText('vaccepted-1',{exact:true}).waitFor();
