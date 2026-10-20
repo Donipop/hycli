@@ -3,7 +3,7 @@ use axum::{
     http::HeaderMap,
     routing::{get, post},
 };
-use hycli::{runtime::Runtime, util};
+use hycli::util;
 use serde_json::{Value, json};
 use std::{
     path::Path,
@@ -22,6 +22,7 @@ fn command(root: &Path, args: &[&str]) -> tokio::process::Command {
             .unwrap_or_else(|| env!("CARGO_BIN_EXE_hycli").into()),
     );
     command
+        .kill_on_drop(true)
         .args(args)
         .env("HYCLI_DATA_DIR", root)
         .env("HYCLI_SPECS", root.join("specs"))
@@ -72,6 +73,30 @@ fn assert_no_secrets(text: &str) {
 }
 fn grant() -> String {
     json!({"kind":"oauth_refresh","client_id":"cli-client-canary","client_secret":"cli-secret-canary","access_token":"cli-access-canary","refresh_token":"cli-refresh-canary","expires_at":chrono::Utc::now().timestamp()-60,"subject":"cli-subject-canary"}).to_string()
+}
+async fn install(root: &Path, spec: &hycli::spec::Spec) {
+    std::fs::create_dir_all(root).unwrap();
+    let path = root.join("definition.json");
+    std::fs::write(&path, serde_json::to_vec(spec).unwrap()).unwrap();
+    successful(
+        input(
+            root,
+            &["--allow-local", "spec", "install", path.to_str().unwrap()],
+            "",
+        )
+        .await,
+    );
+}
+async fn configured(root: &Path, site: &str, auth: &str) -> bool {
+    let site = successful(input(root, &["--allow-local", "describe", site], "").await);
+    site["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|credential| credential["id"] == auth)
+        .expect("credential exposed by describe")["configured"]
+        .as_bool()
+        .unwrap()
 }
 async fn rpc(
     stdin: &mut tokio::process::ChildStdin,
@@ -188,9 +213,11 @@ async fn existing_auth_stdin_cli_and_mcp_use_the_same_rotating_grant() {
     assert_eq!(exchanges.load(Ordering::SeqCst), 1);
     successful(input(&root, &["--allow-local", "oauth-cli", "read-items"], "").await);
     assert_eq!(exchanges.load(Ordering::SeqCst), 1);
-    let core = Runtime::open(&root, None, None, false, true, true).unwrap();
-    assert!(core.sites("en").unwrap()[0].credentials[0].configured);
-    assert!(!core.state.site_writes("oauth-cli").unwrap());
+    assert!(configured(&root, "oauth-cli", "api").await);
+    assert_eq!(
+        successful(input(&root, &["writes", "oauth-cli"], "").await)["writes"],
+        false
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -259,7 +286,6 @@ async fn existing_auth_stdin_cli_and_mcp_use_the_same_rotating_grant() {
     assert!(!missing.status.success());
     assert_eq!(reads.load(Ordering::SeqCst), 3);
     server.abort();
-    drop(core);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -270,18 +296,19 @@ async fn legacy_auth_fallback_survives_unrelated_runtime_failure() {
         .join(util::id());
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("dashboard.json"), "invalid synthetic state").unwrap();
-    assert!(Runtime::open(&root, None, None, false, true, false).is_err());
+    assert!(!input(&root, &["describe"], "").await.status.success());
     successful(input(&root, &["auth", "set", "legacy/api"], "legacy-test-value").await);
-    let store = hycli::store::Store::open(&root.join("store.json")).unwrap();
-    assert!(store.contains("legacy", "api"));
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!(["legacy/api"])
+    );
     let rejected = input(&root, &["auth", "set", "legacy/api"], &grant()).await;
     assert!(!rejected.status.success());
     assert_no_secrets(&String::from_utf8_lossy(&rejected.stderr));
     successful(input(&root, &["auth", "rm", "legacy/api"], "").await);
-    assert!(
-        !hycli::store::Store::open(&root.join("store.json"))
-            .unwrap()
-            .contains("legacy", "api")
+    assert_eq!(
+        successful(input(&root, &["auth", "ls"], "").await),
+        json!([])
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -291,14 +318,13 @@ async fn orphaned_grants_stay_listed_and_removable_without_affecting_siblings() 
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(".cache/oauth-cli")
         .join(util::id());
-    let core = Runtime::open(&root, None, None, false, true, true).unwrap();
     let definition = |site: &str, auth: &str, grant_ref: &str| {
         hycli::spec::parse(json!({"spec_version":3,"site":{"name":site,"base_url":"https://example.com"},"auth":[{"name":auth,"kind":"header","header":"authorization","prefix":"Bearer ","origin":"https://example.com","oauth_refresh":{"grant_ref":grant_ref,"token_endpoint":"https://example.com/token","identity_endpoint":"https://example.com/identity","subject_pointer":"/sub","resource":"fixture","scopes":["read"]}}],"operations":[{"name":"read-items","method":"GET","path":"/items","auth":auth,"effect":"read","evidence":"Synthetic OAuth definition; no network use"}]}).to_string().as_bytes()).unwrap()
     };
     let first = definition("orphan", "api", "one");
     let sibling = definition("sibling", "api", "one");
     for sp in [&first, &sibling] {
-        core.install(sp).unwrap();
+        install(&root, sp).await;
         successful(
             input(
                 &root,
@@ -317,31 +343,14 @@ async fn orphaned_grants_stay_listed_and_removable_without_affecting_siblings() 
         successful(input(&root, &["auth", "ls"], "").await),
         json!(["sibling/api"])
     );
-    assert!(
-        core.sites("en")
-            .unwrap()
-            .iter()
-            .find(|s| s.id == "sibling")
-            .unwrap()
-            .credentials[0]
-            .configured
-    );
-    core.install(&first).unwrap();
-    assert!(
-        !core
-            .sites("en")
-            .unwrap()
-            .iter()
-            .find(|s| s.id == "orphan")
-            .unwrap()
-            .credentials[0]
-            .configured
-    );
+    assert!(configured(&root, "sibling", "api").await);
+    install(&root, &first).await;
+    assert!(!configured(&root, "orphan", "api").await);
 
     // Same public reference, new grant key: removal must delete both generations.
     successful(input(&root, &["auth", "set", "orphan/api"], &grant()).await);
     let rebound = definition("orphan", "api", "two");
-    core.install(&rebound).unwrap();
+    install(&root, &rebound).await;
     successful(input(&root, &["auth", "set", "orphan/api"], &grant()).await);
     assert_eq!(
         successful(input(&root, &["auth", "ls"], "").await),
@@ -349,75 +358,41 @@ async fn orphaned_grants_stay_listed_and_removable_without_affecting_siblings() 
     );
     successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
     for sp in [&first, &rebound] {
-        core.install(sp).unwrap();
-        assert!(
-            !core
-                .sites("en")
-                .unwrap()
-                .iter()
-                .find(|s| s.id == "orphan")
-                .unwrap()
-                .credentials[0]
-                .configured
-        );
+        install(&root, sp).await;
+        assert!(!configured(&root, "orphan", "api").await);
     }
 
     // An auth rename keeps the old reference removable without deleting the new one.
-    core.install(&first).unwrap();
+    install(&root, &first).await;
     successful(input(&root, &["auth", "set", "orphan/api"], &grant()).await);
     let renamed = definition("orphan", "other", "two");
-    core.install(&renamed).unwrap();
+    install(&root, &renamed).await;
     successful(input(&root, &["auth", "set", "orphan/other"], &grant()).await);
     successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
     assert_eq!(
         successful(input(&root, &["auth", "ls"], "").await),
         json!(["orphan/other", "sibling/api"])
     );
-    assert!(
-        core.sites("en")
-            .unwrap()
-            .iter()
-            .find(|s| s.id == "orphan")
-            .unwrap()
-            .credentials[0]
-            .configured
-    );
+    assert!(configured(&root, "orphan", "other").await);
     // A reused private grant_ref must not let one public auth name delete another.
-    core.install(&rebound).unwrap();
+    install(&root, &rebound).await;
     successful(input(&root, &["auth", "rm", "orphan/api"], "").await);
-    core.install(&renamed).unwrap();
-    assert!(
-        core.sites("en")
-            .unwrap()
-            .iter()
-            .find(|s| s.id == "orphan")
-            .unwrap()
-            .credentials[0]
-            .configured
-    );
+    install(&root, &renamed).await;
+    assert!(configured(&root, "orphan", "other").await);
 
     // A replacement legacy strategy may use a different private store key.
     let mut legacy = renamed.clone();
     legacy.auth[0].oauth_refresh = None;
     legacy.auth[0].value_from = "store:orphan/static-key".into();
-    core.install(&legacy).unwrap();
+    install(&root, &legacy).await;
     successful(input(&root, &["auth", "set", "orphan/other"], "legacy-value").await);
     successful(input(&root, &["auth", "rm", "orphan/other"], "").await);
     assert_eq!(
         successful(input(&root, &["auth", "ls"], "").await),
         json!(["sibling/api"])
     );
-    core.install(&renamed).unwrap();
-    assert!(
-        !core
-            .sites("en")
-            .unwrap()
-            .iter()
-            .find(|s| s.id == "orphan")
-            .unwrap()
-            .credentials[0]
-            .configured
-    );
+    install(&root, &renamed).await;
+    assert!(!configured(&root, "orphan", "other").await);
     // Removal remains usable when unrelated runtime state cannot be opened.
     std::fs::write(root.join("dashboard.json"), "invalid synthetic state").unwrap();
     std::fs::remove_file(root.join("specs/sibling.yaml")).unwrap();
@@ -426,6 +401,5 @@ async fn orphaned_grants_stay_listed_and_removable_without_affecting_siblings() 
         successful(input(&root, &["auth", "ls"], "").await),
         json!([])
     );
-    drop(core);
     std::fs::remove_dir_all(root).unwrap();
 }
