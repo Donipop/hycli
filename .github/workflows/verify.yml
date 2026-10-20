@@ -148,6 +148,21 @@ jobs:
           ln -s "$GITHUB_WORKSPACE/dashboard/node_modules" .cache/accepted-command-baseline/dashboard/node_modules
           npm --prefix .cache/accepted-command-baseline/dashboard run build
           git -C .cache/accepted-command-baseline diff --exit-code -- dashboard
+      - name: Exact pre-fix dashboard source for result action recovery
+        if: matrix.browser_tests
+        uses: actions/checkout@v7
+        with:
+          ref: 6ab5ffd849351e8cf4d5263913e0ffcbfc27d785
+          path: .cache/result-action-baseline
+          persist-credentials: false
+      - name: Build pinned result action baseline
+        if: matrix.browser_tests
+        run: |
+          test "$(git -C .cache/result-action-baseline rev-parse HEAD)" = 6ab5ffd849351e8cf4d5263913e0ffcbfc27d785
+          cmp dashboard/package-lock.json .cache/result-action-baseline/dashboard/package-lock.json
+          ln -s "$GITHUB_WORKSPACE/dashboard/node_modules" .cache/result-action-baseline/dashboard/node_modules
+          npm --prefix .cache/result-action-baseline/dashboard run build
+          git -C .cache/result-action-baseline diff --exit-code -- dashboard
       - name: End-to-end service
         if: matrix.browser_tests
         run: |
@@ -158,6 +173,8 @@ jobs:
           LOCALE_BASELINE=1 LOCALE_WEB="$GITHUB_WORKSPACE/.cache/accepted-command-baseline/web" BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/binding-e2e.mjs
+          RESULT_ACTION_BASELINE=1 RESULT_ACTION_WEB="$GITHUB_WORKSPACE/.cache/result-action-baseline/web" BROWSER_BIN="$CHROME_BIN" node dashboard/result-action-recovery-e2e.mjs
+          BROWSER_BIN="$CHROME_BIN" node dashboard/result-action-recovery-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/result-recovery-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/website-draft-e2e.mjs
           ACCEPTED_COMMAND_BASELINE=1 ACCEPTED_COMMAND_WEB="$GITHUB_WORKSPACE/.cache/accepted-command-baseline/web" BROWSER_BIN="$CHROME_BIN" node dashboard/accepted-command-e2e.mjs
@@ -165,6 +182,14 @@ jobs:
           node scripts/test-e2e.mjs --full
           # Verification must preserve reviewed screenshots before source packaging.
           git diff --exit-code -- docs/images docs/design
+      - name: Retain synthetic result action red and green evidence
+        if: always() && matrix.browser_tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: result-action-recovery-regression
+          path: test-results/result-action-recovery/
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic locale readiness evidence
         if: always() && matrix.browser_tests
         uses: actions/upload-artifact@v7
