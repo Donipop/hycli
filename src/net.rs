@@ -2757,6 +2757,8 @@ mod file_receiver_tests {
         util::private_dir(&root).unwrap();
         let attempts = Arc::new(AtomicUsize::new(0));
         let count = attempts.clone();
+        let blocked_attempts = Arc::new(AtomicUsize::new(0));
+        let blocked_count = blocked_attempts.clone();
         let app = Router::new()
             .route(
                 "/redirect",
@@ -2776,7 +2778,8 @@ mod file_receiver_tests {
                         if count.fetch_add(1, Ordering::SeqCst) == 0 {
                             HttpResponse::builder()
                                 .status(503)
-                                .body(Body::from("temporary diagnostic, not file bytes"))
+                                .header("content-type", "application/json")
+                                .body(Body::from(r#"{"error":"temporarily unavailable"}"#))
                                 .unwrap()
                         } else {
                             HttpResponse::builder()
@@ -2784,6 +2787,19 @@ mod file_receiver_tests {
                                 .body(Body::from("final"))
                                 .unwrap()
                         }
+                    }
+                }),
+            )
+            .route(
+                "/blocked",
+                get(move || {
+                    let count = blocked_count.clone();
+                    async move {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        HttpResponse::builder()
+                            .status(503)
+                            .body(Body::from("unclassified rejection"))
+                            .unwrap()
                     }
                 }),
             )
@@ -2827,6 +2843,20 @@ mod file_receiver_tests {
             assert!(empty(&root));
         }
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        let blocked = network
+            .fetch_file_guarded(
+                request(format!("{origin}/blocked")),
+                &|| Ok(()),
+                &FileReceiver::new(&root),
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked.response.status, 503);
+        assert_eq!(blocked.response.defense, "unknown");
+        assert_eq!(blocked.response.bytes, b"unclassified rejection");
+        assert!(blocked.artifact.is_none());
+        assert_eq!(blocked_attempts.load(Ordering::SeqCst), 1);
+        assert!(empty(&root));
         server.abort();
         drop(network);
         std::fs::remove_dir_all(root).unwrap();
