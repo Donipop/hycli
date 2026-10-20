@@ -1123,7 +1123,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
                 return Err(AppError::api("bad_url", 400));
             }
         }
-        if auth.kind == "header" {
+        if auth.kind == "header" && auth.oauth_refresh.is_none() {
             let scope = crate::net::validate_url(if auth.origin.is_empty() {
                 &sp.site.base_url
             } else {
@@ -1152,6 +1152,7 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
             return Err(AppError::api("data_invalid", 400));
         }
         if auth.kind == "header"
+            && auth.oauth_refresh.is_none()
             && !auth
                 .value_from
                 .starts_with(&format!("store:{}/", sp.site.name))

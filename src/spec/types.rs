@@ -51,6 +51,8 @@ pub struct Defaults {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuthStrategy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_refresh: Option<OAuthRefreshBinding>,
     pub name: String,
     pub kind: String, // none | header | browser | derived
     #[serde(default)]
@@ -62,6 +64,24 @@ pub struct AuthStrategy {
     /// Exact credential destination; legacy definitions use the site's base origin.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub origin: String,
+}
+
+/// Public endpoint pins only. Grant values never belong in a SiteSpec.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuthRefreshBinding {
+    pub grant_ref: String,
+    pub token_endpoint: String,
+    pub identity_endpoint: String,
+    pub subject_pointer: String,
+    pub resource: String,
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub client_pointer: String,
+    #[serde(default)]
+    pub resource_pointer: String,
+    #[serde(default)]
+    pub scopes_pointer: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

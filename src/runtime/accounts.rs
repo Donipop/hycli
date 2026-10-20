@@ -55,6 +55,10 @@ impl Runtime {
         {
             return Err(AppError::api("auth_required", 401));
         }
+        let oauth_token = strategy
+            .filter(|a| a.oauth_refresh.is_some())
+            .map(|a| self.oauth_header(sp, a))
+            .transpose()?;
         let mut vault = self
             .vault
             .lock()
@@ -86,18 +90,25 @@ impl Runtime {
         }
         if let Some(auth) = strategy {
             if auth.kind == "header" {
-                let path = auth
-                    .value_from
-                    .strip_prefix("store:")
-                    .ok_or_else(|| AppError::api("data_invalid", 400))?;
-                let (site, key) = path
-                    .split_once('/')
-                    .ok_or_else(|| AppError::api("data_invalid", 400))?;
-                if let Some(secret) = vault.get(site, key) {
+                if auth.oauth_refresh.is_some() {
+                    let secret = oauth_token.ok_or_else(|| AppError::api("auth_required", 401))?;
                     headers.retain(|key, _| !key.eq_ignore_ascii_case(&auth.header));
                     headers.insert(auth.header.clone(), format!("{}{}", auth.prefix, secret));
+                    secrets.push(secret);
                 } else {
-                    return Err(AppError::api("auth_required", 401));
+                    let path = auth
+                        .value_from
+                        .strip_prefix("store:")
+                        .ok_or_else(|| AppError::api("data_invalid", 400))?;
+                    let (site, key) = path
+                        .split_once('/')
+                        .ok_or_else(|| AppError::api("data_invalid", 400))?;
+                    if let Some(secret) = vault.get(site, key) {
+                        headers.retain(|key, _| !key.eq_ignore_ascii_case(&auth.header));
+                        headers.insert(auth.header.clone(), format!("{}{}", auth.prefix, secret));
+                    } else {
+                        return Err(AppError::api("auth_required", 401));
+                    }
                 }
             } else if auth.kind == "derived" {
                 let credential = loaded_credential
@@ -128,6 +139,9 @@ impl Runtime {
             .find_auth(name)
             .filter(|auth| auth.kind == "header")
             .ok_or_else(|| AppError::api("not_found", 404))?;
+        if auth.oauth_refresh.is_some() {
+            return self.set_oauth_credential(&sp, auth, value);
+        }
         let key = auth
             .value_from
             .strip_prefix(&format!("store:{site}/"))
@@ -144,7 +158,7 @@ impl Runtime {
             }
             vault.set(site, key, value)?;
         } else {
-            vault.delete(site, key)?;
+            vault.delete_website_credential(site, name, None, Some(key))?;
         }
         drop(vault);
         if value.is_some() {

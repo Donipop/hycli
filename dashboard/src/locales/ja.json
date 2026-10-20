@@ -517,5 +517,9 @@
   "errors.work_in_progress": "アクティビティで実行中の作業を完了またはキャンセルしてから、もう一度終了してください。",
   "errors.shutting_down": "Hycliを終了しています。",
   "errors.pagination_expired": "ページカーソルの期限が切れたか、リクエストと一致しません。最初のページからやり直してください。",
-  "errors.pagination_invalid": "サイトが未対応のページカーソルを返しました。8文字以上4096バイト以下が必要で、認証情報や短いページ番号は使えません。"
+  "errors.pagination_invalid": "サイトが未対応のページカーソルを返しました。8文字以上4096バイト以下が必要で、認証情報や短いページ番号は使えません。",
+  "errors.oauth_recovery_required": "このOAuth認証情報は安全に更新できません。新しい認可情報のJSONを標準入力からauth setに渡してください。以前の更新トークンは再利用しないでください。",
+  "errors.oauth_verification_pending": "アカウントの確認は未完了です。読み取りを再試行して、トークンを再交換せずに保存済みの認証情報を確認してください。",
+  "errors.oauth_configuration_invalid": "OAuthの設定が無効です。OAuth設定を確認してください。",
+  "errors.oauth_stdin_required": "OAuth認証情報はコマンドライン引数ではなく、標準入力から渡してください。"
 }

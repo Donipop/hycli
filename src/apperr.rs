@@ -152,6 +152,10 @@ impl AppError {
             code,
             msg: public_code.into(),
             remedy: match public_code {
+                "oauth_recovery_required" => "The grant cannot be safely refreshed again. Replace it through the existing auth set command using fresh grant JSON on stdin; do not reuse a possibly consumed refresh token.",
+                "oauth_verification_pending" => "The token pair is saved but identity verification has not completed. Retry the read to verify it without another token exchange.",
+                "oauth_configuration_invalid" => "Use an explicit OAuth refresh binding and typed grant JSON through auth set stdin. Keep token values out of the SiteSpec.",
+                "oauth_stdin_required" => "Send OAuth grant JSON on stdin, not through --value or another command-line argument.",
                 "auth_required" | "identity_unavailable" => "Open `hycli open` and reconnect the website account or configure its website API key.",
                 "provider_missing" | "provider_not_connected" | "provider_required" => "Open `hycli open` and connect an AI provider in AI connections.",
                 "ai_permission_denied" => "Check the API key's account permissions and access to the selected model in the provider console.",

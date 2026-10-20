@@ -517,5 +517,9 @@
   "errors.work_in_progress": "Finish or cancel active work in Activity, then quit again.",
   "errors.shutting_down": "Hycli is shutting down.",
   "errors.pagination_expired": "This page cursor expired or no longer matches this request. Start again from the first page.",
-  "errors.pagination_invalid": "This website returned an unsupported page cursor. At least 8 characters and at most 4096 bytes are required; credentials and short page numbers are not accepted."
+  "errors.pagination_invalid": "This website returned an unsupported page cursor. At least 8 characters and at most 4096 bytes are required; credentials and short page numbers are not accepted.",
+  "errors.oauth_recovery_required": "These OAuth credentials cannot be refreshed safely. Use auth set with fresh grant JSON on standard input. Do not reuse the previous refresh token.",
+  "errors.oauth_verification_pending": "Account verification is incomplete. Retry the read to verify the saved credentials without another token exchange.",
+  "errors.oauth_configuration_invalid": "The OAuth configuration is invalid. Check your OAuth settings.",
+  "errors.oauth_stdin_required": "Provide OAuth credentials through standard input, not command-line arguments."
 }

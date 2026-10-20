@@ -75,6 +75,20 @@ try {
   assert.equal(await dialog().getByText(en['actions.noResult'],{exact:true}).count(),0,'A denied read is not an empty success');
   await close();
   console.log('PASS: API denial shows its own remedy without account reconnection or empty success');
+  for (const code of ['oauth_recovery_required','oauth_verification_pending']) {
+    const title = code === 'oauth_recovery_required' ? 'OAuth recovery' : 'OAuth verification';
+    state.jobs = [job(title,'failed',{error_code:code})];
+    const before = requests.length;
+    await visit();
+    await open(title);
+    await dialog().locator('.result-heading').getByText(en['activity.failed'],{exact:true}).waitFor();
+    await dialog().getByRole('alert').getByText(en['errors.'+code],{exact:true}).waitFor();
+    assert.equal(await button(dialog(),'accounts.autoFind').count(),0,code+' does not suggest browser account discovery');
+    assert.equal(await dialog().getByText(en['actions.noResult'],{exact:true}).count(),0,code+' is not an empty success');
+    assert.equal(requests.slice(before).filter(r => r.method === 'POST' && !r.path.startsWith('/api/session')).length,0,code+' never starts automatic recovery work');
+    await close();
+  }
+  console.log('PASS: OAuth failures show their localized remedies without browser discovery, automatic recovery or empty success');
   const original = job('Read original','completed',{result:{answer:'Original read retained'}});
   state.jobs = [original,job('Other parent','completed',{result:{answer:'Independent result'}}),job('unrelated-summary','failed',{kind:'summary',parent_id:'different-parent',error_code:'ai_billing_error'})];
   await visit();

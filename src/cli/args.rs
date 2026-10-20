@@ -257,8 +257,10 @@ pub enum SpecCmd {
 
 #[derive(Subcommand)]
 pub enum AuthCmd {
+    /// Store a legacy API key or an explicitly bound OAuth grant. OAuth JSON must use stdin.
     Set {
         r#ref: String,
+        /// Legacy API-key value only. Send OAuth grant JSON on stdin instead.
         #[arg(long)]
         value: Option<String>,
     },

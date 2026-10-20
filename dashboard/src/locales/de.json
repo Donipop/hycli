@@ -517,5 +517,9 @@
   "errors.work_in_progress": "Schließen Sie laufende Aufgaben unter Aktivitäten ab oder brechen Sie sie ab. Beenden Sie Hycli dann erneut.",
   "errors.shutting_down": "Hycli wird beendet.",
   "errors.pagination_expired": "Dieser Seitencursor ist abgelaufen oder passt nicht mehr zur Anfrage. Beginne erneut auf der ersten Seite.",
-  "errors.pagination_invalid": "Die Website gab einen nicht unterstützten Seitencursor zurück. Er muss mindestens 8 Zeichen und höchstens 4096 Bytes haben, ohne Zugangsdaten oder kurze Seitenzahlen."
+  "errors.pagination_invalid": "Die Website gab einen nicht unterstützten Seitencursor zurück. Er muss mindestens 8 Zeichen und höchstens 4096 Bytes haben, ohne Zugangsdaten oder kurze Seitenzahlen.",
+  "errors.oauth_recovery_required": "Diese OAuth-Zugangsdaten können nicht sicher erneuert werden. Übergib neue Grant-Daten als JSON über die Standardeingabe an auth set. Verwende das bisherige Refresh-Token nicht erneut.",
+  "errors.oauth_verification_pending": "Die Kontoprüfung ist nicht abgeschlossen. Wiederhole den Lesevorgang, um die gespeicherten Zugangsdaten ohne erneuten Token-Austausch zu prüfen.",
+  "errors.oauth_configuration_invalid": "Die OAuth-Konfiguration ist ungültig. Prüfe deine OAuth-Einstellungen.",
+  "errors.oauth_stdin_required": "Übergib OAuth-Zugangsdaten über die Standardeingabe, nicht als Befehlszeilenargumente."
 }

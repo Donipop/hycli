@@ -399,6 +399,7 @@ pub(super) fn documented_auth(doc: &Value, site: &str) -> AuthRequirements {
                 }
                 let id = format!("website-key-{}", &util::hash(name.as_bytes())[..8]);
                 Some(crate::spec::AuthStrategy {
+                    oauth_refresh: None,
                     name: id.clone(),
                     kind: "header".into(),
                     header: header.into(),

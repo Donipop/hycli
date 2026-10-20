@@ -517,5 +517,9 @@
   "errors.work_in_progress": "Completa o annulla le attività in corso in Attività, poi esci di nuovo.",
   "errors.shutting_down": "Hycli si sta chiudendo.",
   "errors.pagination_expired": "Il cursore di pagina è scaduto o non corrisponde più alla richiesta. Ricomincia dalla prima pagina.",
-  "errors.pagination_invalid": "Il sito ha restituito un cursore non supportato. Sono richiesti almeno 8 caratteri e al massimo 4096 byte, senza credenziali o numeri di pagina brevi."
+  "errors.pagination_invalid": "Il sito ha restituito un cursore non supportato. Sono richiesti almeno 8 caratteri e al massimo 4096 byte, senza credenziali o numeri di pagina brevi.",
+  "errors.oauth_recovery_required": "Queste credenziali OAuth non possono essere rinnovate in sicurezza. Usa auth set con nuovi dati di autorizzazione JSON tramite l’input standard. Non riutilizzare il precedente token di aggiornamento.",
+  "errors.oauth_verification_pending": "La verifica dell’account è incompleta. Riprova la lettura per verificare le credenziali salvate senza un altro scambio di token.",
+  "errors.oauth_configuration_invalid": "La configurazione OAuth non è valida. Controlla le impostazioni OAuth.",
+  "errors.oauth_stdin_required": "Fornisci le credenziali OAuth tramite l’input standard, non come argomenti della riga di comando."
 }

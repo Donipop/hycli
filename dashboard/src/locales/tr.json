@@ -517,5 +517,9 @@
   "errors.work_in_progress": "Etkinlik bölümünde devam eden işleri tamamlayın veya iptal edin, ardından yeniden çıkın.",
   "errors.shutting_down": "Hycli kapatılıyor.",
   "errors.pagination_expired": "Bu sayfa imlecinin süresi doldu veya istekle artık eşleşmiyor. İlk sayfadan yeniden başlayın.",
-  "errors.pagination_invalid": "Site desteklenmeyen bir sayfa imleci döndürdü. En az 8 karakter, en fazla 4096 bayt gerekir; kimlik bilgileri veya kısa sayfa numaraları kabul edilmez."
+  "errors.pagination_invalid": "Site desteklenmeyen bir sayfa imleci döndürdü. En az 8 karakter, en fazla 4096 bayt gerekir; kimlik bilgileri veya kısa sayfa numaraları kabul edilmez.",
+  "errors.oauth_recovery_required": "Bu OAuth kimlik bilgileri güvenli bir şekilde yenilenemiyor. Standart girdiden yeni yetkilendirme JSON verileriyle auth set kullanın. Önceki yenileme belirtecini yeniden kullanmayın.",
+  "errors.oauth_verification_pending": "Hesap doğrulaması tamamlanmadı. Kaydedilen kimlik bilgilerini yeniden belirteç alışverişi yapmadan doğrulamak için okuma işlemini tekrar deneyin.",
+  "errors.oauth_configuration_invalid": "OAuth yapılandırması geçersiz. OAuth ayarlarınızı kontrol edin.",
+  "errors.oauth_stdin_required": "OAuth kimlik bilgilerini komut satırı bağımsız değişkenleri yerine standart girdi üzerinden iletin."
 }

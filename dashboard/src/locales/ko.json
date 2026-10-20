@@ -517,5 +517,9 @@
   "errors.work_in_progress": "활동에서 진행 중인 작업을 완료하거나 취소한 뒤 다시 종료해 주세요.",
   "errors.shutting_down": "Hycli를 종료하는 중입니다.",
   "errors.pagination_expired": "페이지 이동 번호표가 만료되었거나 요청과 일치하지 않습니다. 첫 페이지부터 다시 시작하세요.",
-  "errors.pagination_invalid": "웹사이트가 지원되지 않는 페이지 이동값을 반환했습니다. 8자 이상, 4096바이트 이하의 값만 지원하며 인증정보나 짧은 페이지 번호는 사용할 수 없습니다."
+  "errors.pagination_invalid": "웹사이트가 지원되지 않는 페이지 이동값을 반환했습니다. 8자 이상, 4096바이트 이하의 값만 지원하며 인증정보나 짧은 페이지 번호는 사용할 수 없습니다.",
+  "errors.oauth_recovery_required": "이 OAuth 인증정보는 안전하게 갱신할 수 없습니다. 새 권한 부여 JSON을 표준 입력으로 전달하여 auth set을 실행하세요. 이전 갱신 토큰은 재사용하지 마세요.",
+  "errors.oauth_verification_pending": "계정 확인이 완료되지 않았습니다. 읽기를 다시 시도하여 토큰을 다시 교환하지 않고 저장된 인증정보를 확인하세요.",
+  "errors.oauth_configuration_invalid": "OAuth 설정이 올바르지 않습니다. OAuth 설정을 확인하세요.",
+  "errors.oauth_stdin_required": "OAuth 인증정보는 명령줄 인수가 아닌 표준 입력으로 전달하세요."
 }
