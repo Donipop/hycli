@@ -59,6 +59,7 @@ try {
   const alert = code => page.getByRole('dialog').getByRole('alert').getByText(en['errors.'+code],{exact:true});
   const open = async id => {
     await page.goto(origin+'/#activity');
+    await page.reload({waitUntil:'domcontentloaded'});
     const title = jobs.find(job => job.id === id).action_title;
     await page.locator('.activity-item').filter({hasText:title}).getByRole('button',{name:en['activity.viewResult'],exact:true}).click();
     await button(id === 'file' ? 'files.copyManifest' : 'actions.copy').waitFor();
