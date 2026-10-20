@@ -76,7 +76,10 @@ try {
   const record=name=>{results.push(name);console.log(`PASS: ${name}`);};
   async function reset(next=initial(), hash='', deferStream=false) {
     capturedRead?.res.destroy();capturedRead=undefined;captureRead=false;for(const res of heldReads)res.destroy();heldReads.clear();sync='ok';command='accept';holdPost=false;releasePost=undefined;posts.length=0;prepareAttempts=0;state=next;holdStreamOpen=deferStream;
-    await page.goto(origin+'/'+hash);await page.locator('.local-status').getByText('vinitial',{exact:true}).waitFor();await wait(()=>streams.size>0);await frame();
+    await page.goto(origin+'/'+hash);
+    // A hash-only goto preserves Workspace state; each fixture needs a new document.
+    await page.reload({waitUntil:'domcontentloaded'});
+    await page.locator('.local-status').getByText('vinitial',{exact:true}).waitFor();await wait(()=>streams.size>0);await frame();
   }
   async function prepare(mode, edit=false) {
     await reset();await url().fill('https://example.test');await intent().fill('Original draft');
