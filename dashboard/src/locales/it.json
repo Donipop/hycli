@@ -377,7 +377,7 @@
   "errors.storage_locked": "Sblocca il gestore delle credenziali del dispositivo, poi riprova.",
   "accounts.alreadySignedIn": "Hai già effettuato l’accesso?",
   "accounts.autoFind": "Trova il mio accesso",
-  "accounts.autoFindHint": "Hycli controlla prima i profili browser già presenti. I dati di accesso rimangono su questo dispositivo.",
+  "accounts.autoFindHint": "Scegli di cercare il tuo accesso per controllare i profili locali del browser. I dati di accesso rimangono su questo dispositivo.",
   "accounts.searching": "Ricerca nei tuoi browser…",
   "accounts.searchDone": "Controllati {count} profili browser.",
   "accounts.noSession": "Nessun accesso utilizzabile trovato. Apri il sito, accedi e poi torna qui.",

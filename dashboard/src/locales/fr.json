@@ -377,7 +377,7 @@
   "errors.storage_locked": "Déverrouillez le gestionnaire d’identifiants de votre appareil, puis réessayez.",
   "accounts.alreadySignedIn": "Vous êtes déjà connecté ?",
   "accounts.autoFind": "Trouver ma session",
-  "accounts.autoFindHint": "Hycli vérifie d’abord vos profils de navigateur existants. Vos informations de connexion restent sur cet appareil.",
+  "accounts.autoFindHint": "Choisissez de rechercher votre connexion pour vérifier les profils locaux du navigateur. Les informations de connexion restent sur cet appareil.",
   "accounts.searching": "Recherche dans vos navigateurs…",
   "accounts.searchDone": "{count} profils de navigateur vérifiés.",
   "accounts.noSession": "Aucune session utilisable trouvée. Ouvrez le site web, connectez-vous, puis revenez ici.",

@@ -342,7 +342,7 @@
   "accounts.cookieCount": "保存済みのログイン情報：{count}",
   "accounts.signedIn": "ログイン済み",
   "accounts.autoFind": "ログインを探す",
-  "accounts.autoFindHint": "Hycliがまず既存のブラウザープロファイルを確認します。ログイン情報はこの端末内に保存されます。",
+  "accounts.autoFindHint": "「ログインを検索」を選択すると、この端末のブラウザープロファイルを確認します。ログイン情報はこの端末に保持されます。",
   "accounts.searching": "ブラウザーでログインを探しています…",
   "accounts.searchDone": "ブラウザープロファイルを{count}件確認しました。",
   "accounts.noSession": "利用できるログインが見つかりませんでした。ウェブサイトを開いてログインし、ここに戻ってください。",

@@ -342,7 +342,7 @@
   "accounts.cookieCount": "Thông tin đăng nhập đã lưu: {count}",
   "accounts.signedIn": "Đã đăng nhập",
   "accounts.autoFind": "Tìm phiên đăng nhập của tôi",
-  "accounts.autoFindHint": "Hycli sẽ kiểm tra các hồ sơ trình duyệt hiện có trước. Thông tin đăng nhập chỉ được lưu trên thiết bị này.",
+  "accounts.autoFindHint": "Chọn tìm thông tin đăng nhập của bạn để kiểm tra hồ sơ trình duyệt cục bộ. Thông tin đăng nhập được giữ trên thiết bị này.",
   "accounts.searching": "Đang tìm phiên đăng nhập trong trình duyệt…",
   "accounts.searchDone": "Đã kiểm tra {count} hồ sơ trình duyệt.",
   "accounts.noSession": "Không tìm thấy phiên đăng nhập có thể sử dụng. Hãy mở trang web, đăng nhập rồi quay lại đây.",

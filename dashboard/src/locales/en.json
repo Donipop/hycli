@@ -469,7 +469,7 @@
   "agents.logsHint": "Both you and your agent can read the progress and work log.",
   "errors.job_running": "This website is already being prepared. Open its work log to follow the progress.",
   "accounts.autoFind": "Find my sign-in",
-  "accounts.autoFindHint": "Hycli checks your existing browser profiles first. Sign-in details stay on this device.",
+  "accounts.autoFindHint": "Choose Find my sign-in to check local browser profiles. Sign-in details stay on this device.",
   "accounts.searching": "Looking through your browsers…",
   "accounts.searchDone": "Checked {count} browser profiles.",
   "accounts.noSession": "No usable sign-in was found. Open the website, sign in, then return here.",

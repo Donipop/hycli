@@ -377,7 +377,7 @@
   "errors.storage_locked": "Desbloquea el almacén de credenciales de tu dispositivo y vuelve a intentarlo.",
   "accounts.alreadySignedIn": "¿Ya has iniciado sesión?",
   "accounts.autoFind": "Buscar mi sesión iniciada",
-  "accounts.autoFindHint": "Hycli comprueba primero los perfiles de tus navegadores. Los datos de acceso permanecen en este dispositivo.",
+  "accounts.autoFindHint": "Elige buscar tu sesión para revisar los perfiles locales del navegador. Los datos de inicio de sesión permanecen en este dispositivo.",
   "accounts.searching": "Buscando en tus navegadores…",
   "accounts.searchDone": "Se han comprobado {count} perfiles de navegador.",
   "accounts.noSession": "No se ha encontrado ninguna sesión válida. Abre el sitio web, inicia sesión y vuelve aquí.",

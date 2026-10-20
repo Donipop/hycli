@@ -469,7 +469,7 @@
   "agents.logsHint": "Ty i agent możecie czytać postępy i dziennik pracy.",
   "errors.job_running": "Ta strona jest już przygotowywana. Otwórz jej dziennik pracy, aby śledzić postępy.",
   "accounts.autoFind": "Znajdź moje logowanie",
-  "accounts.autoFindHint": "Hycli najpierw sprawdza istniejące profile przeglądarek. Dane logowania pozostają na tym urządzeniu.",
+  "accounts.autoFindHint": "Wybierz wyszukiwanie swojego logowania, aby sprawdzić lokalne profile przeglądarki. Dane logowania pozostają na tym urządzeniu.",
   "accounts.searching": "Przeszukiwanie przeglądarek…",
   "accounts.searchDone": "Sprawdzono {count} profili przeglądarek.",
   "accounts.noSession": "Nie znaleziono logowania, którego można użyć. Otwórz stronę, zaloguj się i wróć tutaj.",

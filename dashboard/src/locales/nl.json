@@ -377,7 +377,7 @@
   "errors.storage_locked": "Ontgrendel de gegevenskluis van je apparaat en probeer het opnieuw.",
   "accounts.alreadySignedIn": "Al ingelogd?",
   "accounts.autoFind": "Mijn aanmelding zoeken",
-  "accounts.autoFindHint": "Hycli controleert eerst je bestaande browserprofielen. Je inloggegevens blijven op dit apparaat.",
+  "accounts.autoFindHint": "Kies Mijn aanmelding zoeken om lokale browserprofielen te controleren. Aanmeldgegevens blijven op dit apparaat.",
   "accounts.searching": "Je browsers worden doorzocht…",
   "accounts.searchDone": "{count} browserprofielen gecontroleerd.",
   "accounts.noSession": "Geen bruikbare aanmelding gevonden. Open de website, log in en kom hier terug.",

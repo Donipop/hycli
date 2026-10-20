@@ -342,7 +342,7 @@
   "accounts.cookieCount": "저장된 로그인 정보: {count}",
   "accounts.signedIn": "로그인됨",
   "accounts.autoFind": "내 로그인 찾기",
-  "accounts.autoFindHint": "Hycli가 먼저 기존 브라우저 프로필을 확인합니다. 로그인 정보는 이 기기에만 보관됩니다.",
+  "accounts.autoFindHint": "내 로그인 찾기를 선택하면 로컬 브라우저 프로필을 확인합니다. 로그인 정보는 이 기기에만 보관됩니다.",
   "accounts.searching": "브라우저에서 로그인 정보를 찾는 중…",
   "accounts.searchDone": "브라우저 프로필 {count}개를 확인했습니다.",
   "accounts.noSession": "사용할 수 있는 로그인을 찾지 못했습니다. 웹사이트를 열어 로그인한 뒤 여기로 돌아오세요.",

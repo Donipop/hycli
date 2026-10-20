@@ -469,7 +469,7 @@
   "agents.logsHint": "Anda dan agen Anda dapat membaca perkembangan dan log kerja.",
   "errors.job_running": "Situs web ini sedang disiapkan. Buka log kerjanya untuk mengikuti perkembangan.",
   "accounts.autoFind": "Temukan login saya",
-  "accounts.autoFindHint": "Hycli memeriksa profil browser Anda yang sudah ada terlebih dahulu. Detail login tetap tersimpan di perangkat ini.",
+  "accounts.autoFindHint": "Pilih Cari login saya untuk memeriksa profil browser lokal. Detail login tetap berada di perangkat ini.",
   "accounts.searching": "Mencari di browser Anda…",
   "accounts.searchDone": "{count} profil browser telah diperiksa.",
   "accounts.noSession": "Tidak ditemukan login yang dapat digunakan. Buka situs web, masuk, lalu kembali ke sini.",

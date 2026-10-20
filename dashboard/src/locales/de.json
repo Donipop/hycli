@@ -377,7 +377,7 @@
   "errors.storage_locked": "Entsperre den Anmeldedatenspeicher deines Geräts und versuche es erneut.",
   "accounts.alreadySignedIn": "Schon angemeldet?",
   "accounts.autoFind": "Meine Anmeldung finden",
-  "accounts.autoFindHint": "Hycli prüft zuerst deine vorhandenen Browserprofile. Anmeldedaten bleiben auf diesem Gerät.",
+  "accounts.autoFindHint": "Wähle die Suche nach deiner Anmeldung, um lokale Browserprofile zu prüfen. Anmeldedaten bleiben auf diesem Gerät.",
   "accounts.searching": "Deine Browser werden durchsucht…",
   "accounts.searchDone": "{count} Browserprofile geprüft.",
   "accounts.noSession": "Keine verwendbare Anmeldung gefunden. Öffne die Website, melde dich an und kehre dann hierher zurück.",

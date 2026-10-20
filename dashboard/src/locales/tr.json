@@ -469,7 +469,7 @@
   "agents.logsHint": "Siz ve aracınız ilerlemeyi ve iş günlüğünü okuyabilirsiniz.",
   "errors.job_running": "Bu web sitesi zaten hazırlanıyor. İlerlemeyi izlemek için iş günlüğünü açın.",
   "accounts.autoFind": "Oturum açma bilgilerimi bul",
-  "accounts.autoFindHint": "Hycli önce mevcut tarayıcı profillerinizi kontrol eder. Oturum açma bilgileriniz bu cihazda kalır.",
+  "accounts.autoFindHint": "Yerel tarayıcı profillerini kontrol etmek için Oturumumu bul seçeneğini seçin. Oturum açma bilgileri bu cihazda kalır.",
   "accounts.searching": "Tarayıcılarınızda aranıyor…",
   "accounts.searchDone": "{count} tarayıcı profili kontrol edildi.",
   "accounts.noSession": "Kullanılabilir bir oturum bulunamadı. Web sitesini açıp oturum açın, ardından buraya dönün.",

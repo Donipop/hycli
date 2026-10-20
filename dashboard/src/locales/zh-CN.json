@@ -342,7 +342,7 @@
   "accounts.cookieCount": "已保存的登录信息：{count}",
   "accounts.signedIn": "已登录",
   "accounts.autoFind": "查找我的登录状态",
-  "accounts.autoFindHint": "Hycli 会先检查现有的浏览器配置文件。登录信息只保留在这台设备上。",
+  "accounts.autoFindHint": "选择查找我的登录以检查本地浏览器配置文件。登录信息仅保留在此设备上。",
   "accounts.searching": "正在浏览器中查找登录状态…",
   "accounts.searchDone": "已检查 {count} 个浏览器配置文件。",
   "accounts.noSession": "未找到可用的登录状态。请打开网站并登录，然后返回这里。",
