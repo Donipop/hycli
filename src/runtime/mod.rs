@@ -12,6 +12,8 @@ mod preflight;
 mod recon;
 mod session;
 mod transport;
+#[cfg(test)]
+mod upload_safety_tests;
 mod views;
 
 use crate::{

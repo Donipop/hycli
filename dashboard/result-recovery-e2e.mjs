@@ -1,6 +1,6 @@
 // Production dashboard against an isolated synthetic API, never a live service.
 // Build first, then: BROWSER_BIN=/path/to/chromium node dashboard/result-recovery-e2e.mjs
-// No uploads, credentials, external requests, or disabled browser sandbox.
+// No real file bytes, credentials, external requests, or disabled browser sandbox.
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import fs from 'node:fs/promises';
@@ -36,6 +36,22 @@ const server = createServer(async (req, res) => {
       if (holdSummary) await new Promise(resolve => { releaseSummary = resolve; });
       else await new Promise(r => setTimeout(r,150));
       result = {job:child};
+    } else if (req.url === '/api/sites/site/actions/upload' && req.method === 'POST') {
+      const approval = {id:'upload-approval-'+(state.approvals.length+1), status:'pending', site_id:'site', site_title:'Example', action_id:'upload', action_title:'Upload document', inputs:[{label:'Document', value:input.inputs.document}], expires_at:new Date(Date.now()+60000).toISOString()};
+      state.approvals.push(approval);
+      await new Promise(r => setTimeout(r,150));
+      result = {approval};
+    } else if (req.url.startsWith('/api/approvals/') && req.method === 'POST') {
+      const approval = state.approvals.find(a => a.id === req.url.split('/')[3]);
+      assert.equal(approval?.status,'pending','Only a pending synthetic approval can be resolved');
+      if (req.url.endsWith('/reject')) { approval.status = 'rejected'; result = {}; }
+      else if (req.url.endsWith('/approve')) {
+        approval.status = 'approved';
+        const completed = job('Upload document','completed',{result:{message:'Synthetic upload accepted', document:approval.inputs[0].value}});
+        state.jobs.unshift(completed);
+        await new Promise(r => setTimeout(r,150));
+        result = {job:completed};
+      } else { res.writeHead(404); res.end(); return; }
     } else { res.writeHead(404); res.end(); return; }
     res.writeHead(200, {'Content-Type':'application/json'}); res.end(JSON.stringify(result)); return;
   }
@@ -184,6 +200,63 @@ try {
   assert.equal(await dialog().locator('.summary-operation').count(),0);
   assert.equal(summaryCount,6);
   console.log('PASS: Activity retry supersedes observed accepted child and clears old failure');
+  await close();
+  const uploadPath = '/synthetic host/Project Files/report final.pdf';
+  state.sites[0].writes = true;
+  state.sites[0].actions = [{id:'upload',title:'Upload document',description:'Send a document to the synthetic service.',effect:'write',verified:true,accepts_account:false,inputs:[{id:'document',label:'Document',type:'file',required:true,hint:'PDF document.'}]}];
+  const actionPosts = () => requests.filter(r => r.method === 'POST' && r.path === '/api/sites/site/actions/upload');
+  const approvalPosts = suffix => requests.filter(r => r.method === 'POST' && r.path.startsWith('/api/approvals/') && r.path.endsWith(suffix));
+  const openUpload = async () => {
+    await page.goto(origin+'/#websites');
+    await page.reload({waitUntil:'domcontentloaded'});
+    await page.getByRole('button',{name:'Example',exact:true}).click();
+    await dialog().getByRole('button',{name:/Upload document/}).click();
+  };
+  await openUpload();
+  await dialog().getByText('PDF document. '+en['actions.filePathHint'],{exact:true}).waitFor();
+  const fileInput = () => dialog().getByRole('textbox');
+  await button(dialog(),'actions.review').click();
+  assert.equal(await fileInput().evaluate(element => element.validity.valueMissing),true,'Required file path is validated before submission');
+  assert.equal(actionPosts().length,0,'Missing path sends no action POST');
+  await fileInput().fill(uploadPath);
+  assert.equal(await fileInput().inputValue(),uploadPath,'Spaces in explicit host path survive input');
+  await button(dialog(),'common.cancel').click();
+  assert.equal(actionPosts().length,0,'Cancelling input sends no action POST');
+  await openUpload();
+  await fileInput().fill(uploadPath);
+  await button(dialog(),'actions.review').dblclick();
+  await dialog().locator('.review-details').getByText(uploadPath,{exact:true}).waitFor();
+  assert.equal(actionPosts().length,1,'Repeated review clicks create only one approval');
+  assert.equal(actionPosts()[0].input.inputs.document,uploadPath,'Exact user path reaches action request');
+  await button(dialog(),'common.cancel').click();
+  await dialog().waitFor({state:'hidden'});
+  assert.equal(approvalPosts('/reject').length,1);
+  assert.equal(approvalPosts('/approve').length,0,'Cancelling approval performs no upload');
+  await openUpload();
+  await fileInput().fill(uploadPath);
+  await button(dialog(),'actions.review').dblclick();
+  await dialog().locator('.review-details').getByText(uploadPath,{exact:true}).waitFor();
+  await close();
+  await page.locator('.approval-banner').click();
+  await dialog().locator('.review-details').getByText(uploadPath,{exact:true}).waitFor();
+  const screenshotDir = path.join(root,'test-results/file-upload');
+  await fs.mkdir(screenshotDir,{recursive:true});
+  await dialog().screenshot({path:path.join(screenshotDir,'synthetic-approval.png')});
+  await button(dialog(),'safety.allowOnce').dblclick();
+  await dialog().getByText('Synthetic upload accepted',{exact:true}).waitFor();
+  assert.equal(approvalPosts('/approve').length,1,'Repeated approval clicks execute once');
+  assert.equal(actionPosts().length,2,'Only the two explicit review submissions create actions');
+  await dialog().screenshot({path:path.join(screenshotDir,'synthetic-result.png')});
+  await close();
+  await visit();
+  await open('Upload document');
+  await dialog().getByText('Synthetic upload accepted',{exact:true}).waitFor();
+  await dialog().getByText(uploadPath,{exact:true}).waitFor();
+  await close(); await open('Upload document');
+  await dialog().getByText('Synthetic upload accepted',{exact:true}).waitFor();
+  assert.equal(actionPosts().length,2,'Result close/reopen never repeats the action');
+  assert.equal(approvalPosts('/approve').length,1,'Result close/reopen never repeats approval');
+  console.log('PASS: synthetic upload host-path input, required validation, cancel/reopen, exact approval and result, repeated-click guards; no real file transfer claimed');
   assert.deepEqual(errors,[]);
   console.log('PASS: cancelled summary explicit retry and accepted-write/failed-refresh guard');
   console.log('RESULT: synthetic production-dashboard regression passed; not live-service verification');

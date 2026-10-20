@@ -30,7 +30,25 @@ fn command(root: &Path, args: &[&str]) -> tokio::process::Command {
         .current_dir(env!("CARGO_MANIFEST_DIR"));
     command
 }
-async fn input(root: &Path, args: &[&str], value: &str) -> std::process::Output {
+struct CommandOutput {
+    output: std::process::Output,
+    label: String,
+}
+impl std::ops::Deref for CommandOutput {
+    type Target = std::process::Output;
+    fn deref(&self) -> &Self::Target {
+        &self.output
+    }
+}
+async fn input(root: &Path, args: &[&str], value: &str) -> CommandOutput {
+    // Only fixture command/operation names, never stdin, --value, or its value.
+    let label = args
+        .iter()
+        .filter(|arg| **arg != "--allow-local")
+        .take(2)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut child = command(root, args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -44,15 +62,17 @@ async fn input(root: &Path, args: &[&str], value: &str) -> std::process::Output 
         .write_all(value.as_bytes())
         .await
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(45), child.wait_with_output())
+    let output = tokio::time::timeout(Duration::from_secs(45), child.wait_with_output())
         .await
         .unwrap()
-        .unwrap()
+        .unwrap();
+    CommandOutput { output, label }
 }
-fn successful(output: std::process::Output) -> Value {
+fn successful(output: CommandOutput) -> Value {
     assert!(
         output.status.success(),
-        "stdout={} stderr={}",
+        "command={} stdout={} stderr={}",
+        output.label,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

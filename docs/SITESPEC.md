@@ -130,3 +130,45 @@ One cross-process grant lock covers pending-state persistence, one bounded excha
 Grant storage keeps the existing vault protection contract. It uses OS-keyring encryption where available and private-file protection otherwise. An existing encrypted vault never falls back to plaintext when its key is unavailable. The actual protection mode remains visible through existing vault status. The existing store initialization behavior is unchanged; this feature adds no keyring setup flow or OS security-setting changes.
 
 Private pagination handles survive verified token rotation within the same immutable grant owner and configuration. Replacing or removing the grant, changing the definition or changing verified authority invalidates them. An unverified rotated candidate never supplies a resource request. Legacy credential and pagination behavior is unchanged.
+
+## Multipart uploads and derived destinations
+
+`body.multipart` uses the same named input map as other bodies. A `type: file`
+field is an explicitly supplied local path; other fields are text. File defaults
+are invalid, including optional defaults. Missing optional files are omitted;
+missing required files fail before preflight or filesystem access. Preflight
+responses cannot choose or replace a local file. Explicit text inputs remain
+literal, even when they contain `{{...}}`.
+
+Any operation declaring a multipart file is a write, regardless of a `read`
+label, search-style method/path, or an otherwise empty body. Existing write and
+approval gates apply. HTTP is the supported multipart transport; explicit
+browser transports fail before preflight instead of silently omitting the body.
+The sender generates the multipart Content-Type boundary, replacing inherited
+Content-Type headers. Explicit file paths are opened as regular files and streamed
+from those same handles in bounded-memory chunks, without a fixed file-size ceiling
+or a second full-file snapshot. Each stream sends only its initial length; early
+EOF, read failures, and observed metadata changes fail the attempt. This does not
+make an in-place file immutable. Files should remain unchanged until the request
+finishes. Failures after dispatch are reported as an unknown action outcome and
+are never automatically replayed; check the destination before trying again.
+
+`derived_target: true` permits an evidenced destination resolved from preflight.
+A templated `base_url` must resolve fully before dispatch; a missing or invalid
+lease never falls back to the source website. Use an empty `path` when the lease
+returns a complete signed URL with a query string, so the signed URL is preserved.
+HTTPS is required except for explicitly enabled loopback fixtures. Existing
+DNS/IP restrictions remain enabled and write requests never follow redirects.
+
+The source account, selection revision, and credential state remain bound to the
+source website and are rechecked after waits and before dispatch. Source-bound
+preflight reads receive source authentication, not destination header templates.
+Cookie-backed source reads retain guarded browser recovery. Static header-auth
+source reads use guarded HTTP, without dropping or mixing their credentials in
+a browser fallback. Final multipart dispatch remains HTTP-only.
+For cross-origin destinations, default and source credential headers are not
+forwarded. Destination signing headers must reference actual, qualified
+non-cookie preflight fields such as `{{step.lease.signature}}`; ambiguous aliases,
+cookie/auth-header extraction, and source-secret echoes are rejected. Generated
+URL, form, JSON, and multipart text fields follow the same provenance boundary.
+File contents are never scanned; explicitly supplied body text remains literal.

@@ -202,6 +202,7 @@ impl Runtime {
                     read_only: true,
                     follow_redirects: false,
                     tls_profile: "standard".into(),
+                    multipart: None,
                 },
                 prepared
                     .query_cursor

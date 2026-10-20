@@ -1535,6 +1535,7 @@ async fn browser_failure_rechecks_binding_before_http_retry() {
         read_only: true,
         follow_redirects: false,
         tls_profile: "standard".into(),
+        multipart: None,
     };
     let response = core
         .retry_read_after_browser(
@@ -1852,4 +1853,142 @@ async fn identity_refresh_permission_denial_preserves_session_but_401_expires_it
         );
     }
     server.abort();
+}
+
+#[tokio::test]
+async fn multipart_upload_sends_the_file_bytes_and_text_field() {
+    let received: Arc<std::sync::Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
+    let sink = received.clone();
+    let (url, server) = host(Router::new().route(
+        "/upload",
+        post(move |body: axum::body::Bytes| {
+            let sink = sink.clone();
+            async move {
+                *sink.lock().unwrap() = Some(body.to_vec());
+                Json(json!({"ok": true}))
+            }
+        }),
+    ))
+    .await;
+
+    let core = runtime();
+    let sp = spec::parse(
+        json!({"spec_version":1,"site":{"name":"fixture","title":"Fixture","base_url":url},"operations":[
+            {"name":"upload","method":"POST","path":"/upload","effect":"write","evidence":"Synthetic multipart upload endpoint",
+             "body":{"multipart":{"avatar":{"type":"file","required":true},"caption":{"type":"string","required":true}}},
+             "response":{"format":"json","required_pointers":["/ok"]}}
+        ]})
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    core.install(&sp).unwrap();
+    allow_changes(&core, "fixture");
+
+    let dir = root();
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("avatar.gif");
+    std::fs::write(&file, b"GIF89a-synthetic-bytes").unwrap();
+
+    let mut args = BTreeMap::new();
+    args.insert("avatar".to_string(), file.to_string_lossy().into_owned());
+    args.insert("caption".to_string(), "hello there".to_string());
+    core.run_op(&sp, "upload", &args).await.unwrap();
+
+    let body = received
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server received the upload");
+    let contains = |needle: &[u8]| body.windows(needle.len()).any(|w| w == needle);
+    assert!(
+        contains(b"GIF89a-synthetic-bytes"),
+        "file bytes not in multipart body"
+    );
+    assert!(
+        contains(b"hello there"),
+        "caption text not in multipart body"
+    );
+    assert!(contains(b"name=\"avatar\""), "file field name missing");
+    assert!(contains(b"filename="), "file part had no filename");
+    assert!(contains(b"name=\"caption\""), "text field name missing");
+    server.abort();
+}
+
+#[tokio::test]
+async fn derived_target_allows_cross_origin_upload_but_a_plain_op_is_blocked() {
+    let got: Arc<std::sync::Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
+    let sink = got.clone();
+    let (upload_url, upload_server) = host(Router::new().route(
+        "/put",
+        post(move |body: axum::body::Bytes| {
+            let sink = sink.clone();
+            async move {
+                *sink.lock().unwrap() = Some(body.to_vec());
+                Json(json!({"ok": true}))
+            }
+        }),
+    ))
+    .await;
+    let lease_base = upload_url.clone();
+    let (site_url, lease_server) = host(Router::new().route(
+        "/lease",
+        get(move || {
+            let lease_base = lease_base.clone();
+            async move { Json(json!({"base": lease_base})) }
+        }),
+    ))
+    .await;
+
+    let op_json = |derived: bool| {
+        json!({"spec_version":1,"site":{"name":"fixture","title":"Fixture","base_url":site_url},"operations":[
+            {"name":"upload","method":"POST","path":"/put","base_url":"{{step.lease.base}}","derived_target":derived,
+             "effect":"write","evidence":"Synthetic derived cross-origin upload",
+             "preflight":[{"name":"lease","path":"/lease","extract":{"base":"json:/base"}}],
+             "body":{"multipart":{"file":{"type":"file","required":true}}},
+             "response":{"format":"json","required_pointers":["/ok"]}}
+        ]})
+    };
+
+    let dir = root();
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("pic.png");
+    std::fs::write(&file, b"synthetic-png-bytes").unwrap();
+    let mut args = BTreeMap::new();
+    args.insert("file".to_string(), file.to_string_lossy().into_owned());
+
+    // Opt-in derived_target: the cross-origin (different port) upload is allowed.
+    let core = runtime();
+    let sp = spec::parse(op_json(true).to_string().as_bytes()).unwrap();
+    core.install(&sp).unwrap();
+    allow_changes(&core, "fixture");
+    core.run_op(&sp, "upload", &args).await.unwrap();
+    let body = got
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("cross-origin upload received");
+    assert!(
+        body.windows(19).any(|w| w == b"synthetic-png-bytes"),
+        "file bytes not delivered cross-origin"
+    );
+
+    // Without the opt-in, the same cross-origin target is rejected and never hit.
+    *got.lock().unwrap() = None;
+    let core2 = runtime();
+    let sp2 = spec::parse(op_json(false).to_string().as_bytes()).unwrap();
+    core2.install(&sp2).unwrap();
+    allow_changes(&core2, "fixture");
+    let outcome = core2.run_op(&sp2, "upload", &args).await;
+    assert!(
+        outcome.is_err(),
+        "a plain op must not reach a cross-origin target"
+    );
+    assert!(
+        got.lock().unwrap().is_none(),
+        "cross-origin server must not be hit"
+    );
+
+    upload_server.abort();
+    lease_server.abort();
 }

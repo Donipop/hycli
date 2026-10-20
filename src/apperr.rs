@@ -152,6 +152,7 @@ impl AppError {
             code,
             msg: public_code.into(),
             remedy: match public_code {
+                "unsupported_transport" => "Multipart uploads require direct HTTP. Use the operation's http transport; browser transports cannot send file parts.",
                 "oauth_recovery_required" => "The grant cannot be safely refreshed again. Replace it through the existing auth set command using fresh grant JSON on stdin; do not reuse a possibly consumed refresh token.",
                 "oauth_verification_pending" => "The token pair is saved but identity verification has not completed. Retry the read to verify it without another token exchange.",
                 "oauth_configuration_invalid" => "Use an explicit OAuth refresh binding and typed grant JSON through auth set stdin. Keep token values out of the SiteSpec.",
@@ -177,6 +178,7 @@ impl AppError {
                 "unsafe_target" | "local_target" => "Check the destination. For a trusted local website, use --allow-local explicitly.",
                 "browser_diagnostic_unsupported" => "Browser observation is unavailable because read-only, exact-origin enforcement is not verified for every browser network channel. Use accounts observe without --browser for a known same-origin endpoint. No browser was launched or session changed.",
                 "cancelled" | "interrupted" => "Review the activity entry in the dashboard before retrying.",
+                "request_lease_lost" => "This request lost its execution slot. Wait for other activity to finish, then start a new request.",
                 "request_failed" | "timeout" => "Check the website and your connection, then retry the read or prepare the website again.",
                 "no_actions" => "Open the website in your browser and connect its account, then retry preparation with the available evidence.",
                 _ => "",

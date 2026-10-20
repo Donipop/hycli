@@ -117,6 +117,11 @@ pub struct Operation {
     pub base_url: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub transport: String,
+    /// Opt-in: this operation's target URL is derived at runtime from a preflight
+    /// value (for example an upload lease), so it may be cross-origin to the
+    /// static base. Only set by a prepared spec for an upload step.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub derived_target: bool,
     #[serde(default)]
     pub auth: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -188,10 +193,17 @@ pub struct Body {
     pub json_template: Option<Value>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub form: std::collections::BTreeMap<String, Param>,
+    /// multipart/form-data fields. A param with type "file" carries a local
+    /// filesystem path sent as a file part; any other type is a text part.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub multipart: std::collections::BTreeMap<String, Param>,
 }
 impl Body {
     pub fn inputs(&self) -> impl Iterator<Item = (&String, &Param)> {
-        self.json.iter().chain(self.form.iter())
+        self.json
+            .iter()
+            .chain(self.form.iter())
+            .chain(self.multipart.iter())
     }
     pub fn content_type(&self) -> &'static str {
         if self.form.is_empty() {

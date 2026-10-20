@@ -33,7 +33,12 @@ impl Runtime {
         if let Some(p) = &op.pagination {
             wire_inputs.remove(&p.input);
         }
-        let (url, _) = sp.build_request(op, &wire_inputs)?;
+        let (request_url, _) = sp.build_request(op, &wire_inputs)?;
+        let url = if op.derived_target {
+            sp.site.base_url.clone()
+        } else {
+            request_url
+        };
         let explicit_account = account.is_some_and(|value| !value.is_empty());
         let mut account = match account {
             Some(value) => value.to_owned(),
@@ -183,8 +188,7 @@ impl Runtime {
             self.execute_observed(request, &self.state.settings()?.locale)
                 .await
         } else {
-            self.execute_definition(sp, request, None, false, None)
-                .await
+            Box::pin(self.execute_definition(sp, request, None, false, None)).await
         }
     }
     /// Approval IDs are validated when supplied by the dashboard handler; direct CLI/MCP calls execute when writes are enabled.
@@ -202,8 +206,7 @@ impl Runtime {
         job_id: Option<&str>,
     ) -> AppResult<(OpResult, i64)> {
         let sp = self.spec(&request.site_id)?;
-        self.execute_definition(&sp, request, approval, true, job_id)
-            .await
+        Box::pin(self.execute_definition(&sp, request, approval, true, job_id)).await
     }
     /// Verify a proposed read without replacing the user's installed definition.
     pub async fn verify_candidate_with_inputs(
@@ -219,9 +222,10 @@ impl Runtime {
             return Err(AppError::api("approval_required", 409));
         }
         let request = self.request(sp, action, inputs, Some(account))?;
-        self.execute_definition(sp, request, None, false, None)
-            .await
+        Box::pin(self.execute_definition(sp, request, None, false, None)).await
     }
+    // Callers heap-own this large operation state so it is not embedded in every
+    // outer CLI/MCP future. The box stays in the same task and drops with its owner.
     async fn execute_definition(
         &self,
         sp: &Spec,
@@ -245,14 +249,56 @@ impl Runtime {
             wire_inputs.remove(&p.input);
         }
         let (mut url, mut body) = sp.build_request(op, &wire_inputs)?;
+        let source_url = if op.derived_target {
+            sp.site.base_url.clone()
+        } else {
+            url.clone()
+        };
+        let mut multipart = if op.body.as_ref().is_some_and(|b| !b.multipart.is_empty()) {
+            Some(sp.build_multipart(op, &wire_inputs)?)
+        } else {
+            None
+        };
+        if multipart.is_some() && ["browser", "browser-fetch"].contains(&op.transport.as_str()) {
+            return Err(AppError::api("unsupported_transport", 400));
+        }
         let mut effect =
             policy::rendered_request_effect(op, &request.inputs, &url, body.as_deref());
-        if origin(&url)? != origin(sp.operation_base(op))? {
+        if !op.derived_target && origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
         super::oauth::validate_operation(sp, op, &request.inputs, &request.account_id)?;
         let (mut headers, mut secrets, credential_snapshot) =
-            self.headers_snapshot(sp, op, &url, &request.account_id)?;
+            self.headers_snapshot(sp, op, &source_url, &request.account_id)?;
+        let mut source_secrets = credential_snapshot
+            .as_ref()
+            .map(|credential| credential.redaction_values())
+            .unwrap_or_default();
+        for (name, value) in &headers {
+            if let Some(auth) = sp
+                .find_auth(&op.auth)
+                .filter(|auth| name.eq_ignore_ascii_case(&auth.header))
+            {
+                source_secrets.push(value.clone());
+                if let Some(token) = value.strip_prefix(&auth.prefix) {
+                    source_secrets.push(token.to_owned());
+                }
+            }
+            if !value.contains("{{")
+                && !["accept", "content-type", "user-agent", "content-md5"]
+                    .iter()
+                    .any(|public| name.eq_ignore_ascii_case(public))
+            {
+                source_secrets.push(value.clone());
+                if name.eq_ignore_ascii_case("authorization") {
+                    if let Some((_, token)) = value.split_once(' ') {
+                        source_secrets.push(token.to_owned());
+                    }
+                }
+            }
+        }
+        let source_header_hash = util::hash(&serde_json::to_vec(&headers)?);
+        let mut destination_inputs = BTreeMap::new();
         effect = effect.combine(policy::request_headers_effect(
             headers
                 .iter()
@@ -279,18 +325,62 @@ impl Runtime {
                 self.policy.verify_consumable(approval_id, &checked)?;
             }
         }
-        if !op.preflight.is_empty() {
-            let mut effective_inputs = request.inputs.clone();
-            self.run_preflight_steps(
-                sp,
-                op,
+        let source_selection = self.state.site(&sp.site.name)?.map(|site| {
+            (
+                site.account_selection_revision,
+                site.account_id,
+                site.account_binding,
+            )
+        });
+        let check_source_authority = || {
+            let current_selection = self.state.site(&sp.site.name)?.map(|site| {
+                (
+                    site.account_selection_revision,
+                    site.account_id,
+                    site.account_binding,
+                )
+            });
+            if current_selection != source_selection {
+                return Err(AppError::api("auth_required", 401));
+            }
+            self.ensure_credential_snapshot(
+                &sp.site.name,
+                &source_url,
                 &request.account_id,
                 credential_snapshot.as_ref(),
-                &mut effective_inputs,
-                &mut secrets,
-            )
-            .await?;
-            let (rebuilt_url, rebuilt_body) = sp.build_request(op, &effective_inputs)?;
+            )?;
+            let (current, _, _) =
+                self.headers_snapshot(sp, op, &source_url, &request.account_id)?;
+            if util::hash(&serde_json::to_vec(&current)?) != source_header_hash {
+                return Err(AppError::api("auth_required", 401));
+            }
+            Ok(())
+        };
+        let mut effective_inputs = request.inputs.clone();
+        if !op.preflight.is_empty() {
+            destination_inputs = self
+                .run_preflight_steps(
+                    sp,
+                    op,
+                    &request.account_id,
+                    credential_snapshot.as_ref(),
+                    &mut effective_inputs,
+                    &mut secrets,
+                    &check_source_authority,
+                )
+                .await?;
+            for step in &op.preflight {
+                for (field, expression) in &step.extract {
+                    if super::preflight::source_credential_expression(expression) {
+                        if let Some(value) =
+                            destination_inputs.get(&format!("step.{}.{field}", step.name))
+                        {
+                            source_secrets.push(value.clone());
+                        }
+                    }
+                }
+            }
+            let (rebuilt_url, rebuilt_body) = sp.build_final_request(op, &effective_inputs)?;
             let post_effect = policy::rendered_request_effect(
                 op,
                 &effective_inputs,
@@ -304,20 +394,91 @@ impl Runtime {
                 effect = effect.combine(post_effect);
                 self.ensure_writes(&sp.site.name)?;
             }
-            if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
+            if !op.derived_target && origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
                 return Err(AppError::api("unsafe_target", 400));
             }
             url = rebuilt_url;
             body = rebuilt_body;
+            if op.body.as_ref().is_some_and(|b| !b.multipart.is_empty()) {
+                let mut multipart_inputs = effective_inputs.clone();
+                for (name, param) in &op.body.as_ref().expect("multipart body").multipart {
+                    if param.kind == "file" {
+                        multipart_inputs.remove(name);
+                        if let Some(path) = request.inputs.get(name) {
+                            multipart_inputs.insert(name.clone(), path.clone());
+                        }
+                    }
+                }
+                multipart = Some(sp.build_multipart(op, &multipart_inputs)?);
+            }
             let empty_resolved = BTreeMap::new();
-            for (_, v) in &mut headers {
-                if v.contains("{{") {
-                    *v = crate::spec::interpolate_template_str(
-                        v,
+            let mut credential_headers: Vec<String> = credential_snapshot
+                .as_ref()
+                .map(|credential| credential.request_headers(&source_url))
+                .transpose()?
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            if let Some(auth) = sp
+                .find_auth(&op.auth)
+                .filter(|auth| matches!(auth.kind.as_str(), "header" | "derived"))
+            {
+                credential_headers.push(auth.header.clone());
+            }
+            for (name, value) in &mut headers {
+                if credential_headers
+                    .iter()
+                    .any(|private| name.eq_ignore_ascii_case(private))
+                {
+                    continue;
+                }
+                if let Some(template) = op
+                    .headers
+                    .get(name)
+                    .or_else(|| sp.defaults.headers.get(name))
+                    .filter(|template| template.contains("{{"))
+                {
+                    *value = crate::spec::interpolate_template_str(
+                        template,
                         &empty_resolved,
                         &effective_inputs,
                     );
                 }
+            }
+        }
+        if op.preflight.is_empty() {
+            (url, body) = sp.build_final_request(op, &wire_inputs)?;
+        }
+        if origin(&url)? != origin(&source_url)? {
+            super::preflight::validate_destination_url(
+                sp,
+                op,
+                &destination_inputs,
+                &source_secrets,
+                &url,
+            )?;
+            super::preflight::validate_generated_request(
+                op,
+                &request.inputs,
+                &effective_inputs,
+                &destination_inputs,
+                &source_secrets,
+            )?;
+            headers =
+                super::preflight::destination_headers(op, &destination_inputs, &source_secrets)?;
+        }
+        check_source_authority()?;
+        // A derived_target op is the one place a request may leave the site's
+        // declared origin. Validate the final URL here so it is covered whether
+        // or not a preflight ran: require https (loopback for local tests) so a
+        // file is never uploaded in cleartext.
+        if op.derived_target {
+            let parsed = crate::net::validate_url(&url)?;
+            let host = parsed.host_str().unwrap_or_default();
+            let local = host == "127.0.0.1" || host == "localhost" || host == "::1";
+            if parsed.scheme() != "https" && !local {
+                return Err(AppError::api("unsafe_target", 400));
             }
         }
         effect = effect.combine(policy::request_headers_effect(
@@ -336,7 +497,7 @@ impl Runtime {
         }
         self.ensure_credential_snapshot(
             &sp.site.name,
-            &url,
+            &source_url,
             &request.account_id,
             credential_snapshot.as_ref(),
         )?;
@@ -354,11 +515,14 @@ impl Runtime {
             read_only: effect == Effect::Read,
             follow_redirects: effect == Effect::Read,
             tls_profile: sp.defaults.tls_profile.clone(),
+            multipart,
         };
         let direct_key =
             policy::Policy::strategy_key(&op.method, &url, "http", &request.account_id);
         let prefer_browser_fetch = op.transport == "browser-fetch"
-            || (!is_local_url
+            || (req_input.multipart.is_none()
+                && !op.derived_target
+                && !is_local_url
                 && op.transport.is_empty()
                 && (self
                     .policy
@@ -429,7 +593,10 @@ impl Runtime {
             )
             .await
         } else {
-            let fetched = self.network.fetch(req_input.clone()).await;
+            let fetched = self
+                .network
+                .fetch_guarded(req_input.clone(), None, &check_source_authority)
+                .await;
             match fetched {
                 Ok(r)
                     if effect == Effect::Read
@@ -481,6 +648,9 @@ impl Runtime {
                         | "blocked_by_site"
                         | "data_invalid"
                         | "auth_required"
+                        // Network maps lease loss after any write dispatch to
+                        // action_outcome_unknown; this label is pre-dispatch.
+                        | "request_lease_lost"
                 );
                 return Err(if effect != Effect::Read && !pre_dispatch_err {
                     AppError::api("action_outcome_unknown", 502)
@@ -608,5 +778,47 @@ impl Runtime {
             },
             attempt,
         ))
+    }
+}
+
+#[cfg(test)]
+mod stack_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn action_adapters_do_not_embed_the_operation_state_machine() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/action-future")
+            .join(util::id());
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        let sp = crate::spec::parse(
+            br#"{"site":{"name":"future-fixture","base_url":"https://example.test"},"operations":[{"name":"read","method":"GET","path":"/items","effect":"read"}]}"#,
+        )
+        .unwrap();
+        let request = core
+            .request(&sp, "read", BTreeMap::new(), Some(""))
+            .unwrap();
+        let inputs = BTreeMap::new();
+        {
+            let operation = core.execute_definition(&sp, request.clone(), None, false, None);
+            let installed = core.execute_for_job(request, None, None);
+            let direct = core.run_op(&sp, "read", &inputs);
+            let candidate = core.verify_candidate_with_inputs(&sp, "read", "", BTreeMap::new());
+            let operation_bytes = std::mem::size_of_val(&operation);
+            for adapter_bytes in [
+                std::mem::size_of_val(&installed),
+                std::mem::size_of_val(&direct),
+                std::mem::size_of_val(&candidate),
+            ] {
+                assert!(
+                    adapter_bytes < operation_bytes,
+                    "adapter embeds the operation state: {adapter_bytes} >= {operation_bytes}"
+                );
+            }
+            // Construction and dropping do not poll a command or detach work.
+        }
+        assert!(core.state.read().unwrap().jobs.is_empty());
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

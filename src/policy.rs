@@ -113,6 +113,13 @@ pub fn dangerous_intent(value: &str) -> bool {
             .any(|w| lower.contains(w))
 }
 pub fn operation_effect(op: &Operation, args: &BTreeMap<String, String>) -> Effect {
+    if op
+        .body
+        .as_ref()
+        .is_some_and(|body| body.multipart.values().any(|p| p.kind == "file"))
+    {
+        return Effect::Write;
+    }
     let method = op.method.to_ascii_uppercase();
     if dangerous_intent(&op.path) || dangerous_intent(&op.name) {
         return Effect::Write;
@@ -539,6 +546,8 @@ pub struct Approval {
     pub request: Option<ExecutionRequest>,
 }
 
+const REQUEST_LEASE_MS: i64 = 120_000;
+
 pub struct Policy {
     conn: Mutex<Connection>,
     interval_ms: i64,
@@ -763,7 +772,12 @@ impl Policy {
                     };
                     tx.execute(
                         "UPDATE request_gate SET lease=?2,lease_until=?3,next_at=?4 WHERE scope=?1",
-                        params![scope, token, now + 120_000, now + self.interval_ms + jitter],
+                        params![
+                            scope,
+                            token,
+                            now + REQUEST_LEASE_MS,
+                            now + self.interval_ms + jitter
+                        ],
                     )?;
                     tx.execute(
                         "INSERT INTO request_event(scope,at) VALUES(?1,?2)",
@@ -782,6 +796,27 @@ impl Policy {
             }
             tokio::time::sleep(Duration::from_millis(wait.min(500) as u64)).await;
         }
+    }
+    /// Extend only an unexpired lease still owned by this exact token. Never
+    /// reacquire or revive an expired lease: the caller must stop its attempt.
+    pub(crate) fn renew(&self, scope: &str, token: &str) -> AppResult<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| AppError::api("internal", 500))?;
+        // Get the SQLite write lock before sampling time. Otherwise a busy
+        // database could let a stale pre-wait timestamp revive an expired lease.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now = util::unix_ms();
+        let changed = tx.execute(
+            "UPDATE request_gate SET lease_until=?3 WHERE scope=?1 AND lease=?2 AND lease<>'' AND lease_until>?4",
+            params![scope, token, now + REQUEST_LEASE_MS, now],
+        )?;
+        if changed != 1 {
+            return Err(AppError::api("request_lease_lost", 409));
+        }
+        tx.commit()?;
+        Ok(())
     }
     pub fn release(
         &self,
@@ -1003,28 +1038,39 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
         {
             return Err(AppError::api("data_invalid", 400));
         }
-        let destination = crate::net::validate_url(sp.operation_base(op))?;
-        if destination.query().is_some() || destination.fragment().is_some() {
-            return Err(AppError::api("bad_url", 400));
-        }
-        if let Some(auth) = sp.find_auth(&op.auth) {
-            if auth.kind == "header" {
-                let scope = crate::net::validate_url(if auth.origin.is_empty() {
-                    &sp.site.base_url
-                } else {
-                    &auth.origin
-                })?;
-                if destination.origin() != scope.origin() {
-                    return Err(AppError::api("unsafe_target", 400));
-                }
-            } else if matches!(auth.kind.as_str(), "browser" | "derived") {
-                let scope = crate::net::validate_url(if auth.origin.is_empty() {
-                    sp.site.source_url()
-                } else {
-                    &auth.origin
-                })?;
-                if !crate::net::same_site_origin(&destination, &scope) {
-                    return Err(AppError::api("unsafe_target", 400));
+        // A templated base (for example a derived_target upload whose target
+        // comes from a preflight/lease response) is resolved at runtime and
+        // cannot be checked as a static URL here. A non-derived op with a
+        // templated base is still rejected at execution by the origin gate.
+        if !sp.operation_base(op).contains("{{") {
+            let destination = crate::net::validate_url(sp.operation_base(op))?;
+            if destination.query().is_some() || destination.fragment().is_some() {
+                return Err(AppError::api("bad_url", 400));
+            }
+            let authority = if op.derived_target {
+                crate::net::validate_url(&sp.site.base_url)?
+            } else {
+                destination.clone()
+            };
+            if let Some(auth) = sp.find_auth(&op.auth) {
+                if auth.kind == "header" {
+                    let scope = crate::net::validate_url(if auth.origin.is_empty() {
+                        &sp.site.base_url
+                    } else {
+                        &auth.origin
+                    })?;
+                    if authority.origin() != scope.origin() {
+                        return Err(AppError::api("unsafe_target", 400));
+                    }
+                } else if matches!(auth.kind.as_str(), "browser" | "derived") {
+                    let scope = crate::net::validate_url(if auth.origin.is_empty() {
+                        sp.site.source_url()
+                    } else {
+                        &auth.origin
+                    })?;
+                    if !crate::net::same_site_origin(&authority, &scope) {
+                        return Err(AppError::api("unsafe_target", 400));
+                    }
                 }
             }
         }
@@ -1676,5 +1722,48 @@ mod bounded_graphql_tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod transfer_lease_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn renewal_requires_the_current_unexpired_token_and_never_revives_it() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".cache/transfer-lease-tests")
+            .join(util::id());
+        let policy = Policy::with_limits(&root.join("policy.db"), 0, 100).unwrap();
+        let scope = "https://fixture.test|account";
+        let token = policy.acquire(scope).await.unwrap();
+        policy.renew(scope, &token).unwrap();
+        assert_eq!(
+            policy.renew(scope, "wrong-token").unwrap_err().public_code,
+            "request_lease_lost"
+        );
+        policy
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE request_gate SET lease_until=?2 WHERE scope=?1",
+                params![scope, util::unix_ms() - 1],
+            )
+            .unwrap();
+        assert_eq!(
+            policy.renew(scope, &token).unwrap_err().public_code,
+            "request_lease_lost"
+        );
+        let replacement = policy.acquire(scope).await.unwrap();
+        assert_ne!(replacement, token);
+        assert!(policy.renew(scope, &token).is_err());
+        // Dropping the old owner must not release a replacement lease.
+        policy.release(scope, &token, 0, None, false).unwrap();
+        policy.renew(scope, &replacement).unwrap();
+        policy.release(scope, &replacement, 0, None, false).unwrap();
+        assert!(policy.renew(scope, &replacement).is_err());
+        drop(policy);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

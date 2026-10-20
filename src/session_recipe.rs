@@ -291,6 +291,7 @@ impl Runtime {
                 read_only: true,
                 follow_redirects: false,
                 tls_profile: "standard".into(),
+                multipart: None,
             })
             .await?;
         if !response.successful() {
@@ -327,6 +328,7 @@ impl Runtime {
                 read_only: true,
                 follow_redirects: false,
                 tls_profile: "standard".into(),
+                multipart: None,
             })
             .await?;
         if anonymous.successful() {
