@@ -120,6 +120,7 @@
   "actions.summarizing": "Preparing a summary…",
   "actions.noResults": "No matching actions",
   "actions.rawValue": "Value",
+  "actions.filePathHint": "Enter the full file path on the computer running Hycli, not the browser device.",
   "actions.fieldPlaceholder": "Enter {field}",
   "actions.optionalField": "Optional",
   "actions.validationRequired": "Enter a value for {field}.",

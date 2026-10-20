@@ -120,6 +120,7 @@
   "actions.summarizing": "Préparation d’un résumé…",
   "actions.noResults": "Aucune action correspondante",
   "actions.rawValue": "Valeur",
+  "actions.filePathHint": "Saisissez le chemin complet du fichier sur l’ordinateur exécutant Hycli, et non sur l’appareil du navigateur.",
   "actions.fieldPlaceholder": "Saisissez {field}",
   "actions.optionalField": "Facultatif",
   "actions.validationRequired": "Saisissez une valeur pour {field}.",

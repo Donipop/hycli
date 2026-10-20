@@ -225,7 +225,15 @@ async fn account_rotation_disconnect_or_selection_change_during_preflight_preven
             .unwrap()
             .err()
             .expect("changed source authority must fail");
-        assert_eq!(error.public_code, "auth_required");
+        assert_eq!(
+            error.public_code,
+            if change == "disconnect" {
+                "cancelled"
+            } else {
+                "auth_required"
+            },
+            "{change}"
+        );
         assert_eq!(state.leases.load(Ordering::SeqCst), 1);
         assert!(state.received.lock().unwrap().is_empty());
         stop(servers);

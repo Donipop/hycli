@@ -120,6 +120,7 @@
   "actions.summarizing": "सार तैयार हो रहा है…",
   "actions.noResults": "खोज से मेल खाता कोई काम नहीं मिला",
   "actions.rawValue": "मान",
+  "actions.filePathHint": "Hycli चलाने वाले कंप्यूटर पर फ़ाइल का पूरा पथ दर्ज करें, ब्राउज़र वाले डिवाइस पर नहीं।",
   "actions.fieldPlaceholder": "{field} डालें",
   "actions.optionalField": "वैकल्पिक",
   "actions.validationRequired": "{field} में मान डालें।",

@@ -120,6 +120,7 @@
   "actions.summarizing": "要約を作成中…",
   "actions.noResults": "一致する操作がありません",
   "actions.rawValue": "値",
+  "actions.filePathHint": "ブラウザー端末ではなく、Hycliを実行しているコンピューター上のファイルの絶対パスを入力してください。",
   "actions.fieldPlaceholder": "{field}を入力",
   "actions.optionalField": "任意",
   "actions.validationRequired": "{field}を入力してください。",

@@ -120,6 +120,7 @@
   "actions.summarizing": "Menyiapkan ringkasan…",
   "actions.noResults": "Tidak ada tindakan yang cocok",
   "actions.rawValue": "Nilai",
+  "actions.filePathHint": "Masukkan jalur lengkap file di komputer yang menjalankan Hycli, bukan perangkat browser.",
   "actions.fieldPlaceholder": "Masukkan {field}",
   "actions.optionalField": "Opsional",
   "actions.validationRequired": "Masukkan nilai untuk {field}.",

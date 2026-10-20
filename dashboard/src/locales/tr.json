@@ -120,6 +120,7 @@
   "actions.summarizing": "Özet hazırlanıyor…",
   "actions.noResults": "Eşleşen işlem yok",
   "actions.rawValue": "Değer",
+  "actions.filePathHint": "Tarayıcı cihazında değil, Hycli çalıştıran bilgisayardaki tam dosya yolunu girin.",
   "actions.fieldPlaceholder": "{field} girin",
   "actions.optionalField": "İsteğe bağlı",
   "actions.validationRequired": "{field} için bir değer girin.",

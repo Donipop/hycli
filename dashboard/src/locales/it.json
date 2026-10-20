@@ -120,6 +120,7 @@
   "actions.summarizing": "Preparazione di un riepilogo…",
   "actions.noResults": "Nessuna azione corrispondente",
   "actions.rawValue": "Valore",
+  "actions.filePathHint": "Inserisci il percorso completo del file sul computer che esegue Hycli, non sul dispositivo del browser.",
   "actions.fieldPlaceholder": "Inserisci {field}",
   "actions.optionalField": "Facoltativo",
   "actions.validationRequired": "Inserisci un valore per {field}.",

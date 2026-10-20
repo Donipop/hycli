@@ -120,6 +120,7 @@
   "actions.summarizing": "正在生成摘要…",
   "actions.noResults": "没有匹配的操作",
   "actions.rawValue": "值",
+  "actions.filePathHint": "请输入运行 Hycli 的计算机上的完整文件路径，而非浏览器设备上的路径。",
   "actions.fieldPlaceholder": "输入{field}",
   "actions.optionalField": "选填",
   "actions.validationRequired": "请填写{field}。",

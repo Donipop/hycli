@@ -120,6 +120,7 @@
   "actions.summarizing": "Zusammenfassung wird erstellt…",
   "actions.noResults": "Keine passenden Aktionen",
   "actions.rawValue": "Wert",
+  "actions.filePathHint": "Gib den vollständigen Dateipfad auf dem Computer ein, auf dem Hycli läuft, nicht auf dem Browsergerät.",
   "actions.fieldPlaceholder": "{field} eingeben",
   "actions.optionalField": "Optional",
   "actions.validationRequired": "Gib einen Wert für {field} ein.",

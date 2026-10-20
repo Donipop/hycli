@@ -120,6 +120,7 @@
   "actions.summarizing": "正在產生摘要…",
   "actions.noResults": "沒有符合的操作",
   "actions.rawValue": "值",
+  "actions.filePathHint": "請輸入執行 Hycli 的電腦上的完整檔案路徑，而非瀏覽器裝置上的路徑。",
   "actions.fieldPlaceholder": "輸入{field}",
   "actions.optionalField": "選填",
   "actions.validationRequired": "請填寫{field}。",

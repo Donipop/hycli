@@ -120,6 +120,7 @@
   "actions.summarizing": "Preparando um resumo…",
   "actions.noResults": "Nenhuma ação correspondente",
   "actions.rawValue": "Valor",
+  "actions.filePathHint": "Insira o caminho completo do arquivo no computador que executa o Hycli, não no dispositivo do navegador.",
   "actions.fieldPlaceholder": "Informe {field}",
   "actions.optionalField": "Opcional",
   "actions.validationRequired": "Informe um valor para {field}.",

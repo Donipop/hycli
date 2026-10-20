@@ -120,6 +120,7 @@
   "actions.summarizing": "Samenvatting wordt gemaakt…",
   "actions.noResults": "Geen overeenkomende acties",
   "actions.rawValue": "Waarde",
+  "actions.filePathHint": "Voer het volledige bestandspad in op de computer waarop Hycli draait, niet op het browserapparaat.",
   "actions.fieldPlaceholder": "Voer {field} in",
   "actions.optionalField": "Optioneel",
   "actions.validationRequired": "Voer een waarde in voor {field}.",

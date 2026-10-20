@@ -120,6 +120,7 @@
   "actions.summarizing": "요약을 준비하는 중…",
   "actions.noResults": "일치하는 작업이 없습니다",
   "actions.rawValue": "값",
+  "actions.filePathHint": "브라우저 기기가 아닌 Hycli가 실행 중인 컴퓨터의 전체 파일 경로를 입력하세요.",
   "actions.fieldPlaceholder": "{field} 입력",
   "actions.optionalField": "선택 사항",
   "actions.validationRequired": "{field} 값을 입력하세요.",

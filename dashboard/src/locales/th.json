@@ -120,6 +120,7 @@
   "actions.summarizing": "กำลังสรุปผล…",
   "actions.noResults": "ไม่พบคำสั่งที่ตรงกัน",
   "actions.rawValue": "ค่า",
+  "actions.filePathHint": "ป้อนเส้นทางไฟล์แบบเต็มบนคอมพิวเตอร์ที่รัน Hycli ไม่ใช่อุปกรณ์ที่ใช้เบราว์เซอร์",
   "actions.fieldPlaceholder": "ป้อน {field}",
   "actions.optionalField": "ไม่บังคับ",
   "actions.validationRequired": "โปรดป้อนค่าใน {field}",

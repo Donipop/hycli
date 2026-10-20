@@ -120,6 +120,7 @@
   "actions.summarizing": "Đang tạo bản tóm tắt…",
   "actions.noResults": "Không có thao tác phù hợp",
   "actions.rawValue": "Giá trị",
+  "actions.filePathHint": "Nhập đường dẫn đầy đủ đến tệp trên máy tính chạy Hycli, không phải thiết bị dùng trình duyệt.",
   "actions.fieldPlaceholder": "Nhập {field}",
   "actions.optionalField": "Không bắt buộc",
   "actions.validationRequired": "Nhập giá trị cho {field}.",

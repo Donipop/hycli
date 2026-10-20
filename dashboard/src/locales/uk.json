@@ -120,6 +120,7 @@
   "actions.summarizing": "Підготовка підсумку…",
   "actions.noResults": "Відповідних дій не знайдено",
   "actions.rawValue": "Значення",
+  "actions.filePathHint": "Введіть повний шлях до файлу на комп’ютері, де працює Hycli, а не на пристрої з браузером.",
   "actions.fieldPlaceholder": "Введіть: {field}",
   "actions.optionalField": "Необов’язково",
   "actions.validationRequired": "Введіть значення в полі {field}.",

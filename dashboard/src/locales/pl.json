@@ -120,6 +120,7 @@
   "actions.summarizing": "Przygotowywanie podsumowania…",
   "actions.noResults": "Brak pasujących działań",
   "actions.rawValue": "Wartość",
+  "actions.filePathHint": "Podaj pełną ścieżkę pliku na komputerze z uruchomionym Hycli, a nie na urządzeniu z przeglądarką.",
   "actions.fieldPlaceholder": "Wprowadź: {field}",
   "actions.optionalField": "Opcjonalne",
   "actions.validationRequired": "Wprowadź wartość w polu {field}.",

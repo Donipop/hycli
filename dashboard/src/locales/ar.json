@@ -120,6 +120,7 @@
   "actions.summarizing": "جارٍ إعداد الملخص…",
   "actions.noResults": "لا توجد عمليات مطابقة",
   "actions.rawValue": "القيمة",
+  "actions.filePathHint": "أدخل المسار الكامل للملف على الكمبيوتر الذي يشغّل Hycli، وليس جهاز المتصفح.",
   "actions.fieldPlaceholder": "أدخل {field}",
   "actions.optionalField": "اختياري",
   "actions.validationRequired": "أدخل قيمة للحقل {field}.",
