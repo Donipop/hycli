@@ -266,7 +266,7 @@ impl Runtime {
                     _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
                 }
                 if let Ok(current) = self.state.job(&job.id)
-                    && !["queued", "running"].contains(&current.status.as_str())
+                    && ["cancelled", "failed"].contains(&current.status.as_str())
                 {
                     return if !current.error_code.is_empty() {
                         current.error_code
@@ -286,25 +286,18 @@ impl Runtime {
             code = cancelled => Err(crate::apperr::AppError::api(&code, 409)),
         };
         guard.active = false;
+        // Successful actions were conditionally completed by the same runtime
+        // finalizer that still owned their artifact guard. Do not persist twice.
+        if result.is_ok() {
+            return result;
+        }
         let persisted = self.state.update_job(&job.id, |work| {
             if !["queued", "running"].contains(&work.status.as_str()) {
                 return;
             }
             work.finished_at = util::now();
             match &result {
-                Ok((value, _)) if (200..300).contains(&value.status) && value.defense == "none" => {
-                    work.status = "completed".into();
-                    work.phase = "ready".into();
-                    work.progress_done = work.progress_total;
-                    work.result = value.clone().output();
-                    work.note("completed", "", 0, "");
-                }
-                Ok(_) => {
-                    work.status = "failed".into();
-                    work.phase = "failed".into();
-                    work.error_code = "operation_failed".into();
-                    work.note("failed", "", 0, "");
-                }
+                Ok(_) => return, // Runtime conditionally persisted the full action outcome.
                 Err(error) => {
                     work.status = "failed".into();
                     work.phase = "failed".into();
@@ -314,6 +307,18 @@ impl Runtime {
             }
         });
         if let Err(error) = persisted {
+            let error = if result
+                .as_ref()
+                .is_err_and(|error| error.public_code == "action_outcome_unknown")
+                || (job.is_write_action()
+                    && result
+                        .as_ref()
+                        .is_ok_and(|(value, _)| value.artifact.is_some()))
+            {
+                crate::apperr::AppError::api("action_outcome_unknown", 502)
+            } else {
+                error
+            };
             let _ = self.state.update_job(&job.id, |work| {
                 if ["queued", "running"].contains(&work.status.as_str()) {
                     work.status = "failed".into();

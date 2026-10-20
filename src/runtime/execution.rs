@@ -12,6 +12,28 @@ use std::{collections::BTreeMap, time::Duration};
 
 use super::{OpResult, Runtime, humanize, origin, params, sanitized, visible_text};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExecutionPurpose {
+    Run,
+    Verify,
+}
+
+struct PreparedOutcome {
+    result: OpResult,
+    artifact: Option<crate::artifacts::PublishedArtifact>,
+    dispatched_write: bool,
+}
+
+impl PreparedOutcome {
+    fn buffered(result: OpResult, dispatched_write: bool) -> Self {
+        Self {
+            result,
+            artifact: None,
+            dispatched_write,
+        }
+    }
+}
+
 impl Runtime {
     pub fn request(
         &self,
@@ -188,8 +210,10 @@ impl Runtime {
             self.execute_observed(request, &self.state.settings()?.locale)
                 .await
         } else {
-            self.execute_definition(sp, request, None, false, None)
-                .await
+            let (outcome, attempt) = self
+                .execute_definition(sp, request, None, false, None, ExecutionPurpose::Run)
+                .await?;
+            self.finish_prepared(None, outcome, attempt)
         }
     }
     /// Approval IDs are validated when supplied by the dashboard handler; direct CLI/MCP calls execute when writes are enabled.
@@ -207,8 +231,10 @@ impl Runtime {
         job_id: Option<&str>,
     ) -> AppResult<(OpResult, i64)> {
         let sp = self.spec(&request.site_id)?;
-        self.execute_definition(&sp, request, approval, true, job_id)
-            .await
+        let (outcome, attempt) = self
+            .execute_definition(&sp, request, approval, true, job_id, ExecutionPurpose::Run)
+            .await?;
+        self.finish_prepared(job_id, outcome, attempt)
     }
     /// Verify a proposed read without replacing the user's installed definition.
     pub async fn verify_candidate_with_inputs(
@@ -224,9 +250,45 @@ impl Runtime {
             return Err(AppError::api("approval_required", 409));
         }
         let request = self.request(sp, action, inputs, Some(account))?;
-        self.execute_definition(sp, request, None, false, None)
-            .await
+        let (outcome, attempt) = self
+            .execute_definition(sp, request, None, false, None, ExecutionPurpose::Verify)
+            .await?;
+        self.finish_prepared(None, outcome, attempt)
     }
+    fn finish_prepared(
+        &self,
+        job_id: Option<&str>,
+        mut outcome: PreparedOutcome,
+        attempt: i64,
+    ) -> AppResult<(OpResult, i64)> {
+        let map_error = |error| {
+            if outcome.dispatched_write {
+                AppError::api("action_outcome_unknown", 502)
+            } else {
+                error
+            }
+        };
+        if let Some(id) = job_id {
+            outcome.result.ensure_success()?;
+            let completed = self
+                .state
+                .complete_action(
+                    id,
+                    outcome.result.clone().output(),
+                    outcome.result.artifact.clone(),
+                )
+                .map_err(map_error)?;
+            if !completed {
+                return Err(map_error(AppError::api("cancelled", 409)));
+            }
+        }
+        if let Some(artifact) = outcome.artifact.take() {
+            outcome.result.artifact = Some(artifact.persisted());
+        }
+        self.changed();
+        Ok((outcome.result, attempt))
+    }
+
     async fn execute_definition(
         &self,
         sp: &Spec,
@@ -234,8 +296,16 @@ impl Runtime {
         approval: Option<&str>,
         installed: bool,
         job_id: Option<&str>,
-    ) -> AppResult<(OpResult, i64)> {
+        purpose: ExecutionPurpose,
+    ) -> AppResult<(PreparedOutcome, i64)> {
         let op = sp.op(&request.action_id)?;
+        let file_response = op
+            .response
+            .as_ref()
+            .is_some_and(|expected| expected.format == "file");
+        if file_response {
+            policy::validate_spec(sp)?;
+        }
         if Self::spec_hash(sp)? != request.spec_hash {
             return Err(AppError::api("approval_expired", 409));
         }
@@ -520,119 +590,147 @@ impl Runtime {
         };
         let direct_key =
             policy::Policy::strategy_key(&op.method, &url, "http", &request.account_id);
-        let prefer_browser_fetch = op.transport == "browser-fetch"
-            || (req_input.multipart.is_none()
-                && !op.derived_target
-                && !is_local_url
-                && op.transport.is_empty()
-                && (self
-                    .policy
-                    .is_strategy_blocked(&direct_key)
-                    .ok()
-                    .flatten()
-                    .is_some()
-                    || self
+        let prefer_browser_fetch = !file_response
+            && (op.transport == "browser-fetch"
+                || (req_input.multipart.is_none()
+                    && !op.derived_target
+                    && !is_local_url
+                    && op.transport.is_empty()
+                    && (self
                         .policy
-                        .preferred_transport(&req_origin)
+                        .is_strategy_blocked(&direct_key)
                         .ok()
                         .flatten()
-                        .as_deref()
-                        == Some("browser-fetch")));
-        let response = if sp
-            .find_auth(&op.auth)
-            .is_some_and(|auth| auth.oauth_refresh.is_some())
-        {
-            self.fetch_oauth_operation(
-                sp,
-                op,
-                req_input,
-                op.pagination
-                    .as_ref()
-                    .and_then(|p| cursor.as_deref().map(|v| (p.query.as_str(), v))),
-                &mut secrets,
-                &checked.credential_hash,
-            )
-            .await
-        } else if let Some(p) = &op.pagination {
-            self.network
-                .fetch_paginated(req_input, cursor.as_deref().map(|v| (p.query.as_str(), v)))
+                        .is_some()
+                        || self
+                            .policy
+                            .preferred_transport(&req_origin)
+                            .ok()
+                            .flatten()
+                            .as_deref()
+                            == Some("browser-fetch"))));
+        let received = if file_response {
+            let receiver = crate::net::FileReceiver::new(&self.root);
+            if sp
+                .find_auth(&op.auth)
+                .is_some_and(|auth| auth.oauth_refresh.is_some())
+            {
+                self.fetch_oauth_operation(
+                    sp,
+                    op,
+                    req_input,
+                    None,
+                    &mut secrets,
+                    &checked.credential_hash,
+                    Some(&receiver),
+                )
                 .await
-        } else if op.transport == "browser" {
-            let credential = if request.account_id.is_empty() {
-                crate::accounts::Credential {
-                    origin: req_origin,
-                    ..Default::default()
-                }
             } else {
-                credential_snapshot
-                    .clone()
-                    .ok_or_else(|| AppError::api("auth_required", 401))?
-            };
-            self.network
-                .fetch_rendered(&credential, &url, &request.account_id)
-                .await
-        } else if prefer_browser_fetch {
-            let credential =
-                credential_snapshot
-                    .clone()
-                    .unwrap_or_else(|| crate::accounts::Credential {
-                        origin: req_origin.clone(),
-                        ..Default::default()
-                    });
-            self.retry_read_after_browser(
-                self.network.fetch_browser_in_page(&credential, &req_input),
-                req_input.clone(),
-                op.transport != "browser-fetch" && effect == Effect::Read,
-                || {
-                    self.ensure_credential_snapshot(
-                        &sp.site.name,
-                        &url,
-                        &request.account_id,
-                        credential_snapshot.as_ref(),
-                    )
-                },
-            )
-            .await
-        } else {
-            let fetched = self
-                .network
-                .fetch_guarded(req_input.clone(), None, &check_source_authority)
-                .await;
-            match fetched {
-                Ok(r)
-                    if effect == Effect::Read
-                        && crate::defend::is_challenge_label(&r.defense)
-                        && !op.matches_response(&r)
-                        && !is_local_url =>
-                {
-                    self.ensure_credential_snapshot(
-                        &sp.site.name,
-                        &url,
-                        &request.account_id,
-                        credential_snapshot.as_ref(),
-                    )?;
-                    Ok(self
-                        .escalate_challenged_read_snapshot(
-                            &req_input,
-                            r,
-                            true,
-                            credential_snapshot.as_ref(),
-                            || {
-                                self.ensure_credential_snapshot(
-                                    &sp.site.name,
-                                    &url,
-                                    &request.account_id,
-                                    credential_snapshot.as_ref(),
-                                )
-                            },
-                            |resp| op.matches_response(resp),
-                        )
-                        .await)
-                }
-                other => other,
+                self.network
+                    .fetch_file_guarded(req_input, &check_source_authority, &receiver)
+                    .await
             }
+        } else {
+            let response = if sp
+                .find_auth(&op.auth)
+                .is_some_and(|auth| auth.oauth_refresh.is_some())
+            {
+                self.fetch_oauth_operation(
+                    sp,
+                    op,
+                    req_input,
+                    op.pagination
+                        .as_ref()
+                        .and_then(|p| cursor.as_deref().map(|v| (p.query.as_str(), v))),
+                    &mut secrets,
+                    &checked.credential_hash,
+                    None,
+                )
+                .await
+                .map(|received| received.response)
+            } else if let Some(p) = &op.pagination {
+                self.network
+                    .fetch_paginated(req_input, cursor.as_deref().map(|v| (p.query.as_str(), v)))
+                    .await
+            } else if op.transport == "browser" {
+                let credential = if request.account_id.is_empty() {
+                    crate::accounts::Credential {
+                        origin: req_origin,
+                        ..Default::default()
+                    }
+                } else {
+                    credential_snapshot
+                        .clone()
+                        .ok_or_else(|| AppError::api("auth_required", 401))?
+                };
+                self.network
+                    .fetch_rendered(&credential, &url, &request.account_id)
+                    .await
+            } else if prefer_browser_fetch {
+                let credential =
+                    credential_snapshot
+                        .clone()
+                        .unwrap_or_else(|| crate::accounts::Credential {
+                            origin: req_origin.clone(),
+                            ..Default::default()
+                        });
+                self.retry_read_after_browser(
+                    self.network.fetch_browser_in_page(&credential, &req_input),
+                    req_input.clone(),
+                    op.transport != "browser-fetch" && effect == Effect::Read,
+                    || {
+                        self.ensure_credential_snapshot(
+                            &sp.site.name,
+                            &url,
+                            &request.account_id,
+                            credential_snapshot.as_ref(),
+                        )
+                    },
+                )
+                .await
+            } else {
+                let fetched = self
+                    .network
+                    .fetch_guarded(req_input.clone(), None, &check_source_authority)
+                    .await;
+                match fetched {
+                    Ok(r)
+                        if effect == Effect::Read
+                            && crate::defend::is_challenge_label(&r.defense)
+                            && !op.matches_response(&r)
+                            && !is_local_url
+                            && !file_response =>
+                    {
+                        self.ensure_credential_snapshot(
+                            &sp.site.name,
+                            &url,
+                            &request.account_id,
+                            credential_snapshot.as_ref(),
+                        )?;
+                        Ok(self
+                            .escalate_challenged_read_snapshot(
+                                &req_input,
+                                r,
+                                true,
+                                credential_snapshot.as_ref(),
+                                || {
+                                    self.ensure_credential_snapshot(
+                                        &sp.site.name,
+                                        &url,
+                                        &request.account_id,
+                                        credential_snapshot.as_ref(),
+                                    )
+                                },
+                                |resp| op.matches_response(resp),
+                            )
+                            .await)
+                    }
+                    other => other,
+                }
+            };
+            response.map(crate::net::FileResponse::buffered)
         };
-        let response = match response {
+        let mut received = match received {
             Ok(r) => r,
             Err(e) => {
                 let _ = self.kb.record_attempt(&AttemptInput {
@@ -660,26 +758,100 @@ impl Runtime {
                 });
             }
         };
-        let parsed_json = op.parse_json_response(&response);
-        let response_shape = op.matches_response(&response);
+        let response = &received.response;
+        let parsed_json = if file_response {
+            None
+        } else {
+            op.parse_json_response(&response)
+        };
+        let response_shape = if file_response {
+            op.matches_file_response(&received)
+        } else {
+            op.matches_response(response)
+        };
         let query_error = parsed_json.as_ref().is_some_and(|body| {
             body.get("errors")
                 .and_then(Value::as_array)
                 .is_some_and(|errors| !errors.is_empty())
         }) && op.graphql_query(&request.inputs);
         let matches_expected = response_shape && !query_error;
-        let attempt = self.kb.record_attempt(&AttemptInput {
-            site: sp.site.name.clone(),
-            stage: if installed { "use" } else { "verify" }.into(),
-            action: op.name.clone(),
-            target_kind: "operation".into(),
-            target_key: op.name.clone(),
-            status: response.status as i64,
-            duration_ms: response.duration_ms,
-            defense: response.defense.clone(),
-            verdict: if matches_expected { "pass" } else { "fail" }.into(),
-            ..Default::default()
-        })?;
+        // Once a mutating endpoint has succeeded, local bookkeeping or artifact
+        // publication failure must not invite an unsafe replay of that mutation.
+        let dispatched_file_write =
+            file_response && response.successful() && effect != Effect::Read;
+        let file_completion_error = |error| {
+            if dispatched_file_write {
+                AppError::api("action_outcome_unknown", 502)
+            } else {
+                error
+            }
+        };
+        let attempt = self
+            .kb
+            .record_attempt(&AttemptInput {
+                site: sp.site.name.clone(),
+                stage: if installed { "use" } else { "verify" }.into(),
+                action: op.name.clone(),
+                target_kind: "operation".into(),
+                target_key: op.name.clone(),
+                status: response.status as i64,
+                duration_ms: response.duration_ms,
+                defense: response.defense.clone(),
+                verdict: if matches_expected { "pass" } else { "fail" }.into(),
+                ..Default::default()
+            })
+            .map_err(file_completion_error)?;
+        if file_response {
+            return (|| {
+                super::failure::ensure_success(
+                    response.status, &response.defense, "",
+                    Some(crate::apperr::SafeHttpDiagnostic::from_response(response.status, &response.defense, response.json().as_ref(), &secrets)),
+                )?;
+                if !matches_expected { return Err(AppError::api("response_mismatch", 502)); }
+                let check_authority = || -> AppResult<()> {
+                    let current_selection = self.state.site(&sp.site.name)?.map(|site| (site.account_selection_revision, site.account_id.clone(), site.account_binding.clone()));
+                    if current_selection != source_selection { return Err(AppError::api("auth_required", 401)); }
+                    self.ensure_credential_snapshot(&sp.site.name, &source_url, &request.account_id, credential_snapshot.as_ref())?;
+                    let current = self.request(sp, &request.action_id, request.inputs.clone(), Some(&request.account_id))?;
+                    if current.credential_hash != checked.credential_hash { return Err(AppError::api("auth_required", 401)); }
+                    if installed && Self::spec_hash(&self.spec(&sp.site.name)?)? != request.spec_hash { return Err(AppError::api("conflict", 409)); }
+                    if let Some(id) = job_id {
+                        if self.state.job(id)?.status != "running" { return Err(AppError::api("cancelled", 409)); }
+                    }
+                    Ok(())
+                };
+                check_authority()?;
+                self.state.update(|data| {
+                    if installed {
+                        let meta = data.sites.entry(sp.site.name.clone()).or_default();
+                        meta.last_used = util::now();
+                        if effect == Effect::Read { meta.verified.insert(op.name.clone(), true); }
+                    }
+                    Ok(())
+                })?;
+                let sealed = received.artifact.take().ok_or_else(|| AppError::api("response_mismatch", 502))?;
+                let (output, artifact) = if purpose == ExecutionPurpose::Run {
+                    let filename = crate::artifacts::response_filename(response.header("content-disposition"));
+                    let metadata = sanitized(json!({"filename": filename}), &secrets);
+                    let media_type = response.header("content-type").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+                    check_authority()?;
+                    let published = sealed.publish(metadata["filename"].as_str().unwrap_or("download.bin"), &media_type,
+                        crate::artifacts::Provenance { site: sp.site.name.clone(), action: op.name.clone(), source_origin: origin(&source_url)? })?;
+                    (None, Some(published))
+                } else {
+                    (Some(json!({"kind":"file_verification", "status":"verified", "byte_count":sealed.byte_count(), "persisted":false, "content_trust":"untrusted", "inspection":"not_inspected"})), None)
+                };
+                let result = OpResult {
+                    artifact: artifact.as_ref().map(|published| published.manifest().clone()),
+                    diagnostic: None, paginated: false, next_cursor: None,
+                    site: sp.site.name.clone(), op: request.action_id, status: response.status,
+                    latency_ms: response.duration_ms, body: output, mapped: None,
+                    defense: response.defense.clone(), signal: String::new(),
+                };
+                Ok((PreparedOutcome { result, artifact, dispatched_write: dispatched_file_write }, attempt))
+            })().map_err(file_completion_error);
+        }
+        let response = received.response;
         let extracted = op
             .response
             .as_ref()
@@ -749,34 +921,39 @@ impl Runtime {
         if response.successful() && !response_shape {
             return Err(AppError::api("response_mismatch", 502));
         }
+        let dispatched_write = effect != Effect::Read && response.successful();
         Ok((
-            OpResult {
-                diagnostic: Some(crate::apperr::SafeHttpDiagnostic::from_response(
-                    response.status,
-                    &response.defense,
-                    response.json().as_ref(),
-                    &secrets,
-                )),
-                paginated: op.pagination.is_some(),
-                next_cursor,
-                site: sp.site.name.clone(),
-                op: request.action_id,
-                status: response.status,
-                latency_ms: response.duration_ms,
-                body: Some(clean),
-                mapped,
-                defense: response.defense,
-                signal: if query_error {
-                    if effect == Effect::Read {
-                        "query_failed"
+            PreparedOutcome::buffered(
+                OpResult {
+                    artifact: None,
+                    diagnostic: Some(crate::apperr::SafeHttpDiagnostic::from_response(
+                        response.status,
+                        &response.defense,
+                        response.json().as_ref(),
+                        &secrets,
+                    )),
+                    paginated: op.pagination.is_some(),
+                    next_cursor,
+                    site: sp.site.name.clone(),
+                    op: request.action_id,
+                    status: response.status,
+                    latency_ms: response.duration_ms,
+                    body: Some(clean),
+                    mapped,
+                    defense: response.defense,
+                    signal: if query_error {
+                        if effect == Effect::Read {
+                            "query_failed"
+                        } else {
+                            "action_outcome_unknown"
+                        }
+                        .into()
                     } else {
-                        "action_outcome_unknown"
-                    }
-                    .into()
-                } else {
-                    String::new()
+                        String::new()
+                    },
                 },
-            },
+                dispatched_write,
+            ),
             attempt,
         ))
     }

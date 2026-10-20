@@ -215,6 +215,49 @@ impl Spec {
                         "http|browser-fetch|browser",
                     );
                 }
+                if let Some(expected) = &op.response {
+                    if expected.format == "file" {
+                        let valid_types = expected.file.as_ref().is_some_and(|file| {
+                            !file.media_types.is_empty()
+                                && file.media_types.len() <= 16
+                                && file.media_types.iter().all(|media| {
+                                    media.len() <= 127
+                                        && media.matches('/').count() == 1
+                                        && media == &media.to_ascii_lowercase()
+                                        && media.split_once('/').is_some_and(|(kind, subtype)| {
+                                            !kind.is_empty()
+                                                && !subtype.is_empty()
+                                                && media.bytes().all(|b| {
+                                                    b.is_ascii_alphanumeric()
+                                                        || b"/!#$&^_.+-".contains(&b)
+                                                })
+                                        })
+                                })
+                        });
+                        if !valid_types
+                            || op.pagination.is_some()
+                            || !op.model.is_empty()
+                            || !expected.required_pointers.is_empty()
+                            || !expected.required_html_fields.is_empty()
+                            || expected.html.is_some()
+                            || !expected.strip_prefix.is_empty()
+                            || !expected.ssr_json.is_empty()
+                            || !expected.extract_pointer.is_empty()
+                            || !["", "http"].contains(&op.transport.as_str())
+                        {
+                            add(&mut out, &format!("{id}.response"),
+                                "File responses require explicit media types and HTTP transport, without extraction, models or pagination".into(),
+                                "Set response.format: file and response.file.media_types to observed exact media types.");
+                        }
+                    } else if expected.file.is_some() {
+                        add(
+                            &mut out,
+                            &format!("{id}.response.file"),
+                            "File expectations require format: file".into(),
+                            "Remove file or use format: file.",
+                        );
+                    }
+                }
                 if !op.auth.is_empty() && !auths.contains(&op.auth) {
                     add(
                         &mut out,

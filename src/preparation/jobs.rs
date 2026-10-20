@@ -78,11 +78,23 @@ impl Runtime {
         self.changed();
         let core = self.clone();
         let id = job.id.clone();
+        let action_job = job.kind == "action";
         // A start gate prevents a fast task from completing before its abort handle is registered.
         let (start, ready) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
             let _ = ready.await;
             let result = work.await;
+            if action_job && result.is_ok() {
+                // Action completion (including artifacts) belongs to runtime.
+                if let Ok(mut tasks) = core.tasks.lock() {
+                    tasks.remove(&id);
+                }
+                core.changed();
+                return;
+            }
+            let outcome_unknown = result
+                .as_ref()
+                .is_err_and(|error| error.public_code == "action_outcome_unknown");
             let persisted = core.state.update_job(&id, |j| {
                 if !["queued", "running"].contains(&j.status.as_str()) {
                     return;
@@ -135,7 +147,13 @@ impl Runtime {
                     if ["queued", "running"].contains(&job.status.as_str()) {
                         job.status = "failed".into();
                         job.phase = "failed".into();
-                        job.error_code = error.public_code;
+                        job.error_code = if outcome_unknown
+                            || (job.artifact.is_some() && job.is_write_action())
+                        {
+                            "action_outcome_unknown".into()
+                        } else {
+                            error.public_code
+                        };
                         job.finished_at = util::now();
                         job.result = None;
                     }
@@ -238,10 +256,13 @@ impl Runtime {
         if parent.status != "completed" || parent.kind != "action" {
             return Err(AppError::api("bad_request", 400));
         }
-        let config = self.config(provider)?;
         let result = parent
             .result
             .ok_or_else(|| AppError::api("bad_request", 400))?;
+        if parent.artifact.is_some() {
+            return Err(AppError::api("bad_request", 400));
+        }
+        let config = self.config(provider)?;
         let mut job = Job::new("summary", &parent.locale);
         job.parent_id = id.into();
         job.site_id = parent.site_id;

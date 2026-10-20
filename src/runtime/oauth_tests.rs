@@ -69,8 +69,12 @@ async fn fixture_on(
             let mode = s.mode.load(Ordering::SeqCst);
             if mode == 8 { return (StatusCode::FORBIDDEN, Json(json!({"error":"insufficient_scope"}))).into_response(); }
             if mode == 12 || mode == 13 { tokio::time::sleep(Duration::from_millis(350)).await; }
-            if mode == 10 || ((mode == 11 || mode == 12) && headers.get("authorization").unwrap() == "Bearer access-canary-old") {
+            if mode == 10 || ((mode == 11 || mode == 12 || mode == 16) && headers.get("authorization").unwrap() == "Bearer access-canary-old") {
                 return (StatusCode::UNAUTHORIZED, [("www-authenticate", "Bearer error=\"invalid_token\"")], Json(json!({"error":"expired"}))).into_response();
+            }
+            if mode == 16 {
+                return axum::http::Response::builder().header("content-type", "application/pdf")
+                    .body(axum::body::Body::from_stream(futures_util::stream::iter((0..1601).map(|_| Ok::<_, std::io::Error>(vec![0x61; crate::artifacts::TRANSFER_CHUNK_BYTES]))))).unwrap();
             }
             let page_two = query.get("pageToken").is_some();
             if page_two { assert_eq!(query.get("pageToken").unwrap(), "opaque-page-two-canary"); }
@@ -594,4 +598,65 @@ fn unnamed_oauth_credentials_are_rejected_before_storage() {
         serde_json::to_string(&stored(&core, &sp)).unwrap(),
         previous
     );
+}
+
+#[tokio::test]
+async fn oauth_replacement_streams_only_final_resource_into_one_owned_artifact() {
+    use futures_util::StreamExt;
+    let (url, state, server) = fixture().await;
+    state.mode.store(16, Ordering::SeqCst);
+    let (core, mut sp) = configured(&url, false);
+    sp.operations[0].response = Some(
+        serde_json::from_value(
+            json!({"format":"file", "file":{"media_types":["application/pdf"]}}),
+        )
+        .unwrap(),
+    );
+    core.install(&sp).unwrap();
+    let result = read(&core, &sp).await.unwrap();
+    let file = result.artifact.unwrap();
+    assert_eq!(state.exchanges.load(Ordering::SeqCst), 1);
+    assert_eq!(state.reads.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        file.byte_count,
+        1601 * crate::artifacts::TRANSFER_CHUNK_BYTES as u64
+    );
+    assert_eq!(
+        std::fs::read_dir(core.root.join("artifacts"))
+            .unwrap()
+            .count(),
+        1
+    );
+    let opened = crate::artifacts::ArtifactStore::open(&core.root)
+        .unwrap()
+        .open_completed(&file.artifact_id)
+        .unwrap();
+    let stream = opened.into_stream();
+    futures_util::pin_mut!(stream);
+    let mut count = 0u64;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.unwrap();
+        assert!(chunk.iter().all(|b| *b == 0x61));
+        count += chunk.len() as u64;
+    }
+    assert_eq!(count, file.byte_count);
+    server.abort();
+}
+
+#[tokio::test]
+async fn file_resource_mode_does_not_expand_token_response_bounds() {
+    let (url, state, server) = fixture().await;
+    state.mode.store(5, Ordering::SeqCst);
+    let (core, mut sp) = configured(&url, true);
+    sp.operations[0].response = Some(
+        serde_json::from_value(
+            json!({"format":"file", "file":{"media_types":["application/pdf"]}}),
+        )
+        .unwrap(),
+    );
+    core.install(&sp).unwrap();
+    assert!(read(&core, &sp).await.is_err());
+    assert_eq!(state.reads.load(Ordering::SeqCst), 0);
+    assert!(!core.root.join("artifacts").exists());
+    server.abort();
 }

@@ -227,6 +227,31 @@ impl StateStore {
         Self::load_single_job(&tx, id, true)
     }
 
+    /// Publish a result and its typed artifact in the same conditional transaction.
+    /// Cancellation wins if it has already made the job terminal.
+    pub(crate) fn complete_action(
+        &self,
+        id: &str,
+        result: Option<serde_json::Value>,
+        artifact: Option<crate::artifacts::CompletedArtifact>,
+    ) -> AppResult<bool> {
+        let mut completed = false;
+        self.update_job(id, |job| {
+            if job.kind != "action" || job.status != "running" {
+                return;
+            }
+            job.status = "completed".into();
+            job.phase = "ready".into();
+            job.finished_at = util::now();
+            job.progress_done = job.progress_total;
+            job.result = result;
+            job.artifact = artifact;
+            job.note("completed", "", 0, "");
+            completed = true;
+        })?;
+        Ok(completed)
+    }
+
     pub fn update_job(&self, id: &str, apply: impl FnOnce(&mut Job)) -> AppResult<()> {
         let mut conn = self
             .conn
@@ -392,7 +417,7 @@ impl StateStore {
                         action_id, action_title, provider, locale, account_id, status, phase,
                         error_code, found_json, started_at, updated_at, finished_at, summary,
                         approval_id, progress_done, progress_total, parent_id,
-                        effect, dispatch_phase, owner_pid
+                        effect, dispatch_phase, owner_pid, artifact_json
                  FROM jobs ORDER BY ord ASC, rowid DESC",
             )?;
             let rows = stmt.query_map([], JobRow::from_row)?;
@@ -425,7 +450,7 @@ impl StateStore {
                         action_id, action_title, provider, locale, account_id, status, phase,
                         error_code, found_json, started_at, updated_at, finished_at, summary,
                         approval_id, progress_done, progress_total, parent_id,
-                        effect, dispatch_phase, owner_pid
+                        effect, dispatch_phase, owner_pid, artifact_json
                  FROM jobs WHERE id = ?1",
                 params![id],
                 JobRow::from_row,
@@ -713,6 +738,11 @@ impl StateStore {
         before_notes: Option<&[JobNote]>,
     ) -> AppResult<()> {
         let pending_result = job.result.take();
+        let artifact_json = job
+            .artifact
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         let understanding_json = job
             .understanding
             .as_ref()
@@ -722,7 +752,8 @@ impl StateStore {
         let row_bytes = understanding_json.as_ref().map_or(0, String::len)
             + found_json.len()
             + job.summary.len()
-            + job.intent.len();
+            + job.intent.len()
+            + artifact_json.as_ref().map_or(0, String::len);
         if row_bytes > MAX_PAYLOAD_BYTES {
             return Err(AppError::api("too_large", 413));
         }
@@ -738,11 +769,11 @@ impl StateStore {
                  action_id, action_title, provider, locale, account_id, status, phase,
                  error_code, found_json, started_at, updated_at, finished_at, summary,
                  approval_id, progress_done, progress_total, parent_id,
-                 effect, dispatch_phase, owner_pid
+                 effect, dispatch_phase, owner_pid, artifact_json
              ) VALUES (
                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                  ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-                 ?26, ?27, ?28
+                 ?26, ?27, ?28, ?29
              )
              ON CONFLICT(id) DO UPDATE SET
                  ord = excluded.ord,
@@ -774,6 +805,7 @@ impl StateStore {
                      WHEN jobs.dispatch_phase = 'dispatched' THEN 'dispatched'
                      ELSE excluded.dispatch_phase
                  END,
+                 artifact_json = excluded.artifact_json,
                  owner_pid = CASE
                      WHEN excluded.owner_pid != 0 THEN excluded.owner_pid
                      ELSE jobs.owner_pid
@@ -807,6 +839,7 @@ impl StateStore {
                 effect_str,
                 job.dispatch_phase.as_str(),
                 job.owner_pid as i64,
+                artifact_json,
             ],
         )?;
 

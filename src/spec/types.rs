@@ -156,6 +156,8 @@ pub struct Pagination {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResponseExpectation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<FileResponseExpectation>,
     pub format: String,
     pub required_pointers: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -168,6 +170,14 @@ pub struct ResponseExpectation {
     pub ssr_json: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub extract_pointer: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileResponseExpectation {
+    pub media_types: Vec<String>,
+    #[serde(default)]
+    pub allow_empty: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

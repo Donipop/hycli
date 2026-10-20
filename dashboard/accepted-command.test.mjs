@@ -47,3 +47,80 @@ test('successful current publication clears only Workspace sync error and retire
   assert.equal(workspaceError, ''); assert.equal(formError, 'ai_unavailable');
   assert.deepEqual([...resolved], ['still-pending']);
 });
+
+function artifactApi(fetch, overrides = {}) {
+  const links = [];
+  const context = { URL, URLSearchParams, Response, location: { search: '' }, history: {},
+    document: { body: { appendChild() {} }, createElement: () => {
+      const link = { click() { links.push({ href: link.href, download: link.download }); }, remove() {} };
+      return link;
+    } }, fetch, ...overrides };
+  vm.createContext(context);
+  vm.runInContext(stripTypeScriptTypes(`${api}\nglobalThis.api = { checkArtifact, downloadArtifact };`, { mode: 'transform' }), context);
+  return { ...context.api, links };
+}
+test('native artifact download uses cookie HEAD and a same-origin link, never a buffered GET', async () => {
+  const reads = [];
+  const client = artifactApi(async (path, options) => {
+    reads.push({ path, options });
+    const response = new Response(null, { status: 200 });
+    response.blob = () => { throw Error('file must not be buffered'); };
+    return response;
+  });
+  const signal = new AbortController().signal;
+  await client.downloadArtifact('job/one', 'artifact?two', 'same-name.bin', signal);
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].options.method, 'HEAD');
+  assert.equal(reads[0].options.credentials, 'same-origin');
+  assert.equal(reads[0].options.signal, signal);
+  assert.deepEqual(client.links, [{ href: '/api/jobs/job%2Fone/artifacts/artifact%3Ftwo', download: 'same-name.bin' }]);
+});
+test('HEAD 401 renews existing session once, without requiring a nonexistent error body', async () => {
+  const calls = [];
+  const client = artifactApi(async (path, options) => {
+    calls.push({ path, options });
+    if (path === '/api/session') return new Response(JSON.stringify({ csrf: 'new-session' }));
+    return new Response(null, { status: calls.length === 1 ? 401 : 200 });
+  });
+  await client.downloadArtifact('job', 'file', 'file.bin', new AbortController().signal);
+  assert.deepEqual(calls.map(c => c.path), ['/api/jobs/job/artifacts/file', '/api/session', '/api/jobs/job/artifacts/file']);
+  assert.ok(calls.every(c => c.options.credentials === 'same-origin'));
+  assert.equal(client.links.length, 1);
+});
+test('missing, malformed and unreachable artifact checks never start a download or rerun an action', async () => {
+  for (const [status, code] of [[404, 'not_found'], [400, 'data_invalid'], [409, 'data_invalid'], [500, 'internal'], [401, 'session_expired']]) {
+    const client = artifactApi(async path => path === '/api/session' ? new Response(JSON.stringify({ csrf: 'session' })) : new Response(null, { status }));
+    await assert.rejects(client.downloadArtifact('job', 'file', 'file.bin', new AbortController().signal), e => e.code === code);
+    assert.equal(client.links.length, 0);
+  }
+  const client = artifactApi(async () => { throw Error('offline'); });
+  await assert.rejects(client.checkArtifact('job', 'file', new AbortController().signal), e => e.code === 'connection_lost');
+});
+test('closing a file view during its availability check cannot launch a delayed native download', async () => {
+  let release;
+  const client = artifactApi(() => new Promise(resolve => { release = resolve; }));
+  const controller = new AbortController();
+  const pending = client.downloadArtifact('job', 'file', 'file.bin', controller.signal);
+  controller.abort(); release(new Response(null));
+  await assert.rejects(pending, e => e.name === 'AbortError');
+  assert.equal(client.links.length, 0);
+});
+test('file inventory uses only completed action artifacts and preserves repeated filenames by identity', () => {
+  const fileSource = fs.readFileSync(new URL('./src/file-result.tsx', import.meta.url), 'utf8');
+  const parse = fileSource.slice(fileSource.indexOf('export function fileArtifact'), fileSource.indexOf('type FileAccess'));
+  const list = fileSource.slice(fileSource.indexOf('export function completedFiles'), fileSource.indexOf('export function FileHistory'));
+  const context = {}; vm.createContext(context);
+  vm.runInContext(stripTypeScriptTypes(`${parse}\n${list}\nglobalThis.completedFiles=completedFiles;`.replaceAll('export ', '')), context);
+  const artifact = { kind: 'file', version: 1, status: 'complete', location_scope: 'hycli_host', content_trust: 'untrusted', artifact_id: 'a', filename: 'same.bin', local_path: '/host/a', media_type: 'application/octet-stream', byte_count: 10, sha256: 'a'.repeat(64), created_at: '2026-10-20T10:00:00Z', provenance: { site: 'example', action: 'export', source_origin: 'https://example.test' } };
+  const jobs = [
+    { id: 'first', kind: 'action', status: 'completed', artifact },
+    { id: 'second', kind: 'action', status: 'completed', artifact: { ...artifact, artifact_id: 'b', local_path: '/host/b' } },
+    { id: 'json', kind: 'action', status: 'completed', result: artifact },
+    { id: 'running', kind: 'action', status: 'running', artifact },
+    { id: 'failed', kind: 'action', status: 'failed', artifact },
+    { id: 'summary', kind: 'summary', status: 'completed', artifact },
+  ];
+  const listed = context.completedFiles(jobs);
+  assert.deepEqual(Array.from(listed, row => [row.job.id, row.file.artifact_id, row.file.filename]), [['first', 'a', 'same.bin'], ['second', 'b', 'same.bin']]);
+  assert.equal(context.completedFiles(jobs.slice(2)).length, 0, 'Pruned history is not silently rebuilt from results or paths');
+});

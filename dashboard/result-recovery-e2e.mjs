@@ -1,19 +1,27 @@
 // Production dashboard against an isolated synthetic API, never a live service.
 // Build first, then: BROWSER_BIN=/path/to/chromium node dashboard/result-recovery-e2e.mjs
-// No real file bytes, credentials, external requests, or disabled browser sandbox.
+// Synthetic file bytes only. No real credentials, external requests, or disabled browser sandbox.
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const en = JSON.parse(await fs.readFile(path.join(root, 'dashboard/src/locales/en.json'), 'utf8'));
 const now = () => new Date().toISOString();
 const job = (id, status, extra = {}) => ({id:id.replaceAll(' ', '-'), kind:'action', status, site_id:'site', site_title:'Example', action_title:id, started_at:now(), updated_at:now(), finished_at:now(), found:[], notes:[], ...extra});
 const state = { settings:{locale:'en', theme:'light', default_provider:'fixture'}, providers:[{id:'fixture',name:'Fixture AI',connected:true}], sites:[{id:'site',title:'Example',url:'https://example.test',host:'example.test',status:'ready',actions:[],updated_at:''}], accounts:[], jobs:[], approvals:[], engine:{available:true,compatible:true,version:'1'}, version:'test' };
 let summaryCount = 0, hideNewest = false, refreshFails = false, holdSummary = false, releaseSummary;
+const fileBytes = Buffer.from([137,80,78,71,13,10,26,10,0,255,128,65]);
+let fileMissing = false, fileCorrupt = false, fileMismatch = false, expireArtifactSession = false, holdArtifactHead = false, releaseArtifactHead;
 const requests = [], streams = new Set();
+const assertHeadWaiting = async () => {
+  const deadline = Date.now() + 10000;
+  while (!releaseArtifactHead && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve,10));
+  assert.equal(typeof releaseArtifactHead,'function','The native download waits for its HEAD preflight');
+};
 const changed = () => { for (const stream of streams) stream.write('data: changed\n\n'); };
 const server = createServer(async (req, res) => {
   if (req.url === '/api/events') { res.writeHead(200, {'Content-Type':'text/event-stream'}); res.write(': ready\n\n'); streams.add(res); req.on('close', () => streams.delete(res)); return; }
@@ -22,11 +30,27 @@ const server = createServer(async (req, res) => {
     const input = body ? JSON.parse(body) : {};
     requests.push({path:req.url,method:req.method,input});
     let result;
-    if (req.url.startsWith('/api/session')) result = {csrf:'synthetic'};
+    if (req.url.startsWith('/api/session')) { res.setHeader('Set-Cookie', 'hycli_session=fixture; HttpOnly; SameSite=Strict; Path=/'); result = {csrf:'synthetic'}; }
     else if (req.url === '/api/state') {
       if (refreshFails) { res.writeHead(503, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:{code:'connection_lost'}})); return; }
       result = {...state, jobs:state.jobs.filter(j => !hideNewest || j.id !== 'summary-'+summaryCount).map(({result, ...summary}) => summary)};
-    } else if (req.url.startsWith('/api/jobs/') && req.method === 'GET') result = state.jobs.find(j => j.id === req.url.split('/')[3]);
+    } else if (req.url.includes('/artifacts/') && ['GET', 'HEAD'].includes(req.method)) {
+      assert.match(req.headers.cookie || '', /hycli_session=fixture/, 'Native artifact requests use the existing session cookie');
+      if (req.method === 'HEAD' && expireArtifactSession) { expireArtifactSession = false; res.writeHead(401); res.end(); return; }
+      if (req.method === 'HEAD' && holdArtifactHead) await new Promise(resolve => { releaseArtifactHead = resolve; });
+      const owner = state.jobs.find(j => j.id === req.url.split('/')[3]);
+      if (fileMissing || !owner || owner.artifact?.artifact_id !== req.url.split('/')[5]) {
+        res.writeHead(404, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:{code:'not_found'}})); return;
+      }
+      if (fileMismatch) { res.writeHead(409, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:{code:'data_invalid'}})); return; }
+      res.writeHead(200, {'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="fixture.bin"'});
+      if (req.method === 'HEAD') { res.end(); return; }
+      res.write(fileBytes);
+      if (fileCorrupt) setTimeout(() => res.destroy(), 100);
+      else res.end();
+      return;
+    } else if (req.url.endsWith('/result') && req.method === 'GET') result = state.jobs.find(j => j.id === req.url.split('/')[3])?.result;
+    else if (req.url.startsWith('/api/jobs/') && req.method === 'GET') result = state.jobs.find(j => j.id === req.url.split('/')[3]);
     else if (req.url.endsWith('/summarize') || req.url.endsWith('/retry')) {
       const previous = state.jobs.find(j => j.id === req.url.split('/')[3]);
       assert.ok(previous, 'Exact target exists');
@@ -200,7 +224,108 @@ try {
   assert.equal(await dialog().locator('.summary-operation').count(),0);
   assert.equal(summaryCount,6);
   console.log('PASS: Activity retry supersedes observed accepted child and clears old failure');
+  const manifest = {kind:'file',version:1,artifact_id:'0123456789abcdef0123456789abcdef',status:'complete',local_path:'/fixture/hycli/artifacts/0123456789abcdef0123456789abcdef/payload',location_scope:'hycli_host',filename:'fixture.bin',media_type:'application/octet-stream',byte_count:fileBytes.length,sha256:createHash('sha256').update(fileBytes).digest('hex'),created_at:now(),provenance:{site:'site',action:'download',source_origin:'https://example.test'},content_trust:'untrusted'};
+  state.jobs = [job('Ordinary JSON','completed',{result:manifest})];
+  await visit(); await open('Ordinary JSON');
+  await dialog().locator('.result-fields').first().waitFor();
+  assert.equal(await dialog().getByRole('region',{name:en['files.ready']}).count(),0,'Server JSON cannot mint a local file card');
+  assert.equal(await button(dialog(),'actions.summary').isEnabled(),true,'Ordinary JSON keeps its existing summary behavior');
+  assert.equal(await button(dialog(),'files.download').count(),0);
   await close();
+  const secondManifest = {...manifest,artifact_id:'abcdef0123456789abcdef0123456789ab',local_path:'/fixture/hycli/artifacts/abcdef0123456789abcdef0123456789ab/payload'};
+  state.jobs = [job('Binary download','completed',{result:manifest,artifact:manifest}), job('Second download','completed',{result:secondManifest,artifact:secondManifest}), job('Not a file','completed',{result:manifest}), job('Running file','running',{artifact:manifest})];
+  const fileStart = requests.length;
+  await visit(); await button(page,'files.filter').click();
+  const historyFiles = () => page.locator('.file-history .file-result');
+  await historyFiles().nth(1).waitFor();
+  assert.equal(await historyFiles().count(),2,'Only completed action artifacts enter the file list');
+  await page.getByText(en['files.listScope'],{exact:true}).waitFor();
+  for (const [index, metadata] of [manifest,secondManifest].entries()) {
+    const row = historyFiles().nth(index);
+    assert.equal(await row.getAttribute('data-artifact-id'),metadata.artifact_id);
+    await row.getByRole('heading',{name:'fixture.bin',exact:true}).waitFor();
+    for (const value of [metadata.artifact_id,metadata.local_path,en['files.notInspected'],en['files.notChecked']]) await row.getByText(value,{exact:true}).waitFor();
+    await row.getByText('https://example.test · site / download',{exact:true}).waitFor();
+  }
+  await page.reload({waitUntil:'domcontentloaded'}); await button(page,'files.filter').click();
+  await historyFiles().nth(1).waitFor();
+  assert.equal(await historyFiles().count(),2,'The available file list survives reopening from typed job history');
+  const secondDownload = page.waitForEvent('download');
+  await button(historyFiles().nth(1),'files.download').click();
+  const selectedSecond = await secondDownload;
+  assert.equal(selectedSecond.url(),origin+'/api/jobs/Second-download/artifacts/'+secondManifest.artifact_id,'Same-name selection preserves artifact and job identity');
+  assert.deepEqual(await fs.readFile(await selectedSecond.path()),fileBytes);
+  state.jobs = state.jobs.filter(j => j.id !== 'Second-download'); changed();
+  await historyFiles().nth(1).waitFor({state:'hidden'});
+  assert.equal(await historyFiles().count(),1,'Pruned records disappear without scanning or deleting payloads');
+  await button(page,'common.all').click(); await open('Binary download');
+  await dialog().getByRole('region',{name:en['files.ready']}).waitFor();
+  await dialog().getByText(en['files.localOnly'],{exact:true}).waitFor();
+  assert.equal(await button(dialog(),'actions.summary').count(),0,'File metadata is not offered as a content summary');
+  for (let i = 0; i < 2; i++) {
+    const before = requests.length;
+    if (i === 0) { expireArtifactSession = true; holdArtifactHead = true; }
+    const pending = page.waitForEvent('download');
+    if (i === 0) {
+      await button(dialog(),'files.download').dblclick();
+      assert.equal(await button(dialog(),'files.download').isDisabled(),true);
+      await assertHeadWaiting();
+      holdArtifactHead = false; releaseArtifactHead(); releaseArtifactHead = undefined;
+    } else await button(dialog(),'files.download').click();
+    const received = await pending;
+    assert.equal(received.url(),origin+'/api/jobs/Binary-download/artifacts/'+manifest.artifact_id,'The browser downloads directly from the authenticated route, not a blob URL');
+    assert.equal(received.suggestedFilename(),'fixture.bin');
+    assert.deepEqual(await fs.readFile(await received.path()),fileBytes,'Browser retrieves exact binary bytes');
+    await dialog().getByText(en['files.started'],{exact:true}).waitFor();
+    await dialog().getByText(en['files.available'],{exact:true}).waitFor();
+    assert.equal(requests.slice(before).filter(r => r.path.includes('/artifacts/') && r.method === 'GET').length,1,'Repeated clicks while checking launch one native download');
+    if (i === 0) {
+      assert.equal(requests.slice(before).filter(r => r.path === '/api/session').length,1,'HEAD expiry renews the existing session once');
+      await close(); await open('Binary download'); await dialog().getByRole('region',{name:en['files.ready']}).waitFor();
+      await dialog().getByText(en['files.notChecked'],{exact:true}).waitFor();
+    }
+  }
+  const exported = page.waitForEvent('download');
+  await button(dialog(),'files.exportManifest').click();
+  assert.deepEqual(JSON.parse(await fs.readFile(await (await exported).path(),'utf8')),manifest,'JSON export remains the file manifest');
+  await fs.mkdir(path.join(root,'test-results/file-download'),{recursive:true});
+  await page.screenshot({path:path.join(root,'test-results/file-download/completed-file.png'),fullPage:true});
+  fileCorrupt = true;
+  const failedDownload = page.waitForEvent('download');
+  await button(dialog(),'files.download').click();
+  assert.ok(await (await failedDownload).failure(),'A streaming body error is a browser download failure, not a completed save');
+  await dialog().getByText(en['files.started'],{exact:true}).waitFor();
+  await dialog().getByText(en['files.notInspected'],{exact:true}).waitFor();
+  fileCorrupt = false; fileMissing = true;
+  const getsBeforeMissing = requests.filter(r => r.method === 'GET' && r.path.includes('/artifacts/')).length;
+  const missing = page.waitForResponse(response => response.request().method() === 'HEAD' && new URL(response.url()).pathname.includes('/artifacts/'));
+  await button(dialog(),'files.download').click();
+  assert.equal((await missing).status(),404);
+  await dialog().getByText(en['files.unavailable'],{exact:true}).waitFor();
+  await dialog().getByRole('alert').waitFor();
+  assert.equal(await dialog().getByText(en['files.started'],{exact:true}).count(),0,'A failed preflight does not claim download started');
+  assert.equal(requests.filter(r => r.method === 'GET' && r.path.includes('/artifacts/')).length,getsBeforeMissing,'Missing files do not start a native GET');
+  fileMissing = false; fileMismatch = true;
+  const mismatch = page.waitForResponse(response => response.request().method() === 'HEAD' && new URL(response.url()).pathname.includes('/artifacts/'));
+  await button(dialog(),'files.download').click();
+  assert.equal((await mismatch).status(),409);
+  await dialog().getByText(en['files.unavailable'],{exact:true}).waitFor();
+  await dialog().getByRole('alert').getByText(en['errors.data_invalid'],{exact:true}).waitFor();
+  assert.equal(requests.filter(r => r.method === 'GET' && r.path.includes('/artifacts/')).length,getsBeforeMissing,'A manifest conflict cannot start a native GET');
+  fileMismatch = false;
+  const availability = page.waitForResponse(response => response.request().method() === 'HEAD' && new URL(response.url()).pathname.includes('/artifacts/'));
+  await button(dialog(),'files.check').click(); await availability;
+  await dialog().getByText(en['files.available'],{exact:true}).waitFor();
+  assert.equal(await dialog().getByText(en['files.started'],{exact:true}).count(),0,'Availability check is not a download or content inspection');
+  holdArtifactHead = true;
+  await button(dialog(),'files.download').click();
+  await assertHeadWaiting();
+  await close(); holdArtifactHead = false; releaseArtifactHead(); releaseArtifactHead = undefined;
+  await open('Binary download'); await dialog().getByText(en['files.notChecked'],{exact:true}).waitFor();
+  assert.equal(requests.filter(r => r.method === 'GET' && r.path.includes('/artifacts/')).length,getsBeforeMissing,'Closing while checking aborts a delayed download');
+  assert.equal(requests.slice(fileStart).filter(r => r.method === 'POST').length,0,'Listing, retrieval, failure and reopen never rerun an action or call AI');
+  await close();
+  console.log('PASS: scoped typed file list, same-name identities, resume/pruning, native cookie download, duplicate guard, renewal, corruption/missing/close failures, separate manifest export and no action rerun');
   const uploadPath = '/synthetic host/Project Files/report final.pdf';
   state.sites[0].writes = true;
   state.sites[0].actions = [{id:'upload',title:'Upload document',description:'Send a document to the synthetic service.',effect:'write',verified:true,accepts_account:false,inputs:[{id:'document',label:'Document',type:'file',required:true,hint:'PDF document.'}]}];

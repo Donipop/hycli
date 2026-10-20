@@ -98,6 +98,8 @@ pub struct SiteView {
 }
 #[derive(Clone, Serialize)]
 pub struct OpResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<crate::artifacts::CompletedArtifact>,
     #[serde(skip)]
     pub diagnostic: Option<crate::apperr::SafeHttpDiagnostic>,
     #[serde(skip)]
@@ -116,6 +118,9 @@ pub struct OpResult {
 impl OpResult {
     /// Opted-in pagination uses one projection across CLI and persisted jobs.
     pub fn output(self) -> Option<Value> {
+        if let Some(artifact) = self.artifact {
+            return Some(serde_json::json!(artifact));
+        }
         let data = self.mapped.or(self.body);
         if self.paginated {
             Some(serde_json::json!({"data":data,"next_cursor":self.next_cursor}))

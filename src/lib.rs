@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod agent_tools;
 pub mod ai;
 pub mod apperr;
+pub mod artifacts;
 pub use browser_session as browser;
 pub mod browser_discovery;
 pub mod browser_session;
