@@ -343,6 +343,7 @@ async fn settings(State(web): State<Web>, Json(patch): Json<Value>) -> AppResult
                 "reduce_motion",
                 "notifications",
                 "default_provider",
+                "native_browser_discovery",
             ]
             .contains(&k.as_str())
             {

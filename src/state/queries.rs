@@ -271,7 +271,7 @@ impl StateStore {
     pub(super) fn load_settings(conn: &Connection) -> AppResult<Settings> {
         let settings = conn
             .query_row(
-                "SELECT locale, theme, reduce_motion, notifications, default_provider, engine_path
+                "SELECT locale, theme, reduce_motion, notifications, default_provider, engine_path, native_browser_discovery
                  FROM settings WHERE id = 1",
                 [],
                 |r| {
@@ -282,6 +282,7 @@ impl StateStore {
                         notifications: r.get::<_, i64>(3)? != 0,
                         default_provider: r.get(4)?,
                         engine_path: r.get(5)?,
+                        native_browser_discovery: r.get::<_, i64>(6)? != 0,
                     })
                 },
             )
@@ -521,15 +522,16 @@ impl StateStore {
     pub(super) fn save_diff(tx: &Transaction<'_>, before: &Data, next: &Data) -> AppResult<()> {
         if next.settings != before.settings {
             tx.execute(
-                "INSERT INTO settings (id, locale, theme, reduce_motion, notifications, default_provider, engine_path)
-                 VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO settings (id, locale, theme, reduce_motion, notifications, default_provider, engine_path, native_browser_discovery)
+                 VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(id) DO UPDATE SET
                      locale = excluded.locale,
                      theme = excluded.theme,
                      reduce_motion = excluded.reduce_motion,
                      notifications = excluded.notifications,
                      default_provider = excluded.default_provider,
-                     engine_path = excluded.engine_path",
+                     engine_path = excluded.engine_path,
+                     native_browser_discovery = excluded.native_browser_discovery",
                 params![
                     next.settings.locale,
                     next.settings.theme,
@@ -537,6 +539,7 @@ impl StateStore {
                     i64::from(next.settings.notifications),
                     next.settings.default_provider,
                     next.settings.engine_path,
+                    i64::from(next.settings.native_browser_discovery),
                 ],
             )?;
         }

@@ -380,6 +380,12 @@ impl Runtime {
             }
             site_id.into()
         };
+        if !self.state.settings()?.native_browser_discovery {
+            return Err(crate::apperr::AppError::api(
+                "native_discovery_disabled",
+                409,
+            ));
+        }
         let target_copy = target.clone();
         let wanted_profile = profile_id.to_string();
         static SCANNING: AtomicBool = AtomicBool::new(false);
