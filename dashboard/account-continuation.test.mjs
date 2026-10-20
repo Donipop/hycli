@@ -10,11 +10,11 @@ const code = stripTypeScriptTypes(source.slice(start, end).replace('export ', ''
 const account = { id: 'account', site_id: 'site', site_url: 'https://example.test', status: 'connected', verified_identity: true };
 function harness({ fresh = true, accounts = [account], act, found = null, waiting = false, boundAccount } = {}) {
   const calls = [], effects = [], states = [];
-  const data = { accounts: [], sites: [{ id: 'site', url: 'https://example.test', account_id: boundAccount }], settings: {} };
+  const data = { accounts: [], sites: [{ id: 'site', url: 'https://example.test', account_id: boundAccount }], settings: { native_browser_discovery: true } };
   let snapshot = fresh ? { ...data, accounts } : null;
   const ops = { freshSnapshot: () => snapshot, act: async (...args) => { calls.push(args); return act ? act(...args) : {}; }, toast() {} };
   let stateIndex = 0;
-  const context = { effects, useI18n: () => ({t: x => x}), useState: value => [stateIndex++ === 6 ? found : stateIndex === 8 ? waiting : value, next => states.push(next)], useRef: current => ({current}), useEffect: fn => effects.push(fn), sameOrigin: (a,b) => new URL(a).origin === new URL(b).origin, codeOf: () => 'internal', request: () => Promise.resolve({profiles:[]}) };
+  const context = { AbortController, effects, useI18n: () => ({t: x => x}), useState: value => [stateIndex++ === 6 ? found : stateIndex === 8 ? waiting : value, next => states.push(next)], useRef: current => ({current}), useEffect: fn => effects.push(fn), sameOrigin: (a,b) => new URL(a).origin === new URL(b).origin, codeOf: () => 'internal', request: () => Promise.resolve({profiles:[]}) };
   vm.createContext(context); vm.runInContext(code, context);
   const controller = context.AccountDialog({ site: data.sites[0], data, ops, onClose() {} });
   return { ...controller, calls, states, publish(value = {...data, accounts}) { snapshot = value; }, async reconcile() { controller.continuePending(); await new Promise(resolve => setImmediate(resolve)); } };
@@ -90,4 +90,12 @@ test('a later needs_choice receipt cancels an older queued implicit selection', 
   await h.scan(true);
   h.publish(); await h.reconcile();
   assert.deepEqual(h.calls.map(c => c[0]), ['/api/browser/find']);
+});
+test('native discovery cancellation owns its target lifetime and ignores its own abort', async () => {
+ let signal;
+ const h=harness({act:async(path,method,body,currentSignal)=>{signal=currentSignal;return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true}));}});
+ const cleanup=h.effects.find(fn=>String(fn).includes('nativeRequest.current?.abort'))();
+ const pending=h.scan();assert.equal(signal.aborted,false);cleanup();await pending;
+ assert.equal(signal.aborted,true);assert.ok(!h.states.includes('internal'));
+ assert.deepEqual(h.calls.map(c=>c[0]),['/api/browser/find']);
 });

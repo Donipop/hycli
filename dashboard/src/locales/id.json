@@ -477,7 +477,7 @@
   "accounts.chooseFound": "Lebih dari satu akun ditemukan. Pilih akun yang ingin digunakan.",
   "accounts.openLogin": "Buka halaman login situs web",
   "accounts.recheck": "Periksa lagi",
-  "accounts.waitLogin": "Menunggu login yang terverifikasi. Hycli akan memeriksa lagi dan melanjutkan penyiapan jika sudah siap.",
+  "accounts.waitLogin": "Menunggu akun terverifikasi dari pendamping browser. Untuk memeriksa profil browser lokal, pilih Cari lagi.",
   "accounts.loginPending": "Situs web belum mengonfirmasi akun Anda. Coba pendamping browser di bawah; beberapa situs memerlukan akses API yang terdokumentasi.",
   "accounts.moreMethods": "Cara lain untuk terhubung",
   "accounts.useAccount": "Gunakan akun ini",
@@ -551,5 +551,9 @@
   "files.unavailable": "Tidak ada atau tidak tersedia",
   "files.checkFailed": "Tidak dapat memeriksa",
   "files.check": "Periksa ketersediaan",
-  "files.started": "Unduhan diminta. Periksa daftar unduhan browser untuk mengetahui apakah selesai atau gagal."
+  "files.started": "Unduhan diminta. Periksa daftar unduhan browser untuk mengetahui apakah selesai atau gagal.",
+  "settings.nativeDiscovery": "Penemuan browser lokal",
+  "settings.nativeDiscoveryHint": "Izinkan pembacaan profil browser lokal. Ini dapat meminta akses ke penyimpanan kunci sistem operasi. Mengaktifkannya tidak memulai pemindaian.",
+  "errors.native_discovery_disabled": "Penemuan browser lokal nonaktif. Aktifkan di Pengaturan atau gunakan pendamping browser.",
+  "errors.native_discovery_retry_required": "Penemuan native otomatis dijeda setelah percobaan yang belum selesai. Periksa permintaan sistem operasi, lalu coba lagi secara manual atau gunakan pendamping browser."
 }

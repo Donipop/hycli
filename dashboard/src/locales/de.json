@@ -385,7 +385,7 @@
   "accounts.chooseFound": "Mehrere Konten gefunden. Wähle das Konto aus, das du verwenden möchtest.",
   "accounts.openLogin": "Anmeldeseite öffnen",
   "accounts.recheck": "Erneut prüfen",
-  "accounts.waitLogin": "Warten auf eine bestätigte Anmeldung. Hycli prüft erneut und setzt die Einrichtung fort, sobald alles bereit ist.",
+  "accounts.waitLogin": "Warte auf ein verifiziertes Konto von der Browser-Erweiterung. Wähle erneut Suchen, um lokale Browserprofile zu prüfen.",
   "accounts.loginPending": "Die Website hat dein Konto noch nicht bestätigt. Versuche es unten mit der Hycli-Browsererweiterung; einige Websites erfordern einen dokumentierten API-Zugang.",
   "accounts.moreMethods": "Weitere Verbindungsmöglichkeiten",
   "accounts.useAccount": "Dieses Konto verwenden",
@@ -551,5 +551,9 @@
   "files.unavailable": "Fehlt oder ist nicht verfügbar",
   "files.checkFailed": "Prüfung nicht möglich",
   "files.check": "Verfügbarkeit prüfen",
-  "files.started": "Download angefordert. Prüfen Sie im Browser, ob der Download abgeschlossen wurde oder fehlgeschlagen ist."
+  "files.started": "Download angefordert. Prüfen Sie im Browser, ob der Download abgeschlossen wurde oder fehlgeschlagen ist.",
+  "settings.nativeDiscovery": "Lokale Browser-Erkennung",
+  "settings.nativeDiscoveryHint": "Erlaubt das Lesen lokaler Browserprofile. Dies kann Zugriff auf den Schlüsselbund des Betriebssystems anfordern. Das Einschalten startet keine Suche.",
+  "errors.native_discovery_disabled": "Die lokale Browser-Erkennung ist ausgeschaltet. Aktivieren Sie sie in den Einstellungen oder verwenden Sie die Browser-Erweiterung.",
+  "errors.native_discovery_retry_required": "Die automatische native Suche ist nach einem unvollständigen Versuch pausiert. Prüfe die Betriebssystemabfrage und versuche es ausdrücklich erneut oder nutze die Browser-Erweiterung."
 }

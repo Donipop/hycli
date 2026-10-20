@@ -350,7 +350,7 @@
   "accounts.chooseFound": "Đã tìm thấy nhiều tài khoản. Hãy chọn tài khoản bạn muốn sử dụng.",
   "accounts.openLogin": "Mở trang đăng nhập của website",
   "accounts.recheck": "Kiểm tra lại",
-  "accounts.waitLogin": "Đang chờ phiên đăng nhập được xác minh. Hycli sẽ kiểm tra lại và tiếp tục thiết lập khi sẵn sàng.",
+  "accounts.waitLogin": "Đang chờ tài khoản đã xác minh từ tiện ích trình duyệt. Để kiểm tra hồ sơ trình duyệt cục bộ, hãy chọn Tìm lần nữa.",
   "accounts.loginPending": "Trang web chưa xác nhận tài khoản của bạn. Hãy thử tiện ích trình duyệt bên dưới; một số trang web yêu cầu quyền truy cập API theo tài liệu.",
   "accounts.moreMethods": "Các cách kết nối khác",
   "accounts.useAccount": "Dùng tài khoản này",
@@ -551,5 +551,9 @@
   "files.unavailable": "Không tồn tại hoặc không khả dụng",
   "files.checkFailed": "Không thể kiểm tra",
   "files.check": "Kiểm tra tính khả dụng",
-  "files.started": "Đã yêu cầu tải xuống. Xem danh sách tải xuống của trình duyệt để biết đã hoàn tất hay thất bại."
+  "files.started": "Đã yêu cầu tải xuống. Xem danh sách tải xuống của trình duyệt để biết đã hoàn tất hay thất bại.",
+  "settings.nativeDiscovery": "Tìm trình duyệt cục bộ",
+  "settings.nativeDiscoveryHint": "Cho phép đọc hồ sơ trình duyệt cục bộ. Có thể yêu cầu quyền truy cập kho khóa của hệ điều hành. Bật tùy chọn này không bắt đầu quét.",
+  "errors.native_discovery_disabled": "Tìm trình duyệt cục bộ đang tắt. Bật trong Cài đặt hoặc dùng tiện ích đồng hành trình duyệt.",
+  "errors.native_discovery_retry_required": "Tự động tìm kiếm gốc đã tạm dừng sau lần thử chưa hoàn tất. Kiểm tra lời nhắc của hệ điều hành, rồi thử lại thủ công hoặc dùng tiện ích trình duyệt."
 }

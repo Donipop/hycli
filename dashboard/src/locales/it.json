@@ -385,7 +385,7 @@
   "accounts.chooseFound": "Sono stati trovati più account. Scegli quello da usare.",
   "accounts.openLogin": "Apri la pagina di accesso",
   "accounts.recheck": "Controlla di nuovo",
-  "accounts.waitLogin": "In attesa di un accesso verificato. Hycli controllerà di nuovo e riprenderà la configurazione quando sarà pronto.",
+  "accounts.waitLogin": "In attesa di un account verificato dal componente del browser. Per controllare i profili locali, seleziona di nuovo Cerca.",
   "accounts.loginPending": "Il sito non ha ancora confermato il tuo account. Prova l’estensione Hycli qui sotto; alcuni siti richiedono l’accesso a un’API documentata.",
   "accounts.moreMethods": "Altri modi per connettersi",
   "accounts.useAccount": "Usa questo account",
@@ -551,5 +551,9 @@
   "files.unavailable": "Assente o non disponibile",
   "files.checkFailed": "Impossibile verificare",
   "files.check": "Verifica disponibilità",
-  "files.started": "Download richiesto. Controlla nei download del browser se è terminato o non è riuscito."
+  "files.started": "Download richiesto. Controlla nei download del browser se è terminato o non è riuscito.",
+  "settings.nativeDiscovery": "Rilevamento del browser locale",
+  "settings.nativeDiscoveryHint": "Consente di leggere i profili locali del browser. Potrebbe richiedere accesso al portachiavi del sistema operativo. L’attivazione non avvia una ricerca.",
+  "errors.native_discovery_disabled": "Il rilevamento del browser locale è disattivato. Attivalo nelle Impostazioni o usa il componente del browser.",
+  "errors.native_discovery_retry_required": "Il rilevamento nativo automatico è sospeso dopo un tentativo incompleto. Controlla le richieste del sistema, poi riprova manualmente o usa il componente del browser."
 }

@@ -385,7 +385,7 @@
   "accounts.chooseFound": "Mais de uma conta encontrada. Escolha a conta que deseja usar.",
   "accounts.openLogin": "Abrir a página de login",
   "accounts.recheck": "Verificar novamente",
-  "accounts.waitLogin": "Aguardando a confirmação do login. O Hycli verificará novamente e retomará a configuração quando estiver pronto.",
+  "accounts.waitLogin": "Aguardando uma conta verificada pelo complemento do navegador. Para verificar perfis locais, selecione Buscar novamente.",
   "accounts.loginPending": "O site ainda não confirmou sua conta. Tente usar a extensão do Hycli abaixo; alguns sites exigem acesso a uma API documentada.",
   "accounts.moreMethods": "Outras formas de conectar",
   "accounts.useAccount": "Usar esta conta",
@@ -551,5 +551,9 @@
   "files.unavailable": "Ausente ou indisponível",
   "files.checkFailed": "Não foi possível verificar",
   "files.check": "Verificar disponibilidade",
-  "files.started": "Download solicitado. Confira nos downloads do navegador se foi concluído ou falhou."
+  "files.started": "Download solicitado. Confira nos downloads do navegador se foi concluído ou falhou.",
+  "settings.nativeDiscovery": "Detecção do navegador local",
+  "settings.nativeDiscoveryHint": "Permite ler perfis locais do navegador. Isso pode solicitar acesso ao chaveiro do sistema operacional. Ativar não inicia uma busca.",
+  "errors.native_discovery_disabled": "A detecção do navegador local está desativada. Ative nas Configurações ou use o complemento do navegador.",
+  "errors.native_discovery_retry_required": "A descoberta nativa automática foi pausada após uma tentativa incompleta. Confira os avisos do sistema e tente novamente manualmente ou use o complemento do navegador."
 }

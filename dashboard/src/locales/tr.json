@@ -477,7 +477,7 @@
   "accounts.chooseFound": "Birden fazla hesap bulundu. Kullanmak istediğiniz hesabı seçin.",
   "accounts.openLogin": "Web sitesinin giriş sayfasını aç",
   "accounts.recheck": "Tekrar kontrol et",
-  "accounts.waitLogin": "Doğrulanmış oturum açma bekleniyor. Hycli yeniden kontrol edecek ve hazır olduğunda kuruluma devam edecek.",
+  "accounts.waitLogin": "Tarayıcı yardımcısından doğrulanmış bir hesap bekleniyor. Yerel tarayıcı profillerini kontrol etmek için yeniden Bul seçeneğini seçin.",
   "accounts.loginPending": "Web sitesi hesabınızı henüz doğrulamadı. Aşağıdaki tarayıcı yardımcısını deneyin; bazı siteler belgelenmiş API erişimi gerektirir.",
   "accounts.moreMethods": "Diğer bağlantı yöntemleri",
   "accounts.useAccount": "Bu hesabı kullan",
@@ -551,5 +551,9 @@
   "files.unavailable": "Eksik veya kullanılamıyor",
   "files.checkFailed": "Kontrol edilemedi",
   "files.check": "Kullanılabilirliği kontrol et",
-  "files.started": "İndirme istendi. Tamamlanma veya hata durumunu tarayıcınızın indirmelerinden kontrol edin."
+  "files.started": "İndirme istendi. Tamamlanma veya hata durumunu tarayıcınızın indirmelerinden kontrol edin.",
+  "settings.nativeDiscovery": "Yerel tarayıcı keşfi",
+  "settings.nativeDiscoveryHint": "Yerel tarayıcı profillerinin okunmasına izin verir. İşletim sistemi anahtarlığına erişim istenebilir. Açmak taramayı başlatmaz.",
+  "errors.native_discovery_disabled": "Yerel tarayıcı keşfi kapalı. Ayarlardan açın veya tarayıcı yardımcısını kullanın.",
+  "errors.native_discovery_retry_required": "Tamamlanmamış bir denemeden sonra otomatik yerel keşif duraklatıldı. İşletim sistemi istemini kontrol edin, ardından elle yeniden deneyin veya tarayıcı yardımcısını kullanın."
 }

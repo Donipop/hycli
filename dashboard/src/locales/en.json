@@ -477,7 +477,7 @@
   "accounts.chooseFound": "More than one account was found. Choose the account to use.",
   "accounts.openLogin": "Open website sign-in",
   "accounts.recheck": "Check again",
-  "accounts.waitLogin": "Waiting for a verified sign-in. Hycli will check again and resume setup when ready.",
+  "accounts.waitLogin": "Waiting for a verified account from the browser companion. To check local browser profiles, select Find again.",
   "accounts.loginPending": "The website has not confirmed your account yet. Try the browser companion below; some sites require documented API access.",
   "accounts.moreMethods": "More ways to connect",
   "accounts.useAccount": "Use this account",
@@ -551,5 +551,9 @@
   "files.unavailable": "Missing or unavailable",
   "files.checkFailed": "Could not check",
   "files.check": "Check availability",
-  "files.started": "Download requested. Check your browser’s downloads for completion or failure."
+  "files.started": "Download requested. Check your browser’s downloads for completion or failure.",
+  "settings.nativeDiscovery": "Native browser discovery",
+  "settings.nativeDiscoveryHint": "Allow reading local browser profiles. This may request access to your operating system keychain. Turning this on does not start a scan.",
+  "errors.native_discovery_disabled": "Native browser discovery is off. Enable it in Settings or use the browser companion.",
+  "errors.native_discovery_retry_required": "Automatic native discovery is paused after an unfinished attempt. Review any operating system prompt, then explicitly retry or use the browser companion."
 }

@@ -34,7 +34,7 @@ try {
     await button('accounts.autoFind').last().click();await expect.poll(()=>count('/api/browser/find')).toBe(1);
     await expect(page.getByRole('alert')).toBeVisible();await page.waitForTimeout(8000);assert.equal(count('/api/browser/find'),1,'Denied explicit scan never retries itself');
     checks.push('explicit denied discovery makes one request with no automatic retry');
-    fixture.control('Hold native request');await button('accounts.autoFind').last().click();await expect.poll(()=>count('/api/browser/find')).toBe(2);
+    fixture.control('Hold native request');await button('accounts.autoFind').last().dblclick();await expect.poll(()=>count('/api/browser/find')).toBe(2);
     await expect(button('accounts.searching')).toBeDisabled();
     fixture.control('Empty native result');await button('accounts.recheck').waitFor();assert.equal(count('/api/browser/find'),2);
     checks.push('pending discovery is disabled and a settled failure permits explicit retry');
@@ -42,9 +42,16 @@ try {
     await setting.click();await expect(setting).toHaveAttribute('aria-checked','false');await expect(button('accounts.recheck')).toBeDisabled();
     await setting.click();await expect(setting).toHaveAttribute('aria-checked','true');assert.equal(count('/api/browser/find'),2,'Enabling never starts a scan');
     checks.push('persistent opt-out disables native discovery; enabling requires a separate explicit scan');
+    fixture.control('Hold native request');await button('accounts.recheck').dblclick();await expect.poll(()=>count('/api/browser/find')).toBe(3);
+    await button('common.close').click();
+    await expect.poll(()=>fixture.evidence().connections.filter(c=>!c.completed).length).toBe(1);
+    await open();assert.equal(count('/api/browser/find'),3,'Closing cancels the request; reopening is passive');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    fixture.control('Empty native result');
+    checks.push('closing a pending discovery closes its real HTTP response; reopening neither retries nor shows a cancellation error');
     await button('accounts.openLogin').click();await button('accounts.companion').click();await button('browser.connect').click();
     fixture.control('Show verified account');await expect(page.getByRole('dialog')).toHaveCount(0);
-    assert.equal(count('/api/browser/find'),2);assert.equal(count('/api/browser/select'),1);assert.equal(count('/api/sites/prepare'),1);
+    assert.equal(count('/api/browser/find'),3);assert.equal(count('/api/browser/select'),1);assert.equal(count('/api/sites/prepare'),1);
     checks.push('verified companion snapshot continues once without native discovery or reauthentication');
     await page.screenshot({path:path.join(reportDir,'head.png')});
     console.log('PASS: passive connection waiting avoids native scans; explicit discovery and verified companion continuation remain usable.');
