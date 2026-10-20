@@ -758,7 +758,7 @@ async fn same_origin_preflight_preserves_literal_credentials_and_resolves_declar
         "User-Agent",
         "X-Custom-Session",
     ] {
-        let received = Arc::new(Mutex::new(Vec::<HeaderMap>::new()));
+        let received = Arc::new(Mutex::new(Vec::<(HeaderMap, Bytes)>::new()));
         let sink = received.clone();
         let (source, server) = host(
             Router::new()
@@ -770,10 +770,11 @@ async fn same_origin_preflight_preserves_literal_credentials_and_resolves_declar
                 )
                 .route(
                     "/put",
-                    post(move |headers: HeaderMap| {
+                    post(move |headers: HeaderMap, body: Bytes| {
                         let sink = sink.clone();
                         async move {
-                            sink.lock().unwrap().push(headers);
+                            // Success requires consuming the entire streaming multipart request.
+                            sink.lock().unwrap().push((headers, body));
                             Json(json!({"ok":true}))
                         }
                     }),
@@ -821,16 +822,32 @@ async fn same_origin_preflight_preserves_literal_credentials_and_resolves_declar
         .unwrap();
         let received = received.lock().unwrap();
         assert_eq!(received.len(), 1);
+        let (headers, body) = &received[0];
+        assert!(body_contains(
+            body,
+            b"name=\"file\"; filename=\"explicit.bin\""
+        ));
+        assert!(body_contains(
+            body,
+            b"\r\n\r\nliteral-credential-upload\r\n"
+        ));
+        let boundary = headers["content-type"]
+            .to_str()
+            .unwrap()
+            .split("boundary=")
+            .nth(1)
+            .unwrap();
+        assert!(body.ends_with(format!("\r\n--{boundary}--\r\n").as_bytes()));
         assert_eq!(
-            received[0][header].to_str().unwrap(),
+            headers[header].to_str().unwrap(),
             if selected {
                 secret.to_owned()
             } else {
                 format!("Bearer {secret}")
             }
         );
-        assert_eq!(received[0]["x-lease"], "lease-header-canary");
-        assert_eq!(received[0]["x-default-lease"], "lease-header-canary");
+        assert_eq!(headers["x-lease"], "lease-header-canary");
+        assert_eq!(headers["x-default-lease"], "lease-header-canary");
         drop(received);
         server.abort();
     }
