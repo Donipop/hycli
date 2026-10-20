@@ -16,7 +16,6 @@ export function setApiLocale(value: string) { locale = value; }
 export function session(): Promise<void> {
   if (renewing) return renewing;
   renewing = (async () => {
-    // The launch address from `hycli dashboard` grants this browser its session once.
     const launch = new URLSearchParams(location.search).get('launch');
     let response: Response;
     try { response = await fetch(launch ? `/api/session?launch=${encodeURIComponent(launch)}` : '/api/session', { cache: 'no-store', credentials: 'same-origin' }); }
