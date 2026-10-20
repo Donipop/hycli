@@ -101,7 +101,11 @@ fn chromium_isolation_known(connection: &rusqlite::Connection) -> Result<(), ()>
 fn load_site_cookies(
     profile: &BrowserProfile,
     target: &url::Url,
+    cancellation: &CancellationHandle,
 ) -> Result<Vec<crate::accounts::Cookie>, ()> {
+    if cancellation.is_cancelled() {
+        return Err(());
+    }
     use rookie_cookies::{AppBoundPolicy, FromPathRequest};
     let db = if profile.browser == "Firefox" {
         profile.path.join("cookies.sqlite")
@@ -131,7 +135,9 @@ fn load_site_cookies(
         .as_ref()
         .map(|snapshot| snapshot.0.join("Cookies"))
         .unwrap_or(db);
-    let mut request = FromPathRequest::new(source).timeout(std::time::Duration::from_secs(8));
+    let mut request = FromPathRequest::new(source)
+        .timeout(std::time::Duration::from_secs(8))
+        .cancellation(cancellation.clone());
     if browser_id != "firefox" {
         #[cfg(unix)]
         {
@@ -235,35 +241,63 @@ impl Drop for ScanPermit {
     }
 }
 
-async fn run_native_scan<T, F>(
+struct CancelOnDrop(CancellationHandle);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+async fn run_native_scan<T, F, P>(
     scanning: &'static AtomicBool,
     budget: Duration,
+    permitted: P,
     work: F,
 ) -> AppResult<T>
 where
     T: Send + 'static,
     F: FnOnce(CancellationHandle) -> T + Send + 'static,
+    P: Fn() -> AppResult<()>,
 {
+    permitted()?;
     if scanning.swap(true, Ordering::SeqCst) {
         return Err(AppError::api("browser_busy", 409));
     }
     let permit = ScanPermit(scanning);
     let cancellation = CancellationHandle::new();
-    let scan = tokio::task::spawn_blocking(move || {
+    let _cancel = CancelOnDrop(cancellation.clone());
+    let mut scan = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         work(cancellation)
     });
-    tokio::time::timeout(budget, scan)
-        .await
-        .map_err(|_| AppError::api("browser_unavailable", 408))?
-        .map_err(|_| AppError::api("browser_unavailable", 422))
+    let deadline = tokio::time::sleep(budget);
+    tokio::pin!(deadline);
+    let mut policy_check = tokio::time::interval(Duration::from_millis(100));
+    policy_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            result = &mut scan => {
+                let result = result.map_err(|_| AppError::api("browser_unavailable", 422))?;
+                permitted()?;
+                return Ok(result);
+            }
+            _ = &mut deadline => return Err(AppError::api("browser_unavailable", 408)),
+            _ = policy_check.tick() => permitted()?,
+        }
+    }
 }
 
 fn scan_site(
     target: &url::Url,
     wanted_profile: &str,
     profiles: Option<Vec<BrowserProfile>>,
+    cancellation: &CancellationHandle,
+    permitted: impl Fn() -> bool,
 ) -> (usize, usize, Vec<ImportedSession>) {
+    if cancellation.is_cancelled() || !permitted() {
+        cancellation.cancel();
+        return (0, 0, vec![]);
+    }
     // Local fixture/development servers do not inherit unrelated browser credentials.
     if target
         .host_str()
@@ -277,9 +311,17 @@ fn scan_site(
             .into_iter()
             .filter(|p| wanted_profile.is_empty() || p.id == wanted_profile)
             .take(24),
-        &CancellationHandle::new(),
+        cancellation,
         |profile| {
-            let cookies = load_site_cookies(&profile, target);
+            if !permitted() {
+                cancellation.cancel();
+                return ImportedSession::from_results(profile, Err(()), Err(()));
+            }
+            let cookies = load_site_cookies(&profile, target, cancellation);
+            if cancellation.is_cancelled() || !permitted() {
+                cancellation.cancel();
+                return ImportedSession::from_results(profile, Err(()), Err(()));
+            }
             let storage = crate::browser_storage::load(
                 &profile.path,
                 profile.browser == "Firefox",
@@ -292,15 +334,21 @@ fn scan_site(
 
 fn scan_profiles(
     profiles: impl IntoIterator<Item = BrowserProfile>,
-    _cancellation: &CancellationHandle,
+    cancellation: &CancellationHandle,
     mut read: impl FnMut(BrowserProfile) -> ImportedSession,
 ) -> (usize, usize, Vec<ImportedSession>) {
     let mut checked = 0;
     let mut unavailable = 0;
     let mut found = vec![];
     for profile in profiles {
+        if cancellation.is_cancelled() {
+            return (checked, unavailable, vec![]);
+        }
         checked += 1;
         let session = read(profile);
+        if cancellation.is_cancelled() {
+            return (checked, unavailable, vec![]);
+        }
         if !session.complete {
             unavailable += 1;
         }
@@ -310,6 +358,14 @@ fn scan_profiles(
 }
 
 impl Runtime {
+    fn native_discovery_permitted(&self) -> AppResult<()> {
+        if self.state.settings()?.native_browser_discovery {
+            Ok(())
+        } else {
+            Err(AppError::api("native_discovery_disabled", 409))
+        }
+    }
+
     /// A failed local read is not a logout. Keep the old snapshot whole rather
     /// than mixing cookies and storage that may belong to different sign-ins.
     fn replace_imported_account(&self, id: &str, session: &ImportedSession) -> AppResult<bool> {
@@ -389,12 +445,24 @@ impl Runtime {
         let target_copy = target.clone();
         let wanted_profile = profile_id.to_string();
         static SCANNING: AtomicBool = AtomicBool::new(false);
-        let (checked, unavailable, sessions) =
-            run_native_scan(&SCANNING, Duration::from_secs(300), move |_| {
-                scan_site(&target_copy, &wanted_profile, profiles)
-            })
-            .await?;
+        let policy_core = self.clone();
+        let (checked, unavailable, sessions) = run_native_scan(
+            &SCANNING,
+            Duration::from_secs(300),
+            || self.native_discovery_permitted(),
+            move |cancellation| {
+                scan_site(
+                    &target_copy,
+                    &wanted_profile,
+                    profiles,
+                    &cancellation,
+                    || policy_core.native_discovery_permitted().is_ok(),
+                )
+            },
+        )
+        .await?;
         for session in sessions {
+            self.native_discovery_permitted()?;
             let existing = self
                 .state
                 .read()?
@@ -711,6 +779,7 @@ mod tests {
         let task = tokio::spawn(run_native_scan(
             &GATE,
             Duration::from_secs(10),
+            || Ok(()),
             move |cancel| {
                 started.send(cancel.clone()).unwrap();
                 wait.recv().unwrap();
@@ -724,7 +793,7 @@ mod tests {
             GATE.load(Ordering::SeqCst),
             "worker still owns the scan permit"
         );
-        let second = run_native_scan(&GATE, Duration::from_secs(1), |_| ()).await;
+        let second = run_native_scan(&GATE, Duration::from_secs(1), || Ok(()), |_| ()).await;
         assert_eq!(second.unwrap_err().public_code, "browser_busy");
         release.send(()).unwrap();
         done.await.unwrap();
@@ -743,6 +812,7 @@ mod tests {
         let task = tokio::spawn(run_native_scan(
             &GATE,
             Duration::from_millis(100),
+            || Ok(()),
             move |cancel| {
                 started.send(cancel.clone()).unwrap();
                 wait.recv().unwrap();
@@ -764,17 +834,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_scan_policy_revocation_cancels_pending_worker() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let root = std::env::temp_dir().join(format!("hycli-native-policy-{}", crate::util::id()));
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        core.state
+            .update(|data| {
+                data.settings.native_browser_discovery = true;
+                Ok(())
+            })
+            .unwrap();
+        let external = crate::state::StateStore::open(&root.join("dashboard.json")).unwrap();
+        let policy = core.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run_native_scan(
+            &GATE,
+            Duration::from_secs(10),
+            move || policy.native_discovery_permitted(),
+            move |cancel| {
+                started.send(cancel.clone()).unwrap();
+                wait.recv().unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        let cancellation = ready.await.unwrap();
+        external
+            .update(|data| {
+                data.settings.native_browser_discovery = false;
+                Ok(())
+            })
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), task).await;
+        let cancelled = cancellation.is_cancelled();
+        let still_running = GATE.load(Ordering::SeqCst);
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert_eq!(
+            result.unwrap().unwrap().unwrap_err().public_code,
+            "native_discovery_disabled"
+        );
+        assert!(cancelled);
+        assert!(still_running);
+    }
+
+    #[tokio::test]
+    async fn native_scan_disabled_policy_never_starts_worker() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let result = run_native_scan(
+            &GATE,
+            Duration::from_secs(1),
+            || Err(AppError::api("native_discovery_disabled", 409)),
+            |_| panic!("disabled policy must not start native work"),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().public_code, "native_discovery_disabled");
+        assert!(!GATE.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
     async fn native_scan_completion_releases_gate_and_preserves_result() {
         static GATE: AtomicBool = AtomicBool::new(false);
         assert_eq!(
-            run_native_scan(&GATE, Duration::from_secs(1), |_| 7)
+            run_native_scan(&GATE, Duration::from_secs(1), || Ok(()), |_| 7)
                 .await
                 .unwrap(),
             7
         );
         assert!(!GATE.load(Ordering::SeqCst));
         assert_eq!(
-            run_native_scan(&GATE, Duration::from_secs(1), |_| 9)
+            run_native_scan(&GATE, Duration::from_secs(1), || Ok(()), |_| 9)
                 .await
                 .unwrap(),
             9
@@ -849,6 +979,8 @@ mod tests {
                     browser: "Firefox".into(),
                     ..profile()
                 }]),
+                &CancellationHandle::new(),
+                || true,
             );
             assert_eq!((checked, unavailable, sessions.len()), (1, 1, 1));
             let accepted = core
@@ -1010,6 +1142,8 @@ mod tests {
             &url::Url::parse("http://127.0.0.1:1234/").unwrap(),
             "",
             None,
+            &CancellationHandle::new(),
+            || true,
         );
         assert_eq!(checked, 0);
         assert_eq!(unavailable, 0);
