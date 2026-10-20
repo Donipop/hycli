@@ -119,8 +119,11 @@ try {
   state.jobs.find(j => j.id === 'summary-3').status = 'cancelled'; changed();
   await dialog().locator('.summary-operation').getByText(en['activity.cancelled'],{exact:true}).waitFor();
   refreshFails = true;
+  const failedRefresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/state' && response.status() === 503);
   await button(dialog().locator('.summary-operation'),'common.retry').dblclick();
-  await dialog().getByRole('alert').getByText(en['errors.connection_lost'],{exact:true}).waitFor();
+  await failedRefresh;
+  await page.locator('.main-content > .notice').getByText(en['activity.connectionLost'],{exact:true}).waitFor();
+  assert.equal(await dialog().getByRole('alert').count(),0,'Accepted summary must not report a command failure when only snapshot synchronization fails');
   assert.equal(summaryCount,4,'Refresh failure never repeats accepted operation');
   assert.equal(requests.filter(r => r.path === '/api/jobs/summary-3/retry').length,0);
   await dialog().locator('.summary-operation').getByRole('progressbar').waitFor();
@@ -135,6 +138,8 @@ try {
   assert.equal(summaryCount,4);
   refreshFails = false; changed();
   await dialog().locator('.summary-operation').waitFor({state:'hidden'});
+  assert.equal(await page.getByText(en['activity.connectionLost'],{exact:true}).count(),0,'Successful reconciliation clears the separate stale notice');
+  assert.equal(await dialog().getByRole('alert').count(),0,'Reconciliation leaves no false command error');
   // A later Activity retry is authoritative once the exact accepted child was observed.
   await button(dialog(),'actions.summary').click();
   await dialog().locator('.summary-operation').getByRole('progressbar').waitFor();
