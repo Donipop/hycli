@@ -247,6 +247,8 @@ try {
     for (const value of [metadata.artifact_id,metadata.local_path,en['files.notInspected'],en['files.notChecked']]) await row.getByText(value,{exact:true}).waitFor();
     await row.getByText('https://example.test · site / download',{exact:true}).waitFor();
   }
+  await fs.mkdir(path.join(root,'test-results/file-download'),{recursive:true});
+  await page.screenshot({path:path.join(root,'test-results/file-download/available-files.png'),fullPage:true});
   await page.reload({waitUntil:'domcontentloaded'}); await button(page,'files.filter').click();
   await historyFiles().nth(1).waitFor();
   assert.equal(await historyFiles().count(),2,'The available file list survives reopening from typed job history');
@@ -325,6 +327,13 @@ try {
   assert.equal(requests.filter(r => r.method === 'GET' && r.path.includes('/artifacts/')).length,getsBeforeMissing,'Closing while checking aborts a delayed download');
   assert.equal(requests.slice(fileStart).filter(r => r.method === 'POST').length,0,'Listing, retrieval, failure and reopen never rerun an action or call AI');
   await close();
+  await fs.writeFile(path.join(root,'test-results/file-download/report.json'),JSON.stringify({
+    result:'passed',environment:'production dashboard with synthetic local HTTP fixtures',
+    liveExternalAccounts:false,typedHistoryOnly:true,sameNameIdentity:true,reopenAndPruning:true,
+    nativeBytesVerified:true,duplicateClickGuard:true,existingSessionRenewal:true,
+    corruptStreamRejected:true,missingAndMismatchedFilesRejected:true,closeAbortsPendingDownload:true,
+    separateManifestExport:true,actionReruns:0,contentInspectionClaimed:false
+  },null,2));
   console.log('PASS: scoped typed file list, same-name identities, resume/pruning, native cookie download, duplicate guard, renewal, corruption/missing/close failures, separate manifest export and no action rerun');
   const uploadPath = '/synthetic host/Project Files/report final.pdf';
   state.sites[0].writes = true;

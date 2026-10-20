@@ -223,6 +223,7 @@ impl Runtime {
         }
     }
     /// Approval IDs are validated when supplied by the dashboard handler; direct CLI/MCP calls execute when writes are enabled.
+    #[cfg(test)]
     pub(crate) async fn execute(
         &self,
         request: ExecutionRequest,
@@ -247,6 +248,26 @@ impl Runtime {
         ))
         .await?;
         self.finish_prepared(job_id, outcome, attempt)
+    }
+    pub(crate) async fn verify_installed_read(
+        &self,
+        request: ExecutionRequest,
+    ) -> AppResult<(OpResult, i64)> {
+        let sp = self.spec(&request.site_id)?;
+        let op = sp.op(&request.action_id)?;
+        if policy::operation_effect(op, &request.inputs) != Effect::Read {
+            return Err(AppError::api("approval_required", 409));
+        }
+        let (outcome, attempt) = Box::pin(self.execute_definition(
+            &sp,
+            request,
+            None,
+            true,
+            None,
+            ExecutionPurpose::Verify,
+        ))
+        .await?;
+        self.finish_prepared(None, outcome, attempt)
     }
     /// Verify a proposed read without replacing the user's installed definition.
     pub async fn verify_candidate_with_inputs(
@@ -1006,12 +1027,14 @@ mod stack_ownership_tests {
                 None,
                 ExecutionPurpose::Run,
             );
-            let installed = core.execute_for_job(request, None, None);
+            let installed = core.execute_for_job(request.clone(), None, None);
+            let check = core.verify_installed_read(request);
             let direct = core.run_op(&sp, "read", &inputs);
             let candidate = core.verify_candidate_with_inputs(&sp, "read", "", BTreeMap::new());
             let operation_bytes = std::mem::size_of_val(&operation);
             for adapter_bytes in [
                 std::mem::size_of_val(&installed),
+                std::mem::size_of_val(&check),
                 std::mem::size_of_val(&direct),
                 std::mem::size_of_val(&candidate),
             ] {

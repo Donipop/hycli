@@ -189,6 +189,60 @@ async fn explicit_execution_preserves_bytes_but_candidate_verification_does_not_
     server.abort();
 }
 #[tokio::test]
+async fn repeated_recorded_file_checks_do_not_publish_artifacts_or_create_jobs() {
+    let (origin, server) = server().await;
+    let root = root();
+    let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+    let mut sp = definition(&origin);
+    let mut write = sp.operations[0].clone();
+    write.name = "write".into();
+    write.method = "POST".into();
+    write.effect = hycli::policy::Effect::Write;
+    sp.operations.push(write);
+    core.install(&sp).unwrap();
+    core.state
+        .update(|data| {
+            data.sites.entry(sp.site.name.clone()).or_default().smoke =
+                ["download", "json", "write"]
+                    .into_iter()
+                    .map(|action| hycli::smoke::ReadCheck {
+                        action: action.into(),
+                        inputs: BTreeMap::new(),
+                    })
+                    .collect();
+            Ok(())
+        })
+        .unwrap();
+    for _ in 0..3 {
+        let report = core.check_site(&sp.site.name).await.unwrap();
+        assert_eq!(report.verdict, "ok");
+        assert_eq!(report.account, None);
+        assert_eq!(report.checks.len(), 3);
+        assert_eq!(report.checks[0].outcome, "ok");
+        assert_eq!(report.checks[1].outcome, "ok");
+        assert_eq!(report.checks[2].outcome, "skipped");
+        assert_eq!(report.checks[2].error, "not_a_read");
+        assert_no_artifacts(&root);
+        assert!(core.state.read().unwrap().jobs.is_empty());
+    }
+    let (result, _) = core
+        .run_op(&sp, "download", &BTreeMap::new())
+        .await
+        .unwrap();
+    let manifest = assert_artifact(result.output().unwrap());
+    assert_eq!(core.state.read().unwrap().jobs.len(), 1);
+    let report = core.check_site(&sp.site.name).await.unwrap();
+    assert_eq!(report.verdict, "ok");
+    assert_eq!(
+        std::fs::read_dir(root.join("artifacts")).unwrap().count(),
+        1
+    );
+    assert_eq!(core.state.read().unwrap().jobs.len(), 1);
+    assert_artifact(serde_json::to_value(manifest).unwrap());
+    server.abort();
+}
+
+#[tokio::test]
 async fn completed_action_persists_authoritative_artifact_separately_from_server_json() {
     let (origin, server) = server().await;
     let root = root();
