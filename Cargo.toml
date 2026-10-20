@@ -20,7 +20,7 @@ mime_guess = "2.0.5"
 rand = "0.10.3"
 regex = "1.13.1"
 rookie-cookies = { version = "=0.6.0", default-features = false }
-reqwest = { version = "0.13.5", features = ["json", "stream"] }
+reqwest = { version = "0.13.5", features = ["json", "stream", "multipart"] }
 rmcp = { version = "3.5.1", features = ["server", "transport-io"] }
 rusqlite = { version = "0.40.2", features = ["bundled-full"] }
 rust-embed = "8.13.0"

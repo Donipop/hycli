@@ -35,6 +35,9 @@ pub struct Request {
     pub follow_redirects: bool,
     /// Compatibility metadata; requests always use the standard HTTP/TLS stack.
     pub tls_profile: String,
+    /// multipart/form-data parts. When present, sent in place of `body`; the
+    /// network layer reads any file parts from disk and sets the boundary.
+    pub multipart: Option<Vec<crate::spec::MultipartPart>>,
 }
 impl Request {
     fn check_read_headers(&self) -> AppResult<()> {
@@ -491,7 +494,9 @@ impl Network {
             let method = Method::from_bytes(input.method.as_bytes())
                 .map_err(|_| AppError::api("data_invalid", 400))?;
             let mut request = client.request(method, target.clone()).headers(headers);
-            if let Some(body) = &input.body {
+            if let Some(parts) = &input.multipart {
+                request = request.multipart(build_multipart_form(parts).await?);
+            } else if let Some(body) = &input.body {
                 request = request.body(body.clone());
             }
             if let Some(check) = check_authority {
@@ -811,6 +816,55 @@ pub fn retry_after(headers: &[(String, String)]) -> Option<Duration> {
     })
 }
 
+/// Build a reqwest multipart form, reading any file parts from disk. File parts
+/// are capped at 100 MiB and their media type is inferred from the extension.
+async fn build_multipart_form(
+    parts: &[crate::spec::MultipartPart],
+) -> AppResult<reqwest::multipart::Form> {
+    use crate::spec::MultipartPart;
+    let mut form = reqwest::multipart::Form::new();
+    for part in parts {
+        match part {
+            MultipartPart::Text { name, value } => {
+                form = form.text(name.clone(), value.clone());
+            }
+            MultipartPart::File { name, path } => {
+                let meta = tokio::fs::metadata(path)
+                    .await
+                    .map_err(|_| AppError::api("data_invalid", 400))?;
+                if meta.len() > 100 * 1024 * 1024 {
+                    return Err(AppError::api("data_invalid", 400));
+                }
+                let bytes = tokio::fs::read(path)
+                    .await
+                    .map_err(|_| AppError::api("data_invalid", 400))?;
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "upload".into());
+                let ext = std::path::Path::new(path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase());
+                let mime = match ext.as_deref() {
+                    Some("gif") => "image/gif",
+                    Some("png") => "image/png",
+                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("webp") => "image/webp",
+                    Some("mp4") => "video/mp4",
+                    _ => "application/octet-stream",
+                };
+                let field = reqwest::multipart::Part::bytes(bytes)
+                    .file_name(filename)
+                    .mime_str(mime)
+                    .map_err(|_| AppError::api("data_invalid", 400))?;
+                form = form.part(name.clone(), field);
+            }
+        }
+    }
+    Ok(form)
+}
+
 #[cfg(test)]
 mod website_input_tests {
     use super::*;
@@ -827,6 +881,7 @@ mod website_input_tests {
             read_only: true,
             follow_redirects: false,
             tls_profile: String::new(),
+            multipart: None,
         };
         let error = request.check_read_headers().unwrap_err();
         assert_eq!(error.public_code, "approval_required");
@@ -868,6 +923,7 @@ mod website_input_tests {
                     read_only: true,
                     follow_redirects: true,
                     tls_profile: String::new(),
+                    multipart: None,
                 },
                 Some(("pageToken", "private-timeout-cursor")),
             )

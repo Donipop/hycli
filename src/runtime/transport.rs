@@ -190,6 +190,7 @@ impl Runtime {
             read_only: true,
             follow_redirects: true,
             tls_profile: tls_profile.into(),
+            multipart: None,
         };
         let direct_key = policy::Policy::strategy_key("GET", url, "http", account);
         if !is_local_url

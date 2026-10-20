@@ -99,6 +99,58 @@ fn build_request() {
 }
 
 #[test]
+fn build_multipart_resolves_file_and_text_parts() {
+    let sp = parse(
+        r##"
+spec_version: 1
+site:
+  name: up
+  title: Upload Fixture
+  base_url: https://up.example.com
+operations:
+  - name: upload
+    method: POST
+    path: /upload
+    body:
+      multipart:
+        avatar: {type: file, required: true}
+        caption: {type: string, default: hello}
+        slot: {type: string, required: true}
+"##,
+    );
+    let op = sp.op("upload").unwrap();
+    let mut args = BTreeMap::new();
+    args.insert("avatar".to_string(), "/tmp/pic.gif".to_string());
+    args.insert("slot".to_string(), "main".to_string());
+    let parts = sp.build_multipart(op, &args).unwrap();
+    // BTreeMap iterates keys sorted: avatar, caption, slot.
+    assert_eq!(parts.len(), 3);
+    match &parts[0] {
+        spec::MultipartPart::File { name, path } => {
+            assert_eq!(name, "avatar");
+            assert_eq!(path, "/tmp/pic.gif");
+        }
+        other => panic!("expected file part, got {other:?}"),
+    }
+    match &parts[1] {
+        spec::MultipartPart::Text { name, value } => {
+            assert_eq!(name, "caption");
+            assert_eq!(value, "hello", "default applied");
+        }
+        other => panic!("expected text part, got {other:?}"),
+    }
+    match &parts[2] {
+        spec::MultipartPart::Text { name, value } => {
+            assert_eq!(name, "slot");
+            assert_eq!(value, "main");
+        }
+        other => panic!("expected text part, got {other:?}"),
+    }
+    let err = sp.build_multipart(op, &BTreeMap::new()).unwrap_err();
+    assert!(err.msg.contains("avatar"), "missing required: {err}");
+}
+
+#[test]
 fn apply_model() {
     let sp = parse(GOOD);
     let raw = br#"{"id": 7, "name": "abc", "extra": true}"#;

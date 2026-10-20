@@ -315,6 +315,7 @@ pub fn draft_spec(
         let mut op = spec::Operation {
             pagination: None,
             transport: String::new(),
+            derived_target: false,
             name,
             desc: format!(
                 "capture draft ({} observations, last status {})",
@@ -393,6 +394,7 @@ pub fn draft_spec(
                     json: json_map,
                     json_template: None,
                     form: BTreeMap::new(),
+                    multipart: BTreeMap::new(),
                 });
             }
         } else if !c.form_body.is_empty() {
@@ -414,6 +416,7 @@ pub fn draft_spec(
                     json: BTreeMap::new(),
                     json_template: None,
                     form: form_map,
+                    multipart: BTreeMap::new(),
                 });
             }
         }

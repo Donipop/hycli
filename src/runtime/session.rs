@@ -52,6 +52,7 @@ impl Runtime {
                     read_only: true,
                     follow_redirects: false,
                     tls_profile: "standard".into(),
+                    multipart: None,
                 })
                 .await?;
             let observation = Observation {

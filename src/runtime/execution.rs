@@ -242,9 +242,16 @@ impl Runtime {
             wire_inputs.remove(&p.input);
         }
         let (mut url, mut body) = sp.build_request(op, &wire_inputs)?;
+        let mut multipart = if op.body.as_ref().is_some_and(|b| !b.multipart.is_empty()) {
+            Some(sp.build_multipart(op, &wire_inputs)?)
+        } else {
+            None
+        };
         let mut effect =
             policy::rendered_request_effect(op, &request.inputs, &url, body.as_deref());
-        if origin(&url)? != origin(sp.operation_base(op))? {
+        // A derived_target op's real URL comes from its preflight/lease response
+        // and is only resolved after preflight runs, so validate its origin there.
+        if !op.derived_target && origin(&url)? != origin(sp.operation_base(op))? {
             return Err(AppError::api("unsafe_target", 400));
         }
         let (mut headers, mut secrets, credential_snapshot) =
@@ -298,11 +305,14 @@ impl Runtime {
                 effect = effect.combine(post_effect);
                 self.ensure_writes(&sp.site.name)?;
             }
-            if origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
+            if !op.derived_target && origin(&rebuilt_url)? != origin(sp.operation_base(op))? {
                 return Err(AppError::api("unsafe_target", 400));
             }
             url = rebuilt_url;
             body = rebuilt_body;
+            if op.body.as_ref().is_some_and(|b| !b.multipart.is_empty()) {
+                multipart = Some(sp.build_multipart(op, &effective_inputs)?);
+            }
             let empty_resolved = BTreeMap::new();
             for (_, v) in &mut headers {
                 if v.contains("{{") {
@@ -312,6 +322,18 @@ impl Runtime {
                         &effective_inputs,
                     );
                 }
+            }
+        }
+        // A derived_target op is the one place a request may leave the site's
+        // declared origin. Validate the final URL here so it is covered whether
+        // or not a preflight ran: require https (loopback for local tests) so a
+        // file is never uploaded in cleartext.
+        if op.derived_target {
+            let parsed = crate::net::validate_url(&url)?;
+            let host = parsed.host_str().unwrap_or_default();
+            let local = host == "127.0.0.1" || host == "localhost" || host == "::1";
+            if parsed.scheme() != "https" && !local {
+                return Err(AppError::api("unsafe_target", 400));
             }
         }
         effect = effect.combine(policy::request_headers_effect(
@@ -348,6 +370,7 @@ impl Runtime {
             read_only: effect == Effect::Read,
             follow_redirects: effect == Effect::Read,
             tls_profile: sp.defaults.tls_profile.clone(),
+            multipart,
         };
         let direct_key =
             policy::Policy::strategy_key(&op.method, &url, "http", &request.account_id);

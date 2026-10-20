@@ -26,10 +26,14 @@ impl Runtime {
                 let (u, _) = sp.build_request(pre_op, &step_args)?;
                 u
             } else {
-                let base = if step.base_url.is_empty() {
-                    sp.operation_base(op)
-                } else {
+                let base = if !step.base_url.is_empty() {
                     step.base_url.as_str()
+                } else if op.derived_target {
+                    // The op's own base is a derived (lease) target, so a step
+                    // without an explicit base fetches the lease from the site.
+                    sp.site.base_url.as_str()
+                } else {
+                    sp.operation_base(op)
                 };
                 format!(
                     "{}/{}",

@@ -1003,28 +1003,34 @@ pub fn validate_spec(sp: &Spec) -> AppResult<()> {
         {
             return Err(AppError::api("data_invalid", 400));
         }
-        let destination = crate::net::validate_url(sp.operation_base(op))?;
-        if destination.query().is_some() || destination.fragment().is_some() {
-            return Err(AppError::api("bad_url", 400));
-        }
-        if let Some(auth) = sp.find_auth(&op.auth) {
-            if auth.kind == "header" {
-                let scope = crate::net::validate_url(if auth.origin.is_empty() {
-                    &sp.site.base_url
-                } else {
-                    &auth.origin
-                })?;
-                if destination.origin() != scope.origin() {
-                    return Err(AppError::api("unsafe_target", 400));
-                }
-            } else if matches!(auth.kind.as_str(), "browser" | "derived") {
-                let scope = crate::net::validate_url(if auth.origin.is_empty() {
-                    sp.site.source_url()
-                } else {
-                    &auth.origin
-                })?;
-                if !crate::net::same_site_origin(&destination, &scope) {
-                    return Err(AppError::api("unsafe_target", 400));
+        // A templated base (for example a derived_target upload whose target
+        // comes from a preflight/lease response) is resolved at runtime and
+        // cannot be checked as a static URL here. A non-derived op with a
+        // templated base is still rejected at execution by the origin gate.
+        if !sp.operation_base(op).contains("{{") {
+            let destination = crate::net::validate_url(sp.operation_base(op))?;
+            if destination.query().is_some() || destination.fragment().is_some() {
+                return Err(AppError::api("bad_url", 400));
+            }
+            if let Some(auth) = sp.find_auth(&op.auth) {
+                if auth.kind == "header" {
+                    let scope = crate::net::validate_url(if auth.origin.is_empty() {
+                        &sp.site.base_url
+                    } else {
+                        &auth.origin
+                    })?;
+                    if destination.origin() != scope.origin() {
+                        return Err(AppError::api("unsafe_target", 400));
+                    }
+                } else if matches!(auth.kind.as_str(), "browser" | "derived") {
+                    let scope = crate::net::validate_url(if auth.origin.is_empty() {
+                        sp.site.source_url()
+                    } else {
+                        &auth.origin
+                    })?;
+                    if !crate::net::same_site_origin(&destination, &scope) {
+                        return Err(AppError::api("unsafe_target", 400));
+                    }
                 }
             }
         }

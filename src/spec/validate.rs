@@ -233,12 +233,20 @@ impl Spec {
                     *counts.entry(k).or_default() += 1;
                 }
                 if let Some(b) = &op.body {
-                    if (!b.json.is_empty() || b.json_template.is_some()) && !b.form.is_empty() {
+                    let encodings = [
+                        !b.json.is_empty() || b.json_template.is_some(),
+                        !b.form.is_empty(),
+                        !b.multipart.is_empty(),
+                    ]
+                    .iter()
+                    .filter(|used| **used)
+                    .count();
+                    if encodings > 1 {
                         add(
                             &mut out,
                             &format!("{id}.body"),
                             "Choose one body encoding".into(),
-                            "Use body.json/json_template or body.form, not both.",
+                            "Use body.json/json_template, body.form, or body.multipart, not more than one.",
                         );
                     }
                     for (k, _) in b.inputs() {
@@ -281,6 +289,23 @@ impl Spec {
                 if let Some(b) = &op.body {
                     check(&format!("{id}.body.json"), &b.json, &mut out);
                     check(&format!("{id}.body.form"), &b.form, &mut out);
+                    for (n, p) in &b.multipart {
+                        match p.kind.as_str() {
+                            "string" | "int" | "float" | "bool" | "json" | "file" => {}
+                            other => out.push(Issue {
+                                field: format!("{id}.body.multipart.{n}.type"),
+                                detail: format!("unsupported type: {other}"),
+                                remedy: "string|int|float|bool|json|file".into(),
+                            }),
+                        }
+                        if p.required && p.default.is_some() {
+                            out.push(Issue {
+                                field: format!("{id}.body.multipart.{n}"),
+                                detail: "required parameter cannot also define a default".into(),
+                                remedy: "Use required or default, not both".into(),
+                            });
+                        }
+                    }
                 }
             }
         }

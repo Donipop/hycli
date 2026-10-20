@@ -112,8 +112,12 @@ impl Runtime {
             }
         }
         if let Some(body) = &op.body {
-            headers.retain(|key, _| !key.eq_ignore_ascii_case("content-type"));
-            headers.insert("content-type".into(), body.content_type().into());
+            // A multipart upload sets its own content-type (with the boundary) in
+            // the network layer; do not force one here.
+            if body.multipart.is_empty() {
+                headers.retain(|key, _| !key.eq_ignore_ascii_case("content-type"));
+                headers.insert("content-type".into(), body.content_type().into());
+            }
         }
         Ok((headers.into_iter().collect(), secrets, loaded_credential))
     }
@@ -326,6 +330,7 @@ impl Runtime {
             read_only: true,
             follow_redirects: false,
             tls_profile: "standard".into(),
+            multipart: None,
         };
         let response = self.network.fetch(request.clone()).await?;
         // A permission/challenge response does not prove this session signed out.
