@@ -357,6 +357,7 @@
   "safety.approvalExpired": "This confirmation has expired. Review the action again.",
   "errors.approval_required": "This action needs your confirmation.",
   "errors.approval_expired": "Review this action again before running it.",
+  "errors.api_denied": "The endpoint denied this request. Check endpoint access, configuration, permissions/scopes, and inputs.",
   "errors.blocked_by_site": "The website declined this request. Check your account in the browser.",
   "errors.engine_unavailable": "The website tool engine is not available. Check its connection in Settings.",
   "errors.engine_incompatible": "Update the website tool engine to connect it to Hycli.",

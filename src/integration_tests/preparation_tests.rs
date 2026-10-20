@@ -444,6 +444,22 @@ async fn resilience_against_false_403_lockout_multi_cookie_preflight_and_embedde
         .err()
         .unwrap();
     assert_eq!(first_err.http_status, 403);
+    assert_eq!(first_err.public_code, "api_denied");
+    assert_eq!(
+        first_err.public_error()["error"]["diagnostic"],
+        json!({"upstream_status":403,"defense":"none","provider_reason":"insufficient_scope"})
+    );
+    let failed_job = core
+        .state
+        .read()
+        .unwrap()
+        .jobs
+        .into_iter()
+        .find(|job| job.action_id == "forbidden-check")
+        .unwrap();
+    assert_eq!(failed_job.status, "failed");
+    assert_eq!(failed_job.error_code, "api_denied");
+    assert!(failed_job.result.is_none());
     assert_eq!(
         core.state.read().unwrap().accounts[&acct.id].status,
         "connected"

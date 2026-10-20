@@ -371,6 +371,7 @@
   "safety.approvalExpired": "承認の期限が切れました。操作をもう一度確認してください。",
   "errors.approval_required": "この操作には確認が必要です。",
   "errors.approval_expired": "実行前にこの操作をもう一度確認してください。",
+  "errors.api_denied": "エンドポイントがリクエストを拒否しました。アクセス権、設定、権限の範囲、入力値を確認してください。",
   "errors.blocked_by_site": "ウェブサイトがリクエストを拒否しました。ブラウザーでアカウントを確認してください。",
   "errors.engine_unavailable": "ウェブサイトツールの実行エンジンを利用できません。設定で接続を確認してください。",
   "errors.engine_incompatible": "ウェブサイトツールの実行エンジンを更新して、Hycliに接続してください。",

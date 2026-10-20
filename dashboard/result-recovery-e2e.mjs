@@ -67,6 +67,14 @@ try {
     await close();
   }
   console.log('PASS: empty-success text only on successful completion; failure remedy unchanged');
+  state.jobs = [job('API denial','failed',{error_code:'api_denied'})];
+  await visit();
+  await open('API denial');
+  await dialog().getByRole('alert').getByText(en['errors.api_denied'],{exact:true}).waitFor();
+  assert.equal(await button(dialog(),'accounts.autoFind').count(),0,'API denial does not suggest reconnecting the account');
+  assert.equal(await dialog().getByText(en['actions.noResult'],{exact:true}).count(),0,'A denied read is not an empty success');
+  await close();
+  console.log('PASS: API denial shows its own remedy without account reconnection or empty success');
   const original = job('Read original','completed',{result:{answer:'Original read retained'}});
   state.jobs = [original,job('Other parent','completed',{result:{answer:'Independent result'}}),job('unrelated-summary','failed',{kind:'summary',parent_id:'different-parent',error_code:'ai_billing_error'})];
   await visit();

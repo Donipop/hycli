@@ -15,3 +15,6 @@ try {await rpc('initialize',{protocolVersion:'2025-03-26',capabilities:{},client
 }finally{for(const p of pending.values())clearTimeout(p.timer);processMcp.stdin.end();processMcp.kill('SIGTERM');}
 const publicFiles=await fs.readdir(root);for(const name of publicFiles.filter(n=>n!=='store.json')){if((await fs.stat(path.join(root,name))).isFile())assert.ok(!(await fs.readFile(path.join(root,name))).includes(Buffer.from(raw)),'raw continuation persisted in '+name);}
 }finally{server.close();}
+
+// Exercise the shared HTTP failure boundary on the same actual native binary.
+await import("./test-http-denial.mjs");

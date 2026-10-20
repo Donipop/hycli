@@ -510,12 +510,17 @@ impl Runtime {
         {
             private_cursors.push(value.into());
         }
-        let next_cursor =
-            self.capture_cursor(&checked, op, &url, &mut raw, &mut secrets, matches_expected)?;
-        super::pagination::scrub(&mut raw, &private_cursors)?;
+        let next_cursor = if response.successful() && !query_error {
+            self.capture_cursor(&checked, op, &url, &mut raw, &mut secrets, matches_expected)?
+        } else {
+            None
+        };
+        if response.successful() && !query_error {
+            super::pagination::scrub(&mut raw, &private_cursors)?;
+        }
         secrets.extend(private_cursors.iter().cloned());
         let clean = sanitized(raw.clone(), &secrets);
-        let mapped = if op.model.is_empty() {
+        let mapped = if op.model.is_empty() || !response.successful() || query_error {
             None
         } else {
             let model_bytes = serde_json::to_vec(&raw)?;
@@ -554,6 +559,12 @@ impl Runtime {
         }
         Ok((
             OpResult {
+                diagnostic: Some(crate::apperr::SafeHttpDiagnostic::from_response(
+                    response.status,
+                    &response.defense,
+                    response.json().as_ref(),
+                    &secrets,
+                )),
                 paginated: op.pagination.is_some(),
                 next_cursor,
                 site: sp.site.name.clone(),

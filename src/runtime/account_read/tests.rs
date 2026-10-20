@@ -62,6 +62,7 @@ impl Fixture {
                 count.fetch_add(1,Ordering::SeqCst);
                 assert_eq!(headers.get("cookie").unwrap(),"sid=synthetic-private-session");
                 match mode.load(Ordering::SeqCst) {
+                    15 => (StatusCode::FORBIDDEN,Json(json!({"error":{"code":"insufficient_scope","message":"private-provider-detail"},"token":"synthetic-private-session"}))).into_response(),
                     1 => (StatusCode::UNAUTHORIZED,Json(json!({"error":"expired"}))).into_response(),
                     2 => axum::response::Redirect::temporary("/mutate").into_response(),
                     3 => (StatusCode::TOO_MANY_REQUESTS,[("retry-after","1")],Json(json!({"error":"limited"}))).into_response(),
@@ -1152,6 +1153,43 @@ query Q { item(page:1,limit:10,label:"public") { id } }"#;
             .prepare()
             .unwrap()
             .screen_normalized_secrets(&input_secrets)
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn ordinary_api_denial_preserves_account_and_allows_a_healthy_read() {
+    let f = Fixture::new().await;
+    let path = f.descriptor("denied", "GET", "/items", None);
+    let before = f.core.account_read_snapshot(&f.id).unwrap().binding;
+    f.mode.store(15, Ordering::SeqCst);
+    let error = f
+        .core
+        .read_account_request(&f.id, &path, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.public_code, "api_denied");
+    assert_eq!(error.http_status, 403);
+    assert_eq!(
+        error.public_error()["error"]["diagnostic"],
+        json!({"upstream_status":403,"defense":"none","provider_reason":"insufficient_scope"})
+    );
+    assert!(
+        !error
+            .public_error()
+            .to_string()
+            .contains("private-provider-detail")
+    );
+    assert_eq!(f.core.account_read_snapshot(&f.id).unwrap().binding, before);
+    assert_eq!(
+        f.core.state.account(&f.id).unwrap().unwrap().status,
+        "connected"
+    );
+    f.mode.store(0, Ordering::SeqCst);
+    assert!(
+        f.core
+            .read_account_request(&f.id, &path, None)
+            .await
             .is_ok()
     );
 }
