@@ -110,10 +110,65 @@ export function HandoffDialog({ site, ops, onClose }: { site: Site | null; ops: 
   const value = content ? tab === 'instructions' ? content.instructions : tab === 'config' ? JSON.stringify(content.config, null, 2) : content.command : '';
   return <Modal title={site ? t('handoff.title', { site: site.title }) : t('handoff.titleGeneral')} subtitle={t('handoff.description')} onClose={onClose}><div className="filter-tabs handoff-tabs">{['config', 'command', 'instructions'].map(id => <button className={tab === id ? 'selected' : ''} key={id} onClick={() => setTab(id)}>{t(id === 'instructions' ? 'agents.instructions' : `handoff.${id}`)}</button>)}</div>{error ? <ErrorNotice code={error} /> : content ? <><pre className="handoff-content" tabIndex={0}>{value}</pre><p className="subtle-note">{t(tab === 'config' ? 'handoff.configHint' : tab === 'instructions' ? 'agents.instructionsHint' : 'handoff.localNote')}</p><Button onClick={() => { void copyText(value).then(() => ops.toast('common.copied')).catch(() => setError('internal')); }}><Copy size={15} />{t(tab === 'config' ? 'handoff.copyConfig' : tab === 'instructions' ? 'handoff.copyInstructions' : 'common.copy')}</Button></> : <p>{t('common.loading')}</p>}{site && <div className="handoff-actions"><h3>{t('handoff.available')}</h3>{site.actions.map(a => <span key={a.id}><Check size={13} />{a.title}</span>)}</div>}</Modal>;
 }
-export function ResultDialog({ job, data, ops, onClose, connectAccount }: { job: Job; data: Snapshot; ops: Operations; onClose: () => void; connectAccount?: () => void }) {
-  const { t, date } = useI18n(); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const working = ['running', 'queued'].includes(job.status);
+// Workspace owns requests so closing a result dialog cannot forget an accepted
+// operation or release an in-flight submission. Never persist result data to disk.
+export function useSummaryRequests(jobs: Job[]) {
+  const [requests, setRequests] = useState<Record<string, { pending: boolean; job?: Job }>>({});
+  const submitting = useRef(new Set<string>());
+  useEffect(() => {
+    // An accepted response is only a bridge until that exact child is observed.
+    // Thereafter the snapshot owns its status and any subsequent Activity retry.
+    setRequests(current => {
+      let next = current;
+      for (const [parent, request] of Object.entries(current)) {
+        if (!request.job || !jobs.some(job => job.id === request.job!.id && job.kind === 'summary' && job.parent_id === parent)) continue;
+        if (next === current) next = { ...current };
+        next[parent] = { pending: request.pending };
+      }
+      return next;
+    });
+  }, [jobs, requests]);
+  return {
+    requests,
+    begin(parent: string) {
+      if (submitting.current.has(parent)) return false;
+      submitting.current.add(parent);
+      setRequests(current => ({ ...current, [parent]: { ...current[parent], pending: true } }));
+      return true;
+    },
+    accept(parent: string, job: Job) {
+      setRequests(current => ({ ...current, [parent]: { ...current[parent], job } }));
+    },
+    finish(parent: string) {
+      submitting.current.delete(parent);
+      setRequests(current => ({ ...current, [parent]: { ...current[parent], pending: false } }));
+    },
+  };
+}
+export function ResultDialog({ job, data, ops, onClose, connectAccount, summaries }: { summaries: ReturnType<typeof useSummaryRequests>; job: Job; data: Snapshot; ops: Operations; onClose: () => void; connectAccount?: () => void }) {
+  const { t, date } = useI18n(); const [error, setError] = useState(''); const working = ['running', 'queued'].includes(job.status);
   const [result, setResult] = useState<unknown>(job.result);
   const [resultLoading, setResultLoading] = useState(false);
+  const summaryRequest = summaries.requests[job.id];
+  const requestedSummary = summaryRequest?.job;
+  const busy = !!summaryRequest?.pending;
+  const summaryJobs = data.jobs.filter(child => child.kind === 'summary' && child.parent_id === job.id).sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
+  const summaryJob = requestedSummary?.parent_id === job.id && !summaryJobs.some(child => child.id === requestedSummary.id) ? requestedSummary : summaryJobs[0];
+  const summaryPending = busy || summaryJobs.some(isWorking) || (!!summaryJob && isWorking(summaryJob));
+  const summaryNeedsRetry = summaryJob && ['failed', 'cancelled'].includes(summaryJob.status);
+  const summarize = async (retry?: Job) => {
+    if (summaryPending || !summaries.begin(job.id)) return;
+    setError('');
+    try {
+      const result = retry?.status === 'failed'
+        ? await request<{job: Job}>(`/api/jobs/${retry.id}/retry`, 'POST')
+        : await request<{job: Job}>(`/api/jobs/${job.id}/summarize`, 'POST', {provider: retry?.provider || data.settings.default_provider});
+      summaries.accept(job.id, result.job);
+      await ops.refresh();
+    } catch (e) { setError(codeOf(e)); }
+    finally { summaries.finish(job.id); }
+  };
+
   useEffect(() => {
     let active = true;
     setResult(job.result);
@@ -122,7 +177,7 @@ export function ResultDialog({ job, data, ops, onClose, connectAccount }: { job:
     void request<Job>(`/api/jobs/${job.id}`).then(full => { if (active) setResult(full.result); }).catch(e => { if (active) setError(codeOf(e)); }).finally(() => { if (active) setResultLoading(false); });
     return () => { active = false; };
   }, [job.id, job.updated_at, job.status, working]);
-  return <Modal title={job.action_title || job.site_title} subtitle={job.site_title} onClose={onClose} wide>{working ? <Progress job={job} onCancel={() => { void ops.act(`/api/jobs/${job.id}/cancel`).catch(e => setError(codeOf(e))); }} /> : <><div className="result-heading"><Badge tone={job.status === 'completed' ? 'green' : 'amber'}>{t(`activity.${job.status}`)}</Badge><span>{date(job.finished_at || job.updated_at)}</span></div>{job.error_code && <ErrorNotice code={job.error_code} />}{connectAccount && ['auth_required', 'blocked_by_site', 'browser_unavailable'].includes(job.error_code || '') && <Button variant="secondary" onClick={connectAccount}>{t('accounts.autoFind')}<ArrowRight size={15} /></Button>}{job.summary && <div className="result-summary"><Sparkles size={18} /><div><h3>{t('actions.summary')}</h3><p>{job.summary}</p></div></div>}{resultLoading ? <p className="list-empty">{t('common.loading')}</p> : result !== undefined ? <><ResultValue value={result} /><div className="result-actions"><Button variant="secondary" onClick={() => { void copyText(formatValue(result)).then(() => ops.toast('common.copied')).catch(() => setError('internal')); }}><Copy size={14} />{t('actions.copy')}</Button><Button variant="secondary" onClick={() => { void download(`/api/jobs/${job.id}/result`, `hycli-${job.id.slice(0, 8)}.json`).catch(e => setError(codeOf(e))); }}><ArrowDownToLine size={14} />{t('actions.download')}</Button><Button disabled={!data.providers.some(p => p.connected) || data.jobs.some(child => child.parent_id === job.id && isWorking(child))} loading={busy} onClick={() => { setBusy(true); void ops.act(`/api/jobs/${job.id}/summarize`, 'POST', { provider: data.settings.default_provider }).catch(e => setError(codeOf(e))).finally(() => setBusy(false)); }}><Sparkles size={14} />{t('actions.summary')}</Button></div></> : <p className="list-empty">{t('actions.noResult')}</p>}</>}{!working && (job.notes?.length || 0) > 0 && <section className="work-log"><h3>{t('activity.workLog')}</h3><WorkNotes job={job} /></section>}{data.jobs.filter(child => child.parent_id === job.id && isWorking(child)).map(child => <Progress key={child.id} job={child} compact />)}{error && <ErrorNotice code={error} />}</Modal>;
+  return <Modal title={job.action_title || job.site_title} subtitle={job.site_title} onClose={onClose} wide>{working ? <Progress job={job} onCancel={() => { void ops.act(`/api/jobs/${job.id}/cancel`).catch(e => setError(codeOf(e))); }} /> : <><div className="result-heading"><Badge tone={job.status === 'completed' ? 'green' : 'amber'}>{t(`activity.${job.status}`)}</Badge><span>{date(job.finished_at || job.updated_at)}</span></div>{job.error_code && <ErrorNotice code={job.error_code} />}{connectAccount && ['auth_required', 'blocked_by_site', 'browser_unavailable'].includes(job.error_code || '') && <Button variant="secondary" onClick={connectAccount}>{t('accounts.autoFind')}<ArrowRight size={15} /></Button>}{job.summary && <div className="result-summary"><Sparkles size={18} /><div><h3>{t('actions.summary')}</h3><p>{job.summary}</p></div></div>}{resultLoading ? <p className="list-empty">{t('common.loading')}</p> : result !== undefined ? <><ResultValue value={result} /><div className="result-actions"><Button variant="secondary" onClick={() => { void copyText(formatValue(result)).then(() => ops.toast('common.copied')).catch(() => setError('internal')); }}><Copy size={14} />{t('actions.copy')}</Button><Button variant="secondary" onClick={() => { void download(`/api/jobs/${job.id}/result`, `hycli-${job.id.slice(0, 8)}.json`).catch(e => setError(codeOf(e))); }}><ArrowDownToLine size={14} />{t('actions.download')}</Button>{!summaryNeedsRetry && <Button disabled={job.status !== 'completed' || !data.providers.some(p => p.connected) || summaryPending} loading={busy} onClick={() => { void summarize(); }}><Sparkles size={14} />{t('actions.summary')}</Button>}</div></> : job.status === 'completed' && !job.error_code && !error ? <p className="list-empty">{t('actions.noResult')}</p> : null}</>}{!working && (job.notes?.length || 0) > 0 && <section className="work-log"><h3>{t('activity.workLog')}</h3><WorkNotes job={job} /></section>}{summaryJob && summaryJob.status !== 'completed' && <section className="summary-operation" aria-label={t('actions.summary')} aria-live="polite"><h3>{t('actions.summary')}</h3>{isWorking(summaryJob) ? <Progress job={summaryJob} compact /> : summaryNeedsRetry ? <><Badge tone="amber">{t(`activity.${summaryJob.status}`)}</Badge><p>{t('errors.no_summary')}</p>{summaryJob.error_code && summaryJob.error_code !== 'no_summary' && <ErrorNotice code={summaryJob.error_code} />}<Button variant="secondary" loading={busy} disabled={summaryPending || !data.providers.some(p => p.connected)} onClick={() => { void summarize(summaryJob); }}>{t('common.retry')}</Button></> : null}</section>}{error && <ErrorNotice code={error} />}</Modal>;
 }
 function ResultValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   const { t, number } = useI18n();
