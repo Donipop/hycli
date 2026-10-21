@@ -389,3 +389,78 @@ fn anthropic_status_errors_remain_safe_without_json_and_spend_caps_are_not_trans
         "ai_billing_error"
     );
 }
+
+#[test]
+fn provider_output_failures_have_actionable_finite_codes() {
+    for (provider, value, expected) in [
+        (
+            "anthropic",
+            json!({"stop_reason":"max_tokens","content":[]}),
+            "ai_response_incomplete",
+        ),
+        (
+            "openai",
+            json!({"status":"incomplete"}),
+            "ai_response_incomplete",
+        ),
+        (
+            "zai",
+            json!({"choices":[{"finish_reason":"length"}]}),
+            "ai_response_incomplete",
+        ),
+        (
+            "anthropic",
+            json!({"stop_reason":"unexpected-private-value"}),
+            "ai_response_invalid",
+        ),
+        (
+            "openai",
+            json!({"status":"completed","output":[]}),
+            "ai_response_invalid",
+        ),
+    ] {
+        let error = extract_text(provider, &value).unwrap_err();
+        assert_eq!(error.public_code, expected);
+        assert!(!format!("{error:?}").contains("private-value"));
+    }
+    for text in ["private-output", "{\"private-output\":"] {
+        let error = decode_json::<Value>(text).unwrap_err();
+        assert_eq!(error.public_code, "ai_response_invalid");
+        assert!(!format!("{error:?}").contains("private-output"));
+    }
+}
+
+#[tokio::test]
+async fn unreadable_provider_error_body_preserves_rate_limit_status() {
+    let router = Router::new().route(
+        "/messages",
+        post(|| async {
+            (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "x".repeat(8 * 1024 * 1024 + 1),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut client = Client::new(Arc::new(codex::Codex::new(
+        std::env::temp_dir().join("synthetic-ai-body-test"),
+    )));
+    client.origins.insert("anthropic".into(), origin);
+    let error = client
+        .complete(
+            &Config {
+                provider: "anthropic".into(),
+                model: "fixture".into(),
+                key: "synthetic-key".into(),
+            },
+            "fixture",
+            "fixture",
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.public_code, "rate_limited");
+    assert_eq!(error.http_status, 429);
+    server.abort();
+}
