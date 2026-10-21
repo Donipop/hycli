@@ -67,8 +67,12 @@ Hycli एक एकल नेटिव बाइनरी के रूप म�
 | **macOS 13+** | Apple Silicon (`arm64`) और Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` खोलें, **Hycli.app** को **Applications** में ड्रैग करें और खोलें (यह स्वतः `~/.local/bin` में `hycli` को लिंक कर देता है)। |
 | **Linux** | x64 और ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` इंस्टॉल करें (`sudo apt install ./hycli-*.deb`) या `.tar.gz` एक्सट्रैक्ट करके `./install.sh` चलाएं, फिर `hycli open` चलाएं। |
 
+**प्रकाशित संस्करण v0.1.0:** Windows और macOS के पोर्टेबल आर्काइव में इंस्टॉलेशन स्क्रिप्ट शामिल नहीं हैं। इसके बजाय ऊपर दिए गए रिलीज़ लिंक से Windows के लिए `*-setup.exe` या macOS के लिए `.dmg` इंस्टॉलर का उपयोग करें।
+
 <details>
 <summary><strong>टर्मिनल से त्वरित पोर्टेबल इंस्टॉल और सोर्स से बिल्ड करना</strong></summary>
+
+नीचे दिए गए आर्काइव कमांड के लिए ऐसा पैकेज चाहिए जिसमें `install.sh` (Linux/macOS) या `install.ps1` (Windows) हो, जैसे वर्तमान सोर्स से बनाया गया पैकेज।
 
 **Linux / macOS पोर्टेबल आर्काइव:**
 

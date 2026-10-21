@@ -1575,3 +1575,35 @@ async fn installed_cli_read_runs_on_a_one_mebibyte_main_stack() {
     drop(core);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn jobs_show_preserves_provider_failure_codes_notes_and_exit_classes() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".cache/provider-cli-tests")
+        .join(util::id());
+    let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+    for (code, exit) in [
+        ("ai_response_incomplete", 1),
+        ("ai_response_invalid", 1),
+        ("ai_connection_failed", 1),
+        ("rate_limited", 4),
+    ] {
+        let mut job = hycli::state::Job::new("prepare", "en");
+        job.status = "failed".into();
+        job.error_code = code.into();
+        job.note(&format!("agent_failed_{code}"), "explore", 0, "");
+        core.state.add_job(job.clone()).unwrap();
+        let result = cli(&root, &["jobs", "show", &job.id]).await;
+        assert_eq!(
+            result.status.code(),
+            Some(exit),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let value: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(value["error_code"], code);
+        assert_eq!(value["notes"][0]["code"], format!("agent_failed_{code}"));
+        assert!(!value["notes"][0]["message"].as_str().unwrap().is_empty());
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("private-"));
+    }
+}

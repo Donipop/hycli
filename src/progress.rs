@@ -34,6 +34,28 @@ pub fn public_note(value: &str) -> String {
     }
     text.trim().chars().take(200).collect()
 }
+
+fn failure_note_code(code: &str) -> &'static str {
+    match code {
+        "ai_response_incomplete" => "agent_failed_ai_response_incomplete",
+        "ai_response_invalid" => "agent_failed_ai_response_invalid",
+        "ai_connection_failed" => "agent_failed_ai_connection_failed",
+        "ai_unavailable" => "agent_failed_ai_unavailable",
+        "ai_refused" => "agent_failed_ai_refused",
+        "rate_limited" => "agent_failed_rate_limited",
+        "timeout" => "agent_failed_timeout",
+        "credentials_invalid" => "agent_failed_credentials_invalid",
+        "provider_missing" => "agent_failed_provider_missing",
+        "model_unavailable" => "agent_failed_model_unavailable",
+        "insufficient_balance" => "agent_failed_insufficient_balance",
+        "ai_billing_error" => "agent_failed_ai_billing_error",
+        "ai_permission_denied" => "agent_failed_ai_permission_denied",
+        "ai_request_invalid" => "agent_failed_ai_request_invalid",
+        "cancelled" => "agent_failed_cancelled",
+        _ => "agent_failed",
+    }
+}
+
 impl Job {
     pub fn note(&mut self, code: &str, agent: &str, count: usize, summary: &str) {
         let summary = public_note(summary);
@@ -71,6 +93,7 @@ impl Job {
                 "agent_retry" => "Refining the proposed actions.".into(),
                 "agent_done" => format!("Prepared {count} supported actions."),
                 "agent_failed" => "This agent could not finish. Keeping the other findings.".into(),
+                code if code.starts_with("agent_failed_") => crate::apperr::AppError::api(code.trim_start_matches("agent_failed_"), 502).remedy,
                 "ai_stopped" => "The AI stopped before finishing. Keeping the actions found so far.".into(),
                 "found" => format!("Found {count} useful actions."),
                 "checking" => "Checking the actions that can be safely read.".into(),
@@ -135,6 +158,7 @@ impl Runtime {
         status: &str,
         found: usize,
         summary: &str,
+        failure: Option<&crate::apperr::AppError>,
     ) -> AppResult<()> {
         self.state.update_job(id, |job| {
             if job.status != "running" {
@@ -166,7 +190,9 @@ impl Runtime {
                 match status {
                     "queued" => "agent_queued",
                     "completed" => "agent_done",
-                    "failed" => "agent_failed",
+                    "failed" => failure.map_or("agent_failed", |error| {
+                        failure_note_code(&error.public_code)
+                    }),
                     _ => "agent_started",
                 },
                 agent_id,
@@ -339,6 +365,35 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn worker_failure_notes_have_nonempty_static_remedies() {
+        for code in [
+            "ai_response_incomplete",
+            "ai_response_invalid",
+            "ai_connection_failed",
+            "ai_unavailable",
+            "ai_refused",
+            "rate_limited",
+            "timeout",
+            "credentials_invalid",
+            "provider_missing",
+            "model_unavailable",
+            "insufficient_balance",
+            "ai_billing_error",
+            "ai_permission_denied",
+            "ai_request_invalid",
+            "cancelled",
+        ] {
+            let mut job = Job::new("prepare", "en");
+            job.note(failure_note_code(code), "explore", 0, "");
+            assert!(!job.notes[0].message.is_empty(), "{code}");
+            assert_eq!(job.notes[0].code, format!("agent_failed_{code}"));
+        }
+        assert_eq!(
+            failure_note_code("private-unknown-provider-body"),
+            "agent_failed"
+        );
+    }
     #[test]
     fn public_notes_never_accept_addresses_or_request_details() {
         for value in [

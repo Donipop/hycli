@@ -67,8 +67,12 @@ Tải bộ cài đặt gốc hoặc gói nén di động (portable) cho hệ đi
 | **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Mở tệp `.dmg`, kéo **Hycli.app** vào **Applications** rồi mở ứng dụng (tự động liên kết `~/.local/bin/hycli`) |
 | **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Cài đặt tệp `.deb` (`sudo apt install ./hycli-*.deb`) hoặc giải nén `.tar.gz` và chạy `./install.sh`, sau đó chạy `hycli open` |
 
+**Bản v0.1.0 đã phát hành:** Các gói nén di động cho Windows và macOS không chứa tập lệnh cài đặt. Hãy dùng bộ cài `*-setup.exe` cho Windows hoặc `.dmg` cho macOS từ bản phát hành được liên kết ở trên.
+
 <details>
 <summary><strong>Cài đặt gói di động qua terminal & biên dịch từ mã nguồn</strong></summary>
+
+Các lệnh dưới đây yêu cầu gói có chứa `install.sh` (Linux/macOS) hoặc `install.ps1` (Windows), chẳng hạn gói được biên dịch từ mã nguồn hiện tại.
 
 **Gói di động cho Linux / macOS:**
 

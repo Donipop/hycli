@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Détection du navigateur local",
   "settings.nativeDiscoveryHint": "Autorise la lecture des profils locaux du navigateur. Un accès au trousseau du système peut être demandé. L’activation ne lance pas de recherche.",
   "errors.native_discovery_disabled": "La détection du navigateur local est désactivée. Activez-la dans les paramètres ou utilisez le compagnon du navigateur.",
-  "errors.native_discovery_retry_required": "La détection native automatique est suspendue après une tentative inachevée. Vérifiez les invites du système, puis réessayez manuellement ou utilisez le compagnon du navigateur."
+  "errors.native_discovery_retry_required": "La détection native automatique est suspendue après une tentative inachevée. Vérifiez les invites du système, puis réessayez manuellement ou utilisez le compagnon du navigateur.",
+  "errors.ai_response_incomplete": "La réponse de l’IA est incomplète. Relancez la préparation ou choisissez un autre modèle.",
+  "errors.ai_response_invalid": "La réponse de l’IA est inutilisable. Relancez la préparation ou choisissez un autre modèle.",
+  "errors.ai_connection_failed": "La connexion à l’IA a échoué. Vérifiez le réseau et la disponibilité du fournisseur, puis réessayez."
 }

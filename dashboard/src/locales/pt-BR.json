@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Detecção do navegador local",
   "settings.nativeDiscoveryHint": "Permite ler perfis locais do navegador. Isso pode solicitar acesso ao chaveiro do sistema operacional. Ativar não inicia uma busca.",
   "errors.native_discovery_disabled": "A detecção do navegador local está desativada. Ative nas Configurações ou use o complemento do navegador.",
-  "errors.native_discovery_retry_required": "A descoberta nativa automática foi pausada após uma tentativa incompleta. Confira os avisos do sistema e tente novamente manualmente ou use o complemento do navegador."
+  "errors.native_discovery_retry_required": "A descoberta nativa automática foi pausada após uma tentativa incompleta. Confira os avisos do sistema e tente novamente manualmente ou use o complemento do navegador.",
+  "errors.ai_response_incomplete": "A resposta da IA ficou incompleta. Tente preparar novamente ou escolha outro modelo.",
+  "errors.ai_response_invalid": "Não foi possível usar a resposta da IA. Tente preparar novamente ou escolha outro modelo.",
+  "errors.ai_connection_failed": "A conexão com a IA falhou. Verifique a rede e a disponibilidade do provedor e tente novamente."
 }

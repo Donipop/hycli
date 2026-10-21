@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Lokale browserdetectie",
   "settings.nativeDiscoveryHint": "Sta het lezen van lokale browserprofielen toe. Dit kan toegang tot de sleutelhanger van het besturingssysteem vragen. Inschakelen start geen scan.",
   "errors.native_discovery_disabled": "Lokale browserdetectie staat uit. Schakel deze in via Instellingen of gebruik de browserextensie.",
-  "errors.native_discovery_retry_required": "Automatisch lokaal zoeken is gepauzeerd na een onvoltooide poging. Controleer meldingen van het besturingssysteem en probeer handmatig opnieuw of gebruik de browserextensie."
+  "errors.native_discovery_retry_required": "Automatisch lokaal zoeken is gepauzeerd na een onvoltooide poging. Controleer meldingen van het besturingssysteem en probeer handmatig opnieuw of gebruik de browserextensie.",
+  "errors.ai_response_incomplete": "Het AI-antwoord is onvolledig. Probeer de voorbereiding opnieuw of kies een ander model.",
+  "errors.ai_response_invalid": "Het AI-antwoord kon niet worden gebruikt. Probeer de voorbereiding opnieuw of kies een ander model.",
+  "errors.ai_connection_failed": "De AI-verbinding is mislukt. Controleer het netwerk en de beschikbaarheid van de aanbieder en probeer opnieuw."
 }

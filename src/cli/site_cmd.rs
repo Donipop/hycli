@@ -551,7 +551,7 @@ pub(super) fn job_outcome(job: &crate::state::Job) -> Result<(), AppError> {
             let status = match code {
                 "auth_required" | "identity_unavailable" => 401,
                 "api_denied" => 403,
-                "blocked_by_site" | "site_rate_limited" => 429,
+                "blocked_by_site" | "site_rate_limited" | "rate_limited" => 429,
                 _ => 500,
             };
             Err(AppError::api(code, status))

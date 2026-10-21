@@ -67,8 +67,12 @@ Hycli มาในรูปแบบไฟล์ไบนารีเนที�
 | **macOS 13+** | Apple Silicon (`arm64`) และ Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | เปิดไฟล์ `.dmg` ลาก **Hycli.app** ไปยัง **Applications** แล้วเปิดใช้งาน (เชื่อมโยง `~/.local/bin/hycli` โดยอัตโนมัติ) |
 | **Linux** | x64 และ ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | ติดตั้งไฟล์ `.deb` (`sudo apt install ./hycli-*.deb`) หรือแตกไฟล์ `.tar.gz` แล้วรัน `./install.sh` จากนั้นรัน `hycli open` |
 
+**รุ่น v0.1.0 ที่เผยแพร่แล้ว:** ไฟล์เก็บถาวรแบบพกพาสำหรับ Windows และ macOS ไม่มีสคริปต์ติดตั้ง ให้ใช้ตัวติดตั้ง `*-setup.exe` สำหรับ Windows หรือ `.dmg` สำหรับ macOS จากหน้ารุ่นที่ลิงก์ไว้ด้านบนแทน
+
 <details>
 <summary><strong>การติดตั้งแพ็กเกจพกพาผ่านเทอร์มินัลและการบิลด์จากซอร์สโค้ด</strong></summary>
+
+คำสั่งด้านล่างต้องใช้แพ็กเกจที่มี `install.sh` (Linux/macOS) หรือ `install.ps1` (Windows) เช่น แพ็กเกจที่สร้างจากซอร์สโค้ดปัจจุบัน
 
 **แพ็กเกจพกพาสำหรับ Linux / macOS:**
 

@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Tìm trình duyệt cục bộ",
   "settings.nativeDiscoveryHint": "Cho phép đọc hồ sơ trình duyệt cục bộ. Có thể yêu cầu quyền truy cập kho khóa của hệ điều hành. Bật tùy chọn này không bắt đầu quét.",
   "errors.native_discovery_disabled": "Tìm trình duyệt cục bộ đang tắt. Bật trong Cài đặt hoặc dùng tiện ích đồng hành trình duyệt.",
-  "errors.native_discovery_retry_required": "Tự động tìm kiếm gốc đã tạm dừng sau lần thử chưa hoàn tất. Kiểm tra lời nhắc của hệ điều hành, rồi thử lại thủ công hoặc dùng tiện ích trình duyệt."
+  "errors.native_discovery_retry_required": "Tự động tìm kiếm gốc đã tạm dừng sau lần thử chưa hoàn tất. Kiểm tra lời nhắc của hệ điều hành, rồi thử lại thủ công hoặc dùng tiện ích trình duyệt.",
+  "errors.ai_response_incomplete": "Phản hồi AI chưa hoàn tất. Hãy thử chuẩn bị lại hoặc chọn mô hình khác.",
+  "errors.ai_response_invalid": "Không thể sử dụng phản hồi AI. Hãy thử chuẩn bị lại hoặc chọn mô hình khác.",
+  "errors.ai_connection_failed": "Kết nối AI thất bại. Hãy kiểm tra mạng và trạng thái nhà cung cấp rồi thử lại."
 }

@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Penemuan browser lokal",
   "settings.nativeDiscoveryHint": "Izinkan pembacaan profil browser lokal. Ini dapat meminta akses ke penyimpanan kunci sistem operasi. Mengaktifkannya tidak memulai pemindaian.",
   "errors.native_discovery_disabled": "Penemuan browser lokal nonaktif. Aktifkan di Pengaturan atau gunakan pendamping browser.",
-  "errors.native_discovery_retry_required": "Penemuan native otomatis dijeda setelah percobaan yang belum selesai. Periksa permintaan sistem operasi, lalu coba lagi secara manual atau gunakan pendamping browser."
+  "errors.native_discovery_retry_required": "Penemuan native otomatis dijeda setelah percobaan yang belum selesai. Periksa permintaan sistem operasi, lalu coba lagi secara manual atau gunakan pendamping browser.",
+  "errors.ai_response_incomplete": "Respons AI belum lengkap. Coba persiapan lagi atau pilih model lain.",
+  "errors.ai_response_invalid": "Respons AI tidak dapat digunakan. Coba persiapan lagi atau pilih model lain.",
+  "errors.ai_connection_failed": "Koneksi AI gagal. Periksa jaringan dan ketersediaan penyedia, lalu coba lagi."
 }

@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "ローカルブラウザーの検索",
   "settings.nativeDiscoveryHint": "ローカルのブラウザープロファイルの読み取りを許可します。OSのキーチェーンへのアクセスを求められる場合があります。有効にするだけでは検索は始まりません。",
   "errors.native_discovery_disabled": "ローカルブラウザーの検索は無効です。設定で有効にするか、ブラウザー連携を使用してください。",
-  "errors.native_discovery_retry_required": "未完了の試行後、自動ネイティブ検出は一時停止しています。OSの確認画面を確認してから明示的に再試行するか、ブラウザーコンパニオンを使用してください。"
+  "errors.native_discovery_retry_required": "未完了の試行後、自動ネイティブ検出は一時停止しています。OSの確認画面を確認してから明示的に再試行するか、ブラウザーコンパニオンを使用してください。",
+  "errors.ai_response_incomplete": "AIの応答が完了していません。準備を再試行するか、別のモデルを選択してください。",
+  "errors.ai_response_invalid": "AIの応答を使用できませんでした。準備を再試行するか、別のモデルを選択してください。",
+  "errors.ai_connection_failed": "AIへの接続に失敗しました。ネットワークとプロバイダーの稼働状況を確認して再試行してください。"
 }

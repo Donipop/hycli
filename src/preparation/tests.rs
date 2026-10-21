@@ -602,3 +602,86 @@ fn file_guidance_teaches_scoped_metadata_explanations_and_safe_reuse() {
         assert!(!guide.contains("100 MiB"));
     }
 }
+
+#[test]
+fn invalid_worker_plan_is_not_reported_as_provider_outage() {
+    let error = decode_plan(r#"{"calls":"private-invalid-plan"}"#)
+        .err()
+        .unwrap();
+    assert_eq!(error.public_code, "ai_response_invalid");
+    assert!(!format!("{error:?}").contains("private-invalid-plan"));
+}
+
+#[tokio::test]
+async fn worker_failure_reasons_survive_job_reload_without_provider_content() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    use std::sync::Arc;
+    let router = Router::new().route("/messages", post(|Json(body): Json<serde_json::Value>| async move {
+        let prompt = body["messages"][0]["content"].as_str().unwrap_or_default();
+        if prompt.contains("explore") {
+            (StatusCode::OK, Json(json!({"stop_reason":"max_tokens","content":[{"type":"text","text":"private-output"}]})))
+        } else if prompt.contains("organize") {
+            (StatusCode::OK, Json(json!({"stop_reason":"end_turn","content":[{"type":"text","text":"private-invalid-json"}]})))
+        } else {
+            (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error":{"type":"rate_limit_error","message":"private-provider-message"}})))
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".cache/provider-failure-tests")
+        .join(crate::util::id());
+    let mut core = crate::runtime::Runtime::open(&root, None, None, false, true, false).unwrap();
+    Arc::get_mut(&mut core)
+        .unwrap()
+        .ai
+        .origins
+        .insert("anthropic".into(), origin);
+    let mut job = crate::state::Job::new("prepare", "en");
+    job.status = "running".into();
+    core.state.add_job(job.clone()).unwrap();
+    let config = crate::ai::Config {
+        provider: "anthropic".into(),
+        model: "fixture".into(),
+        key: "synthetic-private-key".into(),
+    };
+    let roles = ["explore", "organize", "check"];
+    let results = futures_util::future::join_all(
+        roles
+            .iter()
+            .map(|role| core.plan_worker(&job, &config, role, json!({"fixture":role}))),
+    )
+    .await;
+    assert!(results.iter().all(Result::is_err));
+    drop(core);
+    let reopened = crate::runtime::Runtime::open(&root, None, None, false, true, false).unwrap();
+    for saved in [
+        reopened.state.job(&job.id).unwrap(),
+        reopened
+            .state
+            .read()
+            .unwrap()
+            .jobs
+            .into_iter()
+            .find(|j| j.id == job.id)
+            .unwrap(),
+    ] {
+        for (role, code) in [
+            ("explore", "ai_response_incomplete"),
+            ("organize", "ai_response_invalid"),
+            ("check", "rate_limited"),
+        ] {
+            assert!(
+                saved
+                    .notes
+                    .iter()
+                    .any(|n| n.agent == role && n.code == format!("agent_failed_{code}")),
+                "missing {role}/{code}"
+            );
+        }
+        let encoded = serde_json::to_string(&saved).unwrap();
+        assert!(!encoded.contains("private-"));
+    }
+    server.abort();
+}

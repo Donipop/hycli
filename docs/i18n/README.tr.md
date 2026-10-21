@@ -67,8 +67,12 @@ Platformunuza uygun yerel yükleyiciyi veya taşınabilir arşivi **[GitHub Rele
 | **macOS 13+** | Apple Silicon (`arm64`) ve Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` dosyasını açın, **Hycli.app** uygulamasını **Applications** klasörüne sürükleyin ve açın (`hycli` komutunu otomatik olarak `~/.local/bin` içine bağlar). |
 | **Linux** | x64 ve ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` paketini kurun (`sudo apt install ./hycli-*.deb`) veya `.tar.gz` arşivini çıkarıp `./install.sh` dosyasını çalıştırın, ardından `hycli open` komutunu çalıştırın. |
 
+**Yayımlanmış v0.1.0 sürümü:** Windows ve macOS taşınabilir arşivleri kurulum betiklerini içermez. Bunun yerine yukarıda bağlantısı verilen sürümün Windows `*-setup.exe` veya macOS `.dmg` yükleyicisini kullanın.
+
 <details>
 <summary><strong>Terminalden hızlı taşınabilir kurulum ve kaynaktan derleme</strong></summary>
+
+Aşağıdaki arşiv komutları, güncel kaynak koddan derlenen paketler gibi `install.sh` (Linux/macOS) veya `install.ps1` (Windows) içeren bir paket gerektirir.
 
 **Linux / macOS taşınabilir arşiv:**
 

@@ -67,8 +67,12 @@ Hycliはウェブサイトエンジンとローカルダッシュボード（`ht
 | **macOS 13+** | Apple Silicon (`arm64`) および Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` を開き、**Hycli.app** を **Applications** にドラッグして起動（`~/.local/bin/hycli` に自動リンク） |
 | **Linux** | x64 および ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` をインストール（`sudo apt install ./hycli-*.deb`）するか `.tar.gz` を展開して `./install.sh` を実行後、`hycli open` を実行 |
 
+**公開済みの v0.1.0:** Windows と macOS のポータブルアーカイブにはインストールスクリプトが含まれていません。代わりに、上記のリリースから Windows 用の `*-setup.exe` または macOS 用の `.dmg` インストーラーを使用してください。
+
 <details>
 <summary><strong>ターミナルからのポータブルインストールとソースからのビルド</strong></summary>
+
+以下のアーカイブ用コマンドには、`install.sh`（Linux/macOS）または `install.ps1`（Windows）を含むパッケージが必要です。現在のソースからビルドしたパッケージなどが該当します。
 
 **Linux / macOS ポータブルアーカイブ:**
 

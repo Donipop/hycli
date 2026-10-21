@@ -18,9 +18,14 @@ try{
 }finally{await archiveHandle.close();}
 const entries=await fs.readdir(directory);if(entries.length!==1)throw Error('Expected a single package root');
 const packageRoot=path.join(directory,entries[0]);
+const verifiedFiles=new Set();
 for(const line of (await fs.readFile(path.join(packageRoot,'SHA256SUMS'),'utf8')).trim().split('\n')){
  const match=line.match(/^([a-f0-9]{64})  (.+)$/);if(!match)throw Error('Invalid checksum list');
  if(createHash('sha256').update(await fs.readFile(path.join(packageRoot,match[2]))).digest('hex')!==match[1])throw Error(`Checksum mismatch: ${match[2]}`);
+ verifiedFiles.add(match[2]);
+}
+for(const asset of process.platform==='win32'?['install.ps1','hycli.ico']:['install.sh','hycli.png']){
+ if(!verifiedFiles.has(asset))throw Error(`Required native package asset missing from SHA256SUMS: ${asset}`);
 }
 const executable=path.join(packageRoot,process.platform==='win32'?'hycli.exe':'hycli');
 const data=path.join(directory,'fresh-data'),cwd=path.join(directory,'outside-checkout');await fs.mkdir(cwd);

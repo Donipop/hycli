@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Rilevamento del browser locale",
   "settings.nativeDiscoveryHint": "Consente di leggere i profili locali del browser. Potrebbe richiedere accesso al portachiavi del sistema operativo. L’attivazione non avvia una ricerca.",
   "errors.native_discovery_disabled": "Il rilevamento del browser locale è disattivato. Attivalo nelle Impostazioni o usa il componente del browser.",
-  "errors.native_discovery_retry_required": "Il rilevamento nativo automatico è sospeso dopo un tentativo incompleto. Controlla le richieste del sistema, poi riprova manualmente o usa il componente del browser."
+  "errors.native_discovery_retry_required": "Il rilevamento nativo automatico è sospeso dopo un tentativo incompleto. Controlla le richieste del sistema, poi riprova manualmente o usa il componente del browser.",
+  "errors.ai_response_incomplete": "La risposta dell’IA è incompleta. Riprova la preparazione o scegli un altro modello.",
+  "errors.ai_response_invalid": "Impossibile usare la risposta dell’IA. Riprova la preparazione o scegli un altro modello.",
+  "errors.ai_connection_failed": "Connessione all’IA non riuscita. Controlla la rete e la disponibilità del fornitore, poi riprova."
 }

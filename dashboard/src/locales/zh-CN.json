@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "本地浏览器发现",
   "settings.nativeDiscoveryHint": "允许读取本地浏览器配置文件。这可能请求访问操作系统钥匙串。开启后不会自动开始扫描。",
   "errors.native_discovery_disabled": "本地浏览器发现已关闭。请在设置中开启，或使用浏览器配套扩展。",
-  "errors.native_discovery_retry_required": "上次尝试未完成，自动原生发现已暂停。请检查操作系统提示，然后手动重试或使用浏览器助手。"
+  "errors.native_discovery_retry_required": "上次尝试未完成，自动原生发现已暂停。请检查操作系统提示，然后手动重试或使用浏览器助手。",
+  "errors.ai_response_incomplete": "AI 响应不完整。请重试准备或选择其他模型。",
+  "errors.ai_response_invalid": "无法使用 AI 响应。请重试准备或选择其他模型。",
+  "errors.ai_connection_failed": "AI 连接失败。请检查网络和服务商状态后重试。"
 }
