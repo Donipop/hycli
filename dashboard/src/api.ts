@@ -27,26 +27,29 @@ export function session(): Promise<void> {
   })().finally(() => { renewing = null; });
   return renewing;
 }
-async function guardedFetch(path: string, method: string, body?: unknown): Promise<Response> {
+async function guardedFetch(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
   for (let attempt = 0; attempt < 2; attempt++) {
+    signal?.throwIfAborted();
     let response: Response;
     try {
       response = await fetch(path, {
-        method, credentials: 'same-origin', cache: 'no-store',
+        method, credentials: 'same-origin', cache: 'no-store', signal,
         headers: { 'Content-Type': 'application/json', 'X-Hycli-CSRF': csrf, 'Accept-Language': locale },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-    } catch { throw new ApiError('connection_lost', 0); }
+    } catch (error) { if (signal?.aborted) throw error; throw new ApiError('connection_lost', 0); }
+    signal?.throwIfAborted();
     if (response.ok) return response;
     const data = await response.json().catch(() => ({}));
+    signal?.throwIfAborted();
     // Only this middleware error proves the handler never ran; never replay an ambiguous write.
     if (attempt === 0 && response.status === 401 && data.error?.code === 'session_expired') { await session(); continue; }
     throw new ApiError(data.error?.code || 'internal', response.status);
   }
   throw new ApiError('connection_lost', 0);
 }
-export async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await guardedFetch(path, method, body);
+export async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await guardedFetch(path, method, body, signal);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }

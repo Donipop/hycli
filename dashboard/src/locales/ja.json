@@ -342,7 +342,7 @@
   "accounts.cookieCount": "保存済みのログイン情報：{count}",
   "accounts.signedIn": "ログイン済み",
   "accounts.autoFind": "ログインを探す",
-  "accounts.autoFindHint": "Hycliがまず既存のブラウザープロファイルを確認します。ログイン情報はこの端末内に保存されます。",
+  "accounts.autoFindHint": "「ログインを検索」を選択すると、この端末のブラウザープロファイルを確認します。ログイン情報はこの端末に保持されます。",
   "accounts.searching": "ブラウザーでログインを探しています…",
   "accounts.searchDone": "ブラウザープロファイルを{count}件確認しました。",
   "accounts.noSession": "利用できるログインが見つかりませんでした。ウェブサイトを開いてログインし、ここに戻ってください。",
@@ -350,7 +350,7 @@
   "accounts.chooseFound": "複数のアカウントが見つかりました。使用するアカウントを選んでください。",
   "accounts.openLogin": "ウェブサイトのログイン画面を開く",
   "accounts.recheck": "もう一度確認",
-  "accounts.waitLogin": "確認済みのログインを待っています。Hycliが再確認し、準備ができたら設定を再開します。",
+  "accounts.waitLogin": "ブラウザーコンパニオンから確認済みアカウントを待っています。ローカルプロファイルを確認するには、もう一度検索してください。",
   "accounts.loginPending": "ウェブサイトでアカウントがまだ確認されていません。下のブラウザー拡張機能をお試しください。サイトによっては、ドキュメントに記載されたAPIへのアクセスが必要です。",
   "accounts.moreMethods": "その他の接続方法",
   "accounts.useAccount": "このアカウントを使う",
@@ -551,5 +551,9 @@
   "files.unavailable": "見つからないか利用できません",
   "files.checkFailed": "確認できませんでした",
   "files.check": "利用可否を確認",
-  "files.started": "ダウンロードを要求しました。完了または失敗はブラウザーのダウンロード一覧で確認してください。"
+  "files.started": "ダウンロードを要求しました。完了または失敗はブラウザーのダウンロード一覧で確認してください。",
+  "settings.nativeDiscovery": "ローカルブラウザーの検索",
+  "settings.nativeDiscoveryHint": "ローカルのブラウザープロファイルの読み取りを許可します。OSのキーチェーンへのアクセスを求められる場合があります。有効にするだけでは検索は始まりません。",
+  "errors.native_discovery_disabled": "ローカルブラウザーの検索は無効です。設定で有効にするか、ブラウザー連携を使用してください。",
+  "errors.native_discovery_retry_required": "未完了の試行後、自動ネイティブ検出は一時停止しています。OSの確認画面を確認してから明示的に再試行するか、ブラウザーコンパニオンを使用してください。"
 }

@@ -16,6 +16,7 @@ pub struct Settings {
     pub notifications: bool,
     pub default_provider: String,
     pub engine_path: String,
+    pub native_browser_discovery: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -26,6 +27,7 @@ impl Default for Settings {
             notifications: false,
             default_provider: String::new(),
             engine_path: String::new(),
+            native_browser_discovery: !cfg!(target_os = "macos"),
         }
     }
 }

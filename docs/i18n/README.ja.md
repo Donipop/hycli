@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## ブラウザーでのログイン
 
+ネイティブブラウザー探索は任意で、macOSでは保存済みの選択がないアップグレードを含め既定で無効です。設定は同じデータディレクトリを使うCLI・MCPにも適用され、既存アカウントとブラウザー接続は維持されます。 [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 HycliはWindows、macOS、Linux上のローカルのChrome、Chromium、Edge、Brave、Vivaldi、Arc、Whale、Firefoxのプロファイル（およびインストール済みのローカルステルスChromiumバイナリ）を検出し、指定されたウェブサイトのセッションのみをローカル保管庫に取り込みます。同じ検証済みウェブサイトアカウントを共有する複数のプロファイルは自動的に重複排除されます。
 
 Windows App-Bound暗号化やプライベートコンテナー、未インポートのブラウザーによってセッションがロックされている場合は、**アカウント → アカウントを接続** からブラウザーでログインするか、[ブラウザー連携拡張機能](../../browser-companion/guide.html)の接続、またはダッシュボードでのJSON/Netscape Cookieファイルのインポートを利用してください（Cookieの内容をAIのチャット欄に直接貼り付けないでください）。

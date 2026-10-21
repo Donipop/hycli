@@ -377,7 +377,7 @@
   "errors.storage_locked": "Déverrouillez le gestionnaire d’identifiants de votre appareil, puis réessayez.",
   "accounts.alreadySignedIn": "Vous êtes déjà connecté ?",
   "accounts.autoFind": "Trouver ma session",
-  "accounts.autoFindHint": "Hycli vérifie d’abord vos profils de navigateur existants. Vos informations de connexion restent sur cet appareil.",
+  "accounts.autoFindHint": "Choisissez de rechercher votre connexion pour vérifier les profils locaux du navigateur. Les informations de connexion restent sur cet appareil.",
   "accounts.searching": "Recherche dans vos navigateurs…",
   "accounts.searchDone": "{count} profils de navigateur vérifiés.",
   "accounts.noSession": "Aucune session utilisable trouvée. Ouvrez le site web, connectez-vous, puis revenez ici.",
@@ -385,7 +385,7 @@
   "accounts.chooseFound": "Plusieurs comptes ont été trouvés. Choisissez celui à utiliser.",
   "accounts.openLogin": "Ouvrir la page de connexion",
   "accounts.recheck": "Vérifier à nouveau",
-  "accounts.waitLogin": "En attente d’une connexion vérifiée. Hycli vérifiera à nouveau et reprendra la configuration dès que ce sera possible.",
+  "accounts.waitLogin": "En attente d’un compte vérifié par le compagnon du navigateur. Pour vérifier les profils locaux, lancez une nouvelle recherche.",
   "accounts.loginPending": "Le site web n’a pas encore confirmé votre compte. Essayez l’extension Hycli ci-dessous ; certains sites nécessitent un accès à une API documentée.",
   "accounts.moreMethods": "Autres façons de se connecter",
   "accounts.useAccount": "Utiliser ce compte",
@@ -551,5 +551,9 @@
   "files.unavailable": "Absent ou indisponible",
   "files.checkFailed": "Vérification impossible",
   "files.check": "Vérifier la disponibilité",
-  "files.started": "Téléchargement demandé. Vérifiez sa réussite ou son échec dans les téléchargements du navigateur."
+  "files.started": "Téléchargement demandé. Vérifiez sa réussite ou son échec dans les téléchargements du navigateur.",
+  "settings.nativeDiscovery": "Détection du navigateur local",
+  "settings.nativeDiscoveryHint": "Autorise la lecture des profils locaux du navigateur. Un accès au trousseau du système peut être demandé. L’activation ne lance pas de recherche.",
+  "errors.native_discovery_disabled": "La détection du navigateur local est désactivée. Activez-la dans les paramètres ou utilisez le compagnon du navigateur.",
+  "errors.native_discovery_retry_required": "La détection native automatique est suspendue après une tentative inachevée. Vérifiez les invites du système, puis réessayez manuellement ou utilisez le compagnon du navigateur."
 }

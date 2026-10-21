@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Browser-aanmelding
 
+Native detectie is optioneel en staat standaard uit op macOS, ook na een update zonder opgeslagen keuze. De instelling geldt ook voor CLI en MCP met dezelfde gegevensmap; bestaande accounts en browserverbindingen blijven behouden. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli detecteert lokale profielen van Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale en Firefox (plus lokale stealth Chromium-binaries wanneer geïnstalleerd) op Windows, macOS en Linux, en importeert alleen de sessie van de gevraagde website in de lokale kluis. Profielen die hetzelfde geverifieerde website-account delen, worden automatisch ontdubbeld.
 
 Als een sessie is vergrendeld door Windows App-Bound-versleuteling, privécontainers of een niet-geïmporteerde browser, gebruik dan **Accounts → Een account verbinden** om via je browser in te loggen, koppel de [browser-companion-extensie](../../browser-companion/guide.html) of importeer een JSON-/Netscape-cookiebestand in het dashboard (plak nooit cookies in een AI-chat).

@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## 브라우저 로그인
 
+네이티브 브라우저 탐색은 선택 사항이며 macOS에서는 기존 선택이 없는 업그레이드를 포함해 기본으로 꺼져 있습니다. 설정의 선택은 같은 데이터 폴더를 쓰는 CLI·MCP에도 적용되며, 기존 계정과 브라우저 연결은 유지됩니다. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli는 Windows, macOS, Linux에서 로컬 Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale, Firefox 프로필(및 설치된 로컬 스텔스 Chromium 엔진)을 탐색하여 요청한 웹사이트의 세션만 로컬 암호화 보관소로 가져옵니다. 같은 웹사이트 계정으로 확인된 여러 프로필은 자동으로 하나로 묶입니다.
 
 Windows App-Bound 암호화나 컨테이너 세션으로 보호된 경우 **계정 → 계정 연결**에서 브라우저로 로그인하거나 [브라우저 확장 프로그램](../../browser-companion/guide.html) 또는 쿠키 파일(JSON/Netscape) 가져오기를 사용할 수 있습니다(쿠키 내용을 AI 채팅창에 직접 붙여넣지 마세요).

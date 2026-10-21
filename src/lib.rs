@@ -16,6 +16,7 @@ pub mod environment;
 pub use capture::har;
 pub mod feedback;
 pub mod kb;
+pub(crate) mod native_scan_admission;
 pub mod net;
 pub mod output;
 pub mod platform;

@@ -104,6 +104,18 @@ async fn browser_pairing_is_single_use_origin_bound_and_verifies_actual_identity
         .as_str()
         .unwrap()
         .to_owned();
+    for (value, expected) in [(json!("false"), 400), (json!(false), 200)] {
+        let response = client
+            .patch(format!("{base}/api/settings"))
+            .header("cookie", &cookie)
+            .header("x-hycli-csrf", &csrf)
+            .json(&json!({"native_browser_discovery": value}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), expected);
+    }
+    assert!(!core.state.settings().unwrap().native_browser_discovery);
     let paired = client
         .post(format!("{base}/api/accounts/pair"))
         .header("cookie", &cookie)

@@ -57,7 +57,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Registry, fixture and companion boundary tests
         shell: bash
-        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs dashboard/e2e-screenshots.test.mjs dashboard/snapshot.test.mjs dashboard/accepted-command.test.mjs dashboard/account-continuation.test.mjs
+        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs dashboard/e2e-screenshots.test.mjs dashboard/snapshot.test.mjs dashboard/accepted-command.test.mjs dashboard/account-continuation.test.mjs dashboard/native-discovery.test.mjs
       - name: Rust toolchain
         run: |
           rustup update stable --no-self-update
@@ -163,6 +163,21 @@ jobs:
           ln -s "$GITHUB_WORKSPACE/dashboard/node_modules" .cache/result-action-baseline/dashboard/node_modules
           npm --prefix .cache/result-action-baseline/dashboard run build
           git -C .cache/result-action-baseline diff --exit-code -- dashboard
+      - name: Exact pre-fix dashboard source for native discovery
+        if: matrix.browser_tests
+        uses: actions/checkout@v7
+        with:
+          ref: 89023c86f7823c61b55c60394ad28aab5adafec1
+          path: .cache/native-discovery-baseline
+          persist-credentials: false
+      - name: Build pinned native discovery baseline
+        if: matrix.browser_tests
+        run: |
+          test "$(git -C .cache/native-discovery-baseline rev-parse HEAD)" = 89023c86f7823c61b55c60394ad28aab5adafec1
+          cmp dashboard/package-lock.json .cache/native-discovery-baseline/dashboard/package-lock.json
+          ln -s "$GITHUB_WORKSPACE/dashboard/node_modules" .cache/native-discovery-baseline/dashboard/node_modules
+          npm --prefix .cache/native-discovery-baseline/dashboard run build
+          git -C .cache/native-discovery-baseline diff --exit-code -- dashboard
       - name: End-to-end service
         if: matrix.browser_tests
         run: |
@@ -173,6 +188,8 @@ jobs:
           LOCALE_BASELINE=1 LOCALE_WEB="$GITHUB_WORKSPACE/.cache/accepted-command-baseline/web" BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/locale-persistence-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/binding-e2e.mjs
+          DISCOVERY_BASELINE=1 DISCOVERY_WEB="$GITHUB_WORKSPACE/.cache/native-discovery-baseline/web" BROWSER_BIN="$CHROME_BIN" node dashboard/native-discovery-e2e.mjs
+          BROWSER_BIN="$CHROME_BIN" node dashboard/native-discovery-e2e.mjs
           RESULT_ACTION_BASELINE=1 RESULT_ACTION_WEB="$GITHUB_WORKSPACE/.cache/result-action-baseline/web" BROWSER_BIN="$CHROME_BIN" node dashboard/result-action-recovery-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/result-action-recovery-e2e.mjs
           BROWSER_BIN="$CHROME_BIN" node dashboard/result-recovery-e2e.mjs
@@ -182,6 +199,14 @@ jobs:
           node scripts/test-e2e.mjs --full
           # Verification must preserve reviewed screenshots before source packaging.
           git diff --exit-code -- docs/images docs/design
+      - name: Retain synthetic native discovery red and green evidence
+        if: always() && matrix.browser_tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-discovery-regression
+          path: test-results/native-discovery/
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain synthetic result action red and green evidence
         if: always() && matrix.browser_tests
         uses: actions/upload-artifact@v7

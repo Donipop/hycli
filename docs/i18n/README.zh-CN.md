@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## 浏览器登录
 
+原生浏览器发现是可选功能；macOS 默认关闭，包括没有已保存选择的升级。此设置也适用于使用同一数据目录的 CLI 和 MCP；现有账户和浏览器连接不受影响。 [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli 会在 Windows、macOS 和 Linux 上发现本地 Chrome、Chromium、Edge、Brave、Vivaldi、Arc、Whale 和 Firefox 配置文件（以及已安装的本地隐身 Chromium 引擎），仅将所请求网站的会话导入本地加密保险库。指向同一个已验证网站账号的多个配置文件会自动合并去重。
 
 如果会话受到 Windows App-Bound 加密、隐私容器或未导入浏览器的保护，可在 **账号 → 连接账号** 中通过浏览器登录、连接[浏览器辅助扩展](../../browser-companion/guide.html)，或在仪表盘中导入 JSON/Netscape Cookie 文件（切勿将 Cookie 内容直接粘贴到 AI 聊天窗口中）。

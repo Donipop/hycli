@@ -377,7 +377,7 @@
   "errors.storage_locked": "Desbloquea el almacén de credenciales de tu dispositivo y vuelve a intentarlo.",
   "accounts.alreadySignedIn": "¿Ya has iniciado sesión?",
   "accounts.autoFind": "Buscar mi sesión iniciada",
-  "accounts.autoFindHint": "Hycli comprueba primero los perfiles de tus navegadores. Los datos de acceso permanecen en este dispositivo.",
+  "accounts.autoFindHint": "Elige buscar tu sesión para revisar los perfiles locales del navegador. Los datos de inicio de sesión permanecen en este dispositivo.",
   "accounts.searching": "Buscando en tus navegadores…",
   "accounts.searchDone": "Se han comprobado {count} perfiles de navegador.",
   "accounts.noSession": "No se ha encontrado ninguna sesión válida. Abre el sitio web, inicia sesión y vuelve aquí.",
@@ -385,7 +385,7 @@
   "accounts.chooseFound": "Se ha encontrado más de una cuenta. Elige cuál quieres usar.",
   "accounts.openLogin": "Abrir la página de inicio de sesión",
   "accounts.recheck": "Comprobar de nuevo",
-  "accounts.waitLogin": "Esperando a que se verifique el inicio de sesión. Hycli volverá a comprobarlo y reanudará la configuración cuando esté listo.",
+  "accounts.waitLogin": "Esperando una cuenta verificada del complemento del navegador. Para revisar los perfiles locales, selecciona Buscar de nuevo.",
   "accounts.loginPending": "El sitio web aún no ha confirmado tu cuenta. Prueba la extensión de Hycli a continuación; algunos sitios requieren acceso a una API documentada.",
   "accounts.moreMethods": "Más formas de conectar",
   "accounts.useAccount": "Usar esta cuenta",
@@ -551,5 +551,9 @@
   "files.unavailable": "No existe o no está disponible",
   "files.checkFailed": "No se pudo comprobar",
   "files.check": "Comprobar disponibilidad",
-  "files.started": "Descarga solicitada. Comprueba en las descargas del navegador si terminó o falló."
+  "files.started": "Descarga solicitada. Comprueba en las descargas del navegador si terminó o falló.",
+  "settings.nativeDiscovery": "Detección del navegador local",
+  "settings.nativeDiscoveryHint": "Permite leer perfiles locales del navegador. Puede solicitar acceso al llavero del sistema operativo. Activarla no inicia una búsqueda.",
+  "errors.native_discovery_disabled": "La detección del navegador local está desactivada. Actívala en Configuración o usa el complemento del navegador.",
+  "errors.native_discovery_retry_required": "La búsqueda nativa automática está pausada tras un intento incompleto. Revisa los avisos del sistema y vuelve a intentarlo manualmente o usa el complemento del navegador."
 }

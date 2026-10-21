@@ -152,6 +152,8 @@ impl AppError {
             code,
             msg: public_code.into(),
             remedy: match public_code {
+                "native_discovery_disabled" => "Use the browser companion, or explicitly enable native browser discovery in settings. Native discovery may request OS keychain approval.",
+                "native_discovery_retry_required" => "A previous native discovery did not complete. Use the browser companion, or explicitly retry native discovery after reviewing any OS approval prompts.",
                 "unsupported_transport" => "Multipart uploads require direct HTTP. Use the operation's http transport; browser transports cannot send file parts.",
                 "oauth_recovery_required" => "The grant cannot be safely refreshed again. Replace it through the existing auth set command using fresh grant JSON on stdin; do not reuse a possibly consumed refresh token.",
                 "oauth_verification_pending" => "The token pair is saved but identity verification has not completed. Retry the read to verify it without another token exchange.",

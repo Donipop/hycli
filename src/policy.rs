@@ -561,6 +561,9 @@ impl Policy {
         if let Some(parent) = path.parent() {
             util::private_dir(parent)?;
         }
+        // Bootstrap completes before Runtime opens its other stores, so this guard
+        // never nests with their startup locks or survives on the Policy value.
+        let _startup = util::file_lock(&path.with_extension("db.startup.lock"), false)?;
         let conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL;

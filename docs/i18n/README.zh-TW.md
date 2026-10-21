@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## 瀏覽器登入
 
+原生瀏覽器探索是選用功能；macOS 預設關閉，包括沒有已儲存選擇的升級。此設定也適用於使用相同資料目錄的 CLI 和 MCP；現有帳號與瀏覽器連線不受影響。 [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 Hycli 會在 Windows、macOS 與 Linux 上探索本機 Chrome、Chromium、Edge、Brave、Vivaldi、Arc、Whale 與 Firefox 設定檔（以及已安裝的本機隱身 Chromium 引擎），僅將所請求網站的工作階段匯入本機加密保管庫。共用同一個已驗證網站帳號的多個設定檔會自動合併去重。
 
 若工作階段受 Windows App-Bound 加密、私密容器或未匯入的瀏覽器保護，可在 **帳號 → 連接帳號** 中透過瀏覽器登入、連接[瀏覽器擴充功能](../../browser-companion/guide.html)，或在儀表板中匯入 JSON/Netscape Cookie 檔案（請勿將 Cookie 內容直接貼到 AI 聊天視窗中）。

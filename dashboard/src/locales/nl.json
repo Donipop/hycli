@@ -377,7 +377,7 @@
   "errors.storage_locked": "Ontgrendel de gegevenskluis van je apparaat en probeer het opnieuw.",
   "accounts.alreadySignedIn": "Al ingelogd?",
   "accounts.autoFind": "Mijn aanmelding zoeken",
-  "accounts.autoFindHint": "Hycli controleert eerst je bestaande browserprofielen. Je inloggegevens blijven op dit apparaat.",
+  "accounts.autoFindHint": "Kies Mijn aanmelding zoeken om lokale browserprofielen te controleren. Aanmeldgegevens blijven op dit apparaat.",
   "accounts.searching": "Je browsers worden doorzocht…",
   "accounts.searchDone": "{count} browserprofielen gecontroleerd.",
   "accounts.noSession": "Geen bruikbare aanmelding gevonden. Open de website, log in en kom hier terug.",
@@ -385,7 +385,7 @@
   "accounts.chooseFound": "Er zijn meerdere accounts gevonden. Kies het account dat je wilt gebruiken.",
   "accounts.openLogin": "Inlogpagina openen",
   "accounts.recheck": "Opnieuw controleren",
-  "accounts.waitLogin": "Wachten op een geverifieerde aanmelding. Hycli controleert opnieuw en gaat verder met de installatie zodra alles klaar is.",
+  "accounts.waitLogin": "Wachten op een geverifieerd account van de browserextensie. Kies opnieuw Zoeken om lokale browserprofielen te controleren.",
   "accounts.loginPending": "De website heeft je account nog niet bevestigd. Probeer hieronder de Hycli-browserextensie; sommige websites vereisen toegang tot een gedocumenteerde API.",
   "accounts.moreMethods": "Meer manieren om verbinding te maken",
   "accounts.useAccount": "Dit account gebruiken",
@@ -551,5 +551,9 @@
   "files.unavailable": "Ontbreekt of niet beschikbaar",
   "files.checkFailed": "Controle niet mogelijk",
   "files.check": "Beschikbaarheid controleren",
-  "files.started": "Download aangevraagd. Controleer de downloads van je browser op voltooiing of fouten."
+  "files.started": "Download aangevraagd. Controleer de downloads van je browser op voltooiing of fouten.",
+  "settings.nativeDiscovery": "Lokale browserdetectie",
+  "settings.nativeDiscoveryHint": "Sta het lezen van lokale browserprofielen toe. Dit kan toegang tot de sleutelhanger van het besturingssysteem vragen. Inschakelen start geen scan.",
+  "errors.native_discovery_disabled": "Lokale browserdetectie staat uit. Schakel deze in via Instellingen of gebruik de browserextensie.",
+  "errors.native_discovery_retry_required": "Automatisch lokaal zoeken is gepauzeerd na een onvoltooide poging. Controleer meldingen van het besturingssysteem en probeer handmatig opnieuw of gebruik de browserextensie."
 }

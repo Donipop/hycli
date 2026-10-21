@@ -342,7 +342,7 @@
   "accounts.cookieCount": "已保存的登录信息：{count}",
   "accounts.signedIn": "已登录",
   "accounts.autoFind": "查找我的登录状态",
-  "accounts.autoFindHint": "Hycli 会先检查现有的浏览器配置文件。登录信息只保留在这台设备上。",
+  "accounts.autoFindHint": "选择查找我的登录以检查本地浏览器配置文件。登录信息仅保留在此设备上。",
   "accounts.searching": "正在浏览器中查找登录状态…",
   "accounts.searchDone": "已检查 {count} 个浏览器配置文件。",
   "accounts.noSession": "未找到可用的登录状态。请打开网站并登录，然后返回这里。",
@@ -350,7 +350,7 @@
   "accounts.chooseFound": "找到了多个账号。请选择要使用的账号。",
   "accounts.openLogin": "打开网站登录页面",
   "accounts.recheck": "重新检查",
-  "accounts.waitLogin": "正在等待经过验证的登录状态。Hycli 会再次检查，并在准备好后继续设置。",
+  "accounts.waitLogin": "正在等待浏览器助手提供已验证的帐户。要检查本地浏览器配置文件，请再次选择查找。",
   "accounts.loginPending": "网站尚未确认你的账号。请尝试下方的浏览器扩展；部分网站需要按文档获取 API 访问权限。",
   "accounts.moreMethods": "其他连接方式",
   "accounts.useAccount": "使用此账号",
@@ -551,5 +551,9 @@
   "files.unavailable": "文件缺失或不可用",
   "files.checkFailed": "无法检查",
   "files.check": "检查可用性",
-  "files.started": "已请求下载。请在浏览器的下载列表中确认完成或失败。"
+  "files.started": "已请求下载。请在浏览器的下载列表中确认完成或失败。",
+  "settings.nativeDiscovery": "本地浏览器发现",
+  "settings.nativeDiscoveryHint": "允许读取本地浏览器配置文件。这可能请求访问操作系统钥匙串。开启后不会自动开始扫描。",
+  "errors.native_discovery_disabled": "本地浏览器发现已关闭。请在设置中开启，或使用浏览器配套扩展。",
+  "errors.native_discovery_retry_required": "上次尝试未完成，自动原生发现已暂停。请检查操作系统提示，然后手动重试或使用浏览器助手。"
 }

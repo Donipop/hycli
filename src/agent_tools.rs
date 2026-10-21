@@ -170,6 +170,7 @@ impl Runtime {
                         profile,
                         false,
                         Some(context.environment.profiles.clone()),
+                        crate::native_scan_admission::NativeScanIntent::Preparation,
                     )
                     .await?;
                 let imported: Vec<_> = search
@@ -447,6 +448,13 @@ mod tests {
             .join(".cache/tests")
             .join(util::id());
         let core = Runtime::open(&root, None, None, false, false, false).unwrap();
+        // This isolated fixture explicitly exercises native import on every OS.
+        core.state
+            .update(|data| {
+                data.settings.native_browser_discovery = true;
+                Ok(())
+            })
+            .unwrap();
         let origin = "https://example.com";
         let site_id = crate::runtime::site_id_for(&url::Url::parse(origin).unwrap());
         let old = core

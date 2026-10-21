@@ -210,6 +210,8 @@ hycli check SITE
 <a id="browser-sign-in"></a>
 ## Login do navegador
 
+A descoberta nativa é opcional e vem desativada no macOS, inclusive em atualizações sem uma escolha salva. A configuração é compartilhada com CLI e MCP no mesmo diretório de dados; contas e conexões de navegador existentes são preservadas. [Native discovery and recovery (English)](../../agent/AGENTS.md#native-discovery-choice-and-recovery).
+
 O Hycli descobre perfis locais do Chrome, Chromium, Edge, Brave, Vivaldi, Arc, Whale e Firefox (além de binários locais de Chromium furtivo, quando instalados) no Windows, macOS e Linux, importando apenas a sessão do site solicitado para o cofre local. Perfis que compartilham a mesma conta verificada de um site são desduplicados automaticamente.
 
 Se uma sessão estiver bloqueada pela criptografia App-Bound do Windows, contêineres privados ou um navegador não importado, use **Contas → Conectar uma conta** para entrar pelo navegador, conecte a [extensão complementar do navegador](../../browser-companion/guide.html) ou importe um arquivo de cookies JSON/Netscape no painel (nunca cole cookies em um chat de IA).

@@ -342,7 +342,7 @@
   "accounts.cookieCount": "已儲存的登入資訊：{count}",
   "accounts.signedIn": "已登入",
   "accounts.autoFind": "尋找我的登入狀態",
-  "accounts.autoFindHint": "Hycli 會先檢查現有的瀏覽器設定檔。登入資訊只會保留在這台裝置上。",
+  "accounts.autoFindHint": "選擇尋找我的登入以檢查本機瀏覽器設定檔。登入資訊僅保留在此裝置上。",
   "accounts.searching": "正在瀏覽器中尋找登入狀態…",
   "accounts.searchDone": "已檢查 {count} 個瀏覽器設定檔。",
   "accounts.noSession": "找不到可用的登入狀態。請開啟網站並登入，然後返回這裡。",
@@ -350,7 +350,7 @@
   "accounts.chooseFound": "找到多個帳號。請選擇要使用的帳號。",
   "accounts.openLogin": "開啟網站登入頁面",
   "accounts.recheck": "重新檢查",
-  "accounts.waitLogin": "正在等待已驗證的登入狀態。Hycli 會再次檢查，準備好後繼續設定。",
+  "accounts.waitLogin": "正在等待瀏覽器助手提供已驗證的帳戶。若要檢查本機瀏覽器設定檔，請再次選擇尋找。",
   "accounts.loginPending": "網站尚未確認你的帳號。請試用下方的瀏覽器擴充功能；部分網站需要依文件取得 API 存取權限。",
   "accounts.moreMethods": "其他連接方式",
   "accounts.useAccount": "使用此帳號",
@@ -551,5 +551,9 @@
   "files.unavailable": "檔案遺失或無法使用",
   "files.checkFailed": "無法檢查",
   "files.check": "檢查可用性",
-  "files.started": "已要求下載。請在瀏覽器的下載清單中確認完成或失敗。"
+  "files.started": "已要求下載。請在瀏覽器的下載清單中確認完成或失敗。",
+  "settings.nativeDiscovery": "本機瀏覽器探索",
+  "settings.nativeDiscoveryHint": "允許讀取本機瀏覽器設定檔。這可能要求存取作業系統鑰匙圈。開啟後不會自動開始掃描。",
+  "errors.native_discovery_disabled": "本機瀏覽器探索已關閉。請在設定中開啟，或使用瀏覽器配套擴充功能。",
+  "errors.native_discovery_retry_required": "上次嘗試未完成，自動原生探索已暫停。請檢查作業系統提示，然後手動重試或使用瀏覽器助手。"
 }

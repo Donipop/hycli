@@ -7,8 +7,11 @@ use crate::{
     runtime::Runtime,
     util,
 };
+use rookie_cookies::CancellationHandle;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 pub fn discover() -> Vec<BrowserProfile> {
     crate::environment::inspect().profiles
@@ -95,10 +98,25 @@ fn chromium_isolation_known(connection: &rusqlite::Connection) -> Result<(), ()>
         .map_err(|_| ())?;
     if invalid == 0 { Ok(()) } else { Err(()) }
 }
+#[derive(Debug, PartialEq, Eq)]
+enum CookieLoadFailure {
+    Unavailable,
+    Unresolved,
+}
+impl From<()> for CookieLoadFailure {
+    fn from(_: ()) -> Self {
+        Self::Unavailable
+    }
+}
+
 fn load_site_cookies(
     profile: &BrowserProfile,
     target: &url::Url,
-) -> Result<Vec<crate::accounts::Cookie>, ()> {
+    cancellation: &CancellationHandle,
+) -> Result<Vec<crate::accounts::Cookie>, CookieLoadFailure> {
+    if cancellation.is_cancelled() {
+        return Err(CookieLoadFailure::Unavailable);
+    }
     use rookie_cookies::{AppBoundPolicy, FromPathRequest};
     let db = if profile.browser == "Firefox" {
         profile.path.join("cookies.sqlite")
@@ -128,7 +146,9 @@ fn load_site_cookies(
         .as_ref()
         .map(|snapshot| snapshot.0.join("Cookies"))
         .unwrap_or(db);
-    let mut request = FromPathRequest::new(source).timeout(std::time::Duration::from_secs(8));
+    let mut request = FromPathRequest::new(source)
+        .timeout(std::time::Duration::from_secs(8))
+        .cancellation(cancellation.clone());
     if browser_id != "firefox" {
         #[cfg(unix)]
         {
@@ -140,8 +160,8 @@ fn load_site_cookies(
         }
     }
     // No app-bound bypass feature is compiled. Respect OS protection and skip unsupported rows.
-    let result =
-        rookie_cookies::from_path(request.app_bound(AppBoundPolicy::Disabled)).map_err(|_| ())?;
+    let result = rookie_cookies::from_path(request.app_bound(AppBoundPolicy::Disabled))
+        .map_err(|_| CookieLoadFailure::Unresolved)?;
     let mut entries = result.into_detailed_cookies();
     if snapshot.is_some() {
         for entry in &mut entries {
@@ -151,7 +171,7 @@ fn load_site_cookies(
                 .get_or_insert_with(String::new);
         }
     }
-    native_cookies(entries, target, browser_id == "firefox")
+    native_cookies(entries, target, browser_id == "firefox").map_err(Into::into)
 }
 fn native_cookies(
     entries: Vec<rookie_cookies::enums::DetailedCookie>,
@@ -225,14 +245,88 @@ fn native_cookies(
         Err(_) => Err(()),
     }
 }
+struct ScanPermit(&'static AtomicBool);
+impl Drop for ScanPermit {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+struct CancelOnDrop(CancellationHandle);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+async fn run_native_scan<T, F, P>(
+    scanning: &'static AtomicBool,
+    budget: Duration,
+    permitted: P,
+    work: F,
+) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(CancellationHandle) -> T + Send + 'static,
+    P: Fn() -> AppResult<()>,
+{
+    permitted()?;
+    if scanning.swap(true, Ordering::SeqCst) {
+        return Err(AppError::api("browser_busy", 409));
+    }
+    let permit = ScanPermit(scanning);
+    let cancellation = CancellationHandle::new();
+    let _cancel = CancelOnDrop(cancellation.clone());
+    let mut scan = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work(cancellation)
+    });
+    let deadline = tokio::time::sleep(budget);
+    tokio::pin!(deadline);
+    let mut policy_check = tokio::time::interval(Duration::from_millis(100));
+    policy_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            result = &mut scan => {
+                let result = result.map_err(|_| AppError::api("browser_unavailable", 422))?;
+                permitted()?;
+                return Ok(result);
+            }
+            _ = &mut deadline => return Err(AppError::api("browser_unavailable", 408)),
+            _ = policy_check.tick() => permitted()?,
+        }
+    }
+}
+
+fn with_native_admission<T>(
+    root: &Path,
+    intent: crate::native_scan_admission::NativeScanIntent,
+    cancellation: &CancellationHandle,
+    work: impl FnOnce() -> T,
+) -> AppResult<T> {
+    if cancellation.is_cancelled() {
+        return Err(AppError::api("native_discovery_retry_required", 409));
+    }
+    let admission = crate::native_scan_admission::NativeScanPermit::acquire(root, intent)?;
+    let result = work();
+    if cancellation.is_cancelled() {
+        return Err(AppError::api("native_discovery_retry_required", 409));
+    }
+    admission.clean_complete()?;
+    Ok(result)
+}
+
 fn scan_site(
     target: &url::Url,
     wanted_profile: &str,
     profiles: Option<Vec<BrowserProfile>>,
+    cancellation: &CancellationHandle,
+    permitted: impl Fn() -> bool,
 ) -> (usize, usize, Vec<ImportedSession>) {
-    let mut checked = 0;
-    let mut unavailable = 0;
-    let mut found = vec![];
+    if cancellation.is_cancelled() || !permitted() {
+        cancellation.cancel();
+        return (0, 0, vec![]);
+    }
     // Local fixture/development servers do not inherit unrelated browser credentials.
     if target
         .host_str()
@@ -240,28 +334,92 @@ fn scan_site(
     {
         return (0, 0, vec![]);
     }
-    for profile in profiles
-        .unwrap_or_else(discover)
-        .into_iter()
-        .filter(|p| wanted_profile.is_empty() || p.id == wanted_profile)
-        .take(24)
-    {
+    scan_profiles(
+        profiles
+            .unwrap_or_else(discover)
+            .into_iter()
+            .filter(|p| wanted_profile.is_empty() || p.id == wanted_profile)
+            .take(24),
+        cancellation,
+        |profile| {
+            read_native_profile(
+                profile,
+                cancellation,
+                &permitted,
+                |profile| load_site_cookies(profile, target, cancellation),
+                |profile| {
+                    crate::browser_storage::load(
+                        &profile.path,
+                        profile.browser == "Firefox",
+                        &target.origin().ascii_serialization(),
+                    )
+                },
+            )
+        },
+    )
+}
+
+fn read_native_profile(
+    profile: BrowserProfile,
+    cancellation: &CancellationHandle,
+    permitted: impl Fn() -> bool,
+    load_cookies: impl FnOnce(
+        &BrowserProfile,
+    ) -> Result<Vec<crate::accounts::Cookie>, CookieLoadFailure>,
+    load_storage: impl FnOnce(&BrowserProfile) -> Result<crate::browser_storage::Storage, ()>,
+) -> ImportedSession {
+    if cancellation.is_cancelled() || !permitted() {
+        cancellation.cancel();
+        return ImportedSession::from_results(profile, Err(()), Err(()));
+    }
+    let cookies = load_cookies(&profile);
+    if matches!(cookies, Err(CookieLoadFailure::Unresolved)) {
+        // Native access errors have no reliable denial discriminator. Do not fan out
+        // to another profile or prompt after an unresolved native request.
+        cancellation.cancel();
+    }
+    if cancellation.is_cancelled() || !permitted() {
+        cancellation.cancel();
+        return ImportedSession::from_results(profile, Err(()), Err(()));
+    }
+    let storage = load_storage(&profile);
+    ImportedSession::from_results(profile, cookies.map_err(|_| ()), storage)
+}
+
+fn scan_profiles(
+    profiles: impl IntoIterator<Item = BrowserProfile>,
+    cancellation: &CancellationHandle,
+    mut read: impl FnMut(BrowserProfile) -> ImportedSession,
+) -> (usize, usize, Vec<ImportedSession>) {
+    let mut checked = 0;
+    let mut unavailable = 0;
+    let mut found = vec![];
+    for profile in profiles {
+        if cancellation.is_cancelled() {
+            return (checked, unavailable, vec![]);
+        }
         checked += 1;
-        let cookies = load_site_cookies(&profile, target);
-        let storage = crate::browser_storage::load(
-            &profile.path,
-            profile.browser == "Firefox",
-            &target.origin().ascii_serialization(),
-        );
-        let session = ImportedSession::from_results(profile, cookies, storage);
+        let session = read(profile);
         if !session.complete {
             unavailable += 1;
+        }
+        if cancellation.is_cancelled() {
+            return (checked, unavailable, vec![]);
         }
         found.push(session);
     }
     (checked, unavailable, found)
 }
+
 impl Runtime {
+    fn native_discovery_permitted(&self) -> AppResult<()> {
+        if self.state.settings()?.native_browser_discovery {
+            Ok(())
+        } else {
+            Err(AppError::api("native_discovery_disabled", 409))
+        }
+    }
+
     /// A failed local read is not a logout. Keep the old snapshot whole rather
     /// than mixing cookies and storage that may belong to different sign-ins.
     fn replace_imported_account(&self, id: &str, session: &ImportedSession) -> AppResult<bool> {
@@ -307,8 +465,15 @@ impl Runtime {
         raw_url: &str,
         profile_id: &str,
     ) -> AppResult<BrowserSearch> {
-        self.import_browser_accounts(site_id, raw_url, profile_id, true, None)
-            .await
+        self.import_browser_accounts(
+            site_id,
+            raw_url,
+            profile_id,
+            true,
+            None,
+            crate::native_scan_admission::NativeScanIntent::UserRequested,
+        )
+        .await
     }
     pub(crate) async fn import_browser_accounts(
         self: &std::sync::Arc<Self>,
@@ -317,6 +482,7 @@ impl Runtime {
         profile_id: &str,
         render: bool,
         profiles: Option<Vec<BrowserProfile>>,
+        intent: crate::native_scan_admission::NativeScanIntent,
     ) -> AppResult<BrowserSearch> {
         let target = crate::net::website_url(raw_url)?;
         if !crate::policy::safe_read_url(&target) {
@@ -332,31 +498,36 @@ impl Runtime {
             }
             site_id.into()
         };
+        if !self.state.settings()?.native_browser_discovery {
+            return Err(crate::apperr::AppError::api(
+                "native_discovery_disabled",
+                409,
+            ));
+        }
         let target_copy = target.clone();
         let wanted_profile = profile_id.to_string();
-        // Serialise native keyring access. A timeout does not start competing background scans.
-        static SCANNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if SCANNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            return Err(crate::apperr::AppError::api("browser_busy", 409));
-        }
-        let scan = tokio::task::spawn_blocking(move || {
-            struct Release;
-            impl Drop for Release {
-                fn drop(&mut self) {
-                    SCANNING.store(false, std::sync::atomic::Ordering::SeqCst);
-                }
-            }
-            let _release = Release;
-            scan_site(&target_copy, &wanted_profile, profiles)
-        });
-        // Up to 24 profiles may each wait eight seconds for their OS key store.
-        // Leave room for snapshots on a busy disk instead of discarding a valid full scan.
-        let (checked, unavailable, sessions) =
-            tokio::time::timeout(std::time::Duration::from_secs(300), scan)
-                .await
-                .map_err(|_| crate::apperr::AppError::api("browser_unavailable", 408))?
-                .map_err(|_| crate::apperr::AppError::api("browser_unavailable", 422))?;
+        static SCANNING: AtomicBool = AtomicBool::new(false);
+        let policy_core = self.clone();
+        let (checked, unavailable, sessions) = run_native_scan(
+            &SCANNING,
+            Duration::from_secs(300),
+            || self.native_discovery_permitted(),
+            move |cancellation| {
+                policy_core.native_discovery_permitted()?;
+                with_native_admission(&policy_core.root, intent, &cancellation, || {
+                    scan_site(
+                        &target_copy,
+                        &wanted_profile,
+                        profiles,
+                        &cancellation,
+                        || policy_core.native_discovery_permitted().is_ok(),
+                    )
+                })
+            },
+        )
+        .await??;
         for session in sessions {
+            self.native_discovery_permitted()?;
             let existing = self
                 .state
                 .read()?
@@ -635,6 +806,393 @@ fn identity_key(account: &crate::accounts::AccountView) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn native_scan_cancellation_stops_before_another_profile_and_discards_partial_result() {
+        let cancellation = CancellationHandle::new();
+        let mut calls = 0;
+        let (checked, _, sessions) = scan_profiles(
+            (0..4).map(|_| BrowserProfile::default()),
+            &cancellation,
+            |profile| {
+                calls += 1;
+                cancellation.cancel();
+                ImportedSession::from_results(profile, Ok(vec![]), Ok(Default::default()))
+            },
+        );
+        assert_eq!(calls, 1, "cancellation must stop further profile work");
+        assert_eq!(checked, 1);
+        assert!(sessions.is_empty(), "cancelled work must not be published");
+    }
+
+    #[test]
+    fn native_scan_already_cancelled_never_reads_profiles() {
+        let cancellation = CancellationHandle::new();
+        cancellation.cancel();
+        let (checked, unavailable, sessions) =
+            scan_profiles([BrowserProfile::default()], &cancellation, |_| {
+                panic!("cancelled scan must never read a profile")
+            });
+        assert_eq!((checked, unavailable), (0, 0));
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn native_scan_unresolved_native_read_stops_profile_fanout_and_storage() {
+        let cancellation = CancellationHandle::new();
+        let mut reads = 0;
+        let (checked, _, sessions) = scan_profiles(
+            (0..3).map(|_| BrowserProfile::default()),
+            &cancellation,
+            |profile| {
+                read_native_profile(
+                    profile,
+                    &cancellation,
+                    || true,
+                    |_| {
+                        reads += 1;
+                        Err(CookieLoadFailure::Unresolved)
+                    },
+                    |_| panic!("unresolved native access must not continue to storage"),
+                )
+            },
+        );
+        assert_eq!(reads, 1);
+        assert_eq!(checked, 1);
+        assert!(sessions.is_empty());
+        assert!(cancellation.is_cancelled());
+    }
+
+    #[test]
+    fn native_scan_unresolved_result_requires_explicit_clean_retry() {
+        use crate::native_scan_admission::{NativeScanIntent, NativeScanPermit};
+        let root =
+            std::env::temp_dir().join(format!("hycli-native-unresolved-{}", crate::util::id()));
+        let cancellation = CancellationHandle::new();
+        let mut calls = 0;
+        let result =
+            with_native_admission(&root, NativeScanIntent::Preparation, &cancellation, || {
+                scan_profiles(
+                    (0..3).map(|_| BrowserProfile::default()),
+                    &cancellation,
+                    |profile| {
+                        read_native_profile(
+                            profile,
+                            &cancellation,
+                            || true,
+                            |_| {
+                                calls += 1;
+                                Err(CookieLoadFailure::Unresolved)
+                            },
+                            |_| panic!("unresolved native read must not continue to storage"),
+                        )
+                    },
+                )
+            });
+        assert_eq!(
+            result.err().unwrap().public_code,
+            "native_discovery_retry_required"
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(
+            NativeScanPermit::acquire(&root, NativeScanIntent::Preparation)
+                .err()
+                .unwrap()
+                .public_code,
+            "native_discovery_retry_required"
+        );
+        with_native_admission(
+            &root,
+            NativeScanIntent::UserRequested,
+            &CancellationHandle::new(),
+            || (),
+        )
+        .unwrap();
+        NativeScanPermit::acquire(&root, NativeScanIntent::Preparation)
+            .unwrap()
+            .clean_complete()
+            .unwrap();
+    }
+
+    #[test]
+    fn native_scan_local_unavailable_does_not_trip_native_retry_breaker() {
+        let cancellation = CancellationHandle::new();
+        let (checked, unavailable, sessions) = scan_profiles(
+            (0..2).map(|_| BrowserProfile::default()),
+            &cancellation,
+            |profile| {
+                read_native_profile(
+                    profile,
+                    &cancellation,
+                    || true,
+                    |_| Err(CookieLoadFailure::Unavailable),
+                    |_| Ok(Default::default()),
+                )
+            },
+        );
+        assert_eq!((checked, unavailable), (2, 2));
+        assert_eq!(sessions.len(), 2);
+        assert!(!cancellation.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn native_scan_caller_abort_cancels_owned_worker_without_releasing_gate() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run_native_scan(
+            &GATE,
+            Duration::from_secs(10),
+            || Ok(()),
+            move |cancel| {
+                started.send(cancel.clone()).unwrap();
+                wait.recv().unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        let cancellation = ready.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            GATE.load(Ordering::SeqCst),
+            "worker still owns the scan permit"
+        );
+        let second = run_native_scan(&GATE, Duration::from_secs(1), || Ok(()), |_| ()).await;
+        assert_eq!(second.unwrap_err().public_code, "browser_busy");
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert!(
+            cancellation.is_cancelled(),
+            "dropping the caller must cancel its native request"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_scan_timeout_cancels_owned_worker() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run_native_scan(
+            &GATE,
+            Duration::from_millis(100),
+            || Ok(()),
+            move |cancel| {
+                started.send(cancel.clone()).unwrap();
+                wait.recv().unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        let cancellation = ready.await.unwrap();
+        assert_eq!(task.await.unwrap().unwrap_err().http_status, 408);
+        assert!(
+            GATE.load(Ordering::SeqCst),
+            "timeout must not release a running worker's permit"
+        );
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert!(
+            cancellation.is_cancelled(),
+            "timeout must cancel its native request"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_scan_http_disconnect_cancels_worker_without_releasing_admission() {
+        use crate::native_scan_admission::{NativeScanIntent, NativeScanPermit};
+        use tokio::io::AsyncWriteExt;
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let root = std::env::temp_dir().join(format!("hycli-disconnect-{}", util::id()));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let fixture = std::sync::Arc::new(std::sync::Mutex::new(Some((started, wait, finished))));
+        let worker_root = root.clone();
+        let app = axum::Router::new().route(
+            "/synthetic-scan",
+            axum::routing::get(move || {
+                let fixture = fixture.clone();
+                let worker_root = worker_root.clone();
+                async move {
+                    let (started, wait, finished) = fixture.lock().unwrap().take().unwrap();
+                    let result = run_native_scan(
+                        &GATE,
+                        Duration::from_secs(10),
+                        || Ok(()),
+                        move |cancel| {
+                            let mut reads = 0;
+                            let mut published = 0;
+                            let result = with_native_admission(
+                                &worker_root,
+                                NativeScanIntent::Preparation,
+                                &cancel,
+                                || {
+                                    let mut started = Some(started);
+                                    let (_, _, sessions) = scan_profiles(
+                                        (0..2).map(|_| BrowserProfile::default()),
+                                        &cancel,
+                                        |profile| {
+                                            read_native_profile(
+                                                profile,
+                                                &cancel,
+                                                || true,
+                                                |_| {
+                                                    reads += 1;
+                                                    if let Some(started) = started.take() {
+                                                        started.send(cancel.clone()).unwrap();
+                                                        wait.recv().unwrap();
+                                                    }
+                                                    Ok(vec![])
+                                                },
+                                                |_| panic!("disconnected caller must not continue to storage"),
+                                            )
+                                        },
+                                    );
+                                    published = sessions.len();
+                                },
+                            );
+                            finished
+                                .send((reads, published, result.err().map(|e| e.public_code)))
+                                .unwrap();
+                        },
+                    )
+                    .await;
+                    if result.is_ok() {
+                        axum::http::StatusCode::OK
+                    } else {
+                        axum::http::StatusCode::CONFLICT
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut connection = tokio::net::TcpStream::connect(address).await.unwrap();
+        connection
+            .write_all(
+                b"GET /synthetic-scan HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let cancellation = tokio::time::timeout(Duration::from_secs(2), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(connection);
+        let cancelled = tokio::time::timeout(Duration::from_secs(2), async {
+            while !cancellation.is_cancelled() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok();
+        let held = NativeScanPermit::acquire(&root, NativeScanIntent::UserRequested)
+            .err()
+            .map(|e| e.public_code);
+        let gate_held = GATE.load(Ordering::SeqCst);
+        release.send(()).unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(2), done).await;
+        server.abort();
+        assert!(
+            cancelled,
+            "HTTP disconnect must drop the caller and cancel native work"
+        );
+        assert_eq!(held.as_deref(), Some("browser_busy"));
+        assert!(gate_held);
+        assert_eq!(
+            outcome.unwrap().unwrap(),
+            (1, 0, Some("native_discovery_retry_required".into()))
+        );
+        assert_eq!(
+            NativeScanPermit::acquire(&root, NativeScanIntent::Preparation)
+                .err()
+                .unwrap()
+                .public_code,
+            "native_discovery_retry_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_scan_policy_revocation_cancels_pending_worker() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let root = std::env::temp_dir().join(format!("hycli-native-policy-{}", crate::util::id()));
+        let core = Runtime::open(&root, None, None, false, true, false).unwrap();
+        core.state
+            .update(|data| {
+                data.settings.native_browser_discovery = true;
+                Ok(())
+            })
+            .unwrap();
+        let external = crate::state::StateStore::open(&root.join("dashboard.json")).unwrap();
+        let policy = core.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run_native_scan(
+            &GATE,
+            Duration::from_secs(10),
+            move || policy.native_discovery_permitted(),
+            move |cancel| {
+                started.send(cancel.clone()).unwrap();
+                wait.recv().unwrap();
+                finished.send(()).unwrap();
+            },
+        ));
+        let cancellation = ready.await.unwrap();
+        external
+            .update(|data| {
+                data.settings.native_browser_discovery = false;
+                Ok(())
+            })
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), task).await;
+        let cancelled = cancellation.is_cancelled();
+        let still_running = GATE.load(Ordering::SeqCst);
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert_eq!(
+            result.unwrap().unwrap().unwrap_err().public_code,
+            "native_discovery_disabled"
+        );
+        assert!(cancelled);
+        assert!(still_running);
+    }
+
+    #[tokio::test]
+    async fn native_scan_disabled_policy_never_starts_worker() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        let result = run_native_scan(
+            &GATE,
+            Duration::from_secs(1),
+            || Err(AppError::api("native_discovery_disabled", 409)),
+            |_| panic!("disabled policy must not start native work"),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().public_code, "native_discovery_disabled");
+        assert!(!GATE.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn native_scan_completion_releases_gate_and_preserves_result() {
+        static GATE: AtomicBool = AtomicBool::new(false);
+        assert_eq!(
+            run_native_scan(&GATE, Duration::from_secs(1), || Ok(()), |_| 7)
+                .await
+                .unwrap(),
+            7
+        );
+        assert!(!GATE.load(Ordering::SeqCst));
+        assert_eq!(
+            run_native_scan(&GATE, Duration::from_secs(1), || Ok(()), |_| 9)
+                .await
+                .unwrap(),
+            9
+        );
+    }
+
+    #[test]
     fn native_reimport_read_failures_preserve_the_whole_verified_session() {
         use crate::accounts::{Credential, Identity};
         use serde_json::json;
@@ -694,6 +1252,7 @@ mod tests {
             };
             std::fs::create_dir_all(broken.parent().unwrap()).unwrap();
             std::fs::write(&broken, b"not a sqlite database").unwrap();
+            let cancellation = CancellationHandle::new();
             let (checked, unavailable, sessions) = scan_site(
                 &url::Url::parse("https://example.com/").unwrap(),
                 "",
@@ -702,11 +1261,26 @@ mod tests {
                     browser: "Firefox".into(),
                     ..profile()
                 }]),
+                &cancellation,
+                || true,
             );
-            assert_eq!((checked, unavailable, sessions.len()), (1, 1, 1));
-            let accepted = core
-                .replace_imported_account(&account.id, &sessions[0])
-                .unwrap();
+            assert_eq!((checked, unavailable), (1, 1));
+            let accepted = if cookie_failure {
+                assert!(
+                    cancellation.is_cancelled(),
+                    "unresolved native read stops the entire scan"
+                );
+                assert!(
+                    sessions.is_empty(),
+                    "unresolved native reads must not publish partial snapshots"
+                );
+                false
+            } else {
+                assert!(!cancellation.is_cancelled());
+                assert_eq!(sessions.len(), 1);
+                core.replace_imported_account(&account.id, &sessions[0])
+                    .unwrap()
+            };
             assert_eq!(
                 snapshot(),
                 before,
@@ -863,6 +1437,8 @@ mod tests {
             &url::Url::parse("http://127.0.0.1:1234/").unwrap(),
             "",
             None,
+            &CancellationHandle::new(),
+            || true,
         );
         assert_eq!(checked, 0);
         assert_eq!(unavailable, 0);
