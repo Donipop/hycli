@@ -282,7 +282,7 @@ pub(super) fn decode_plan(text: &str) -> AppResult<Plan> {
             }
         }
     }
-    serde_json::from_value(value).map_err(|_| AppError::api("ai_unavailable", 502))
+    serde_json::from_value(value).map_err(|_| AppError::api("ai_response_invalid", 502))
 }
 
 impl Runtime {

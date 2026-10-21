@@ -673,11 +673,11 @@ impl Runtime {
         role: &str,
         prompt: Value,
     ) -> AppResult<Plan> {
-        self.agent_progress(&job.id, role, "queued", 0, "")?;
+        self.agent_progress(&job.id, role, "queued", 0, "", None)?;
         let result = self
             .ai
             .complete_when_ready(config, SYSTEM, &prompt.to_string(), || {
-                self.agent_progress(&job.id, role, "running", 0, "")
+                self.agent_progress(&job.id, role, "running", 0, "", None)
             })
             .await;
         if std::env::var_os("HYCLI_PREPARATION_TRACE").is_some() {
@@ -704,8 +704,9 @@ impl Runtime {
                 "completed",
                 plan.spec.as_ref().map_or(0, |s| s.operations.len()),
                 &plan.note,
+                None,
             )?,
-            Err(_) => self.agent_progress(&job.id, role, "failed", 0, "")?,
+            Err(error) => self.agent_progress(&job.id, role, "failed", 0, "", Some(error))?,
         }
         plan
     }

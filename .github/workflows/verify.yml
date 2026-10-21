@@ -103,6 +103,7 @@ jobs:
           npm --prefix dashboard ci
           npm --prefix dashboard run check
           npm --prefix dashboard run build
+          node --test dashboard/work-notes.test.mjs
       - name: Rust checks
         run: |
           cargo fmt --all --check

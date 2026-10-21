@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Wykrywanie lokalnej przeglądarki",
   "settings.nativeDiscoveryHint": "Zezwalaj na odczyt lokalnych profili przeglądarki. Może to wymagać dostępu do pęku kluczy systemu. Włączenie nie uruchamia skanowania.",
   "errors.native_discovery_disabled": "Wykrywanie lokalnej przeglądarki jest wyłączone. Włącz je w ustawieniach lub użyj rozszerzenia przeglądarki.",
-  "errors.native_discovery_retry_required": "Automatyczne wykrywanie natywne wstrzymano po niedokończonej próbie. Sprawdź monit systemu, a następnie ponów ręcznie lub użyj rozszerzenia przeglądarki."
+  "errors.native_discovery_retry_required": "Automatyczne wykrywanie natywne wstrzymano po niedokończonej próbie. Sprawdź monit systemu, a następnie ponów ręcznie lub użyj rozszerzenia przeglądarki.",
+  "errors.ai_response_incomplete": "Odpowiedź AI jest niepełna. Ponów przygotowanie lub wybierz inny model.",
+  "errors.ai_response_invalid": "Nie można użyć odpowiedzi AI. Ponów przygotowanie lub wybierz inny model.",
+  "errors.ai_connection_failed": "Połączenie z AI nie powiodło się. Sprawdź sieć i dostępność dostawcy, a następnie spróbuj ponownie."
 }

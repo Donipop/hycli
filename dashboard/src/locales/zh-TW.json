@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "本機瀏覽器探索",
   "settings.nativeDiscoveryHint": "允許讀取本機瀏覽器設定檔。這可能要求存取作業系統鑰匙圈。開啟後不會自動開始掃描。",
   "errors.native_discovery_disabled": "本機瀏覽器探索已關閉。請在設定中開啟，或使用瀏覽器配套擴充功能。",
-  "errors.native_discovery_retry_required": "上次嘗試未完成，自動原生探索已暫停。請檢查作業系統提示，然後手動重試或使用瀏覽器助手。"
+  "errors.native_discovery_retry_required": "上次嘗試未完成，自動原生探索已暫停。請檢查作業系統提示，然後手動重試或使用瀏覽器助手。",
+  "errors.ai_response_incomplete": "AI 回應不完整。請重試準備或選擇其他模型。",
+  "errors.ai_response_invalid": "無法使用 AI 回應。請重試準備或選擇其他模型。",
+  "errors.ai_connection_failed": "AI 連線失敗。請檢查網路和服務商狀態後重試。"
 }

@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Lokale Browser-Erkennung",
   "settings.nativeDiscoveryHint": "Erlaubt das Lesen lokaler Browserprofile. Dies kann Zugriff auf den Schlüsselbund des Betriebssystems anfordern. Das Einschalten startet keine Suche.",
   "errors.native_discovery_disabled": "Die lokale Browser-Erkennung ist ausgeschaltet. Aktivieren Sie sie in den Einstellungen oder verwenden Sie die Browser-Erweiterung.",
-  "errors.native_discovery_retry_required": "Die automatische native Suche ist nach einem unvollständigen Versuch pausiert. Prüfe die Betriebssystemabfrage und versuche es ausdrücklich erneut oder nutze die Browser-Erweiterung."
+  "errors.native_discovery_retry_required": "Die automatische native Suche ist nach einem unvollständigen Versuch pausiert. Prüfe die Betriebssystemabfrage und versuche es ausdrücklich erneut oder nutze die Browser-Erweiterung.",
+  "errors.ai_response_incomplete": "Die KI-Antwort ist unvollständig. Wiederhole die Vorbereitung oder wähle ein anderes Modell.",
+  "errors.ai_response_invalid": "Die KI-Antwort konnte nicht verwendet werden. Wiederhole die Vorbereitung oder wähle ein anderes Modell.",
+  "errors.ai_connection_failed": "Die KI-Verbindung ist fehlgeschlagen. Prüfe das Netzwerk und die Verfügbarkeit des Anbieters und versuche es erneut."
 }

@@ -555,5 +555,8 @@
   "settings.nativeDiscovery": "Yerel tarayıcı keşfi",
   "settings.nativeDiscoveryHint": "Yerel tarayıcı profillerinin okunmasına izin verir. İşletim sistemi anahtarlığına erişim istenebilir. Açmak taramayı başlatmaz.",
   "errors.native_discovery_disabled": "Yerel tarayıcı keşfi kapalı. Ayarlardan açın veya tarayıcı yardımcısını kullanın.",
-  "errors.native_discovery_retry_required": "Tamamlanmamış bir denemeden sonra otomatik yerel keşif duraklatıldı. İşletim sistemi istemini kontrol edin, ardından elle yeniden deneyin veya tarayıcı yardımcısını kullanın."
+  "errors.native_discovery_retry_required": "Tamamlanmamış bir denemeden sonra otomatik yerel keşif duraklatıldı. İşletim sistemi istemini kontrol edin, ardından elle yeniden deneyin veya tarayıcı yardımcısını kullanın.",
+  "errors.ai_response_incomplete": "Yapay zekâ yanıtı tamamlanmadı. Hazırlığı yeniden deneyin veya başka bir model seçin.",
+  "errors.ai_response_invalid": "Yapay zekâ yanıtı kullanılamadı. Hazırlığı yeniden deneyin veya başka bir model seçin.",
+  "errors.ai_connection_failed": "Yapay zekâ bağlantısı başarısız oldu. Ağı ve sağlayıcının durumunu kontrol edip yeniden deneyin."
 }
