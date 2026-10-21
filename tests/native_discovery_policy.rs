@@ -142,3 +142,45 @@ fn native_discovery_defaults_apply_to_fresh_and_legacy_json_settings() {
     assert_eq!(legacy.native_browser_discovery, !cfg!(target_os = "macos"));
     assert_eq!(legacy.locale, "ko");
 }
+
+#[test]
+fn state_startup_waits_for_database_bootstrap_owner() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let path = root().join("state.json");
+    let startup = util::file_lock(&path.with_extension("db.startup.lock"), false).unwrap();
+    let (entered, ready) = mpsc::channel();
+    let (finished, result) = mpsc::channel();
+    let worker_path = path.clone();
+    let worker = std::thread::spawn(move || {
+        entered.send(()).unwrap();
+        finished
+            .send(
+                StateStore::open(&worker_path)
+                    .map(|store| store.settings().unwrap().native_browser_discovery),
+            )
+            .unwrap();
+    });
+    ready.recv_timeout(Duration::from_secs(2)).unwrap();
+    let premature = result.recv_timeout(Duration::from_millis(200));
+    let opened_database = path.with_extension("db").exists();
+    startup.unlock().unwrap();
+    drop(startup);
+    let completed = match premature {
+        Ok(result) => result,
+        Err(_) => result.recv_timeout(Duration::from_secs(5)).unwrap(),
+    };
+    worker.join().unwrap();
+    assert!(
+        !opened_database,
+        "a second opener must wait before SQLite bootstrap"
+    );
+    assert_eq!(completed.unwrap(), !cfg!(target_os = "macos"));
+    // The startup guard must not survive for the lifetime of the returned store.
+    let store = StateStore::open(&path).unwrap();
+    let next = StateStore::open(&path).unwrap();
+    assert_eq!(
+        store.settings().unwrap().native_browser_discovery,
+        next.settings().unwrap().native_browser_discovery
+    );
+}
