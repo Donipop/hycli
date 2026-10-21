@@ -8,7 +8,7 @@
 </p>
 
 <p align="center" dir="rtl">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">تنزيل (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">تنزيل (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">احصل على المساعدة عبر GitHub</a> ·
   <a href="#try-it-in-30-seconds">جرّبه في 30 ثانية</a> ·
   <a href="#get-started">البدء</a> ·
@@ -59,13 +59,13 @@ hycli your-website create-draft --title "مرحبًا من Hycli" --body "تمت
 
 ### التنزيل والتشغيل (Windows وmacOS وLinux)
 
-نزّل المثبّت الأصلي أو الأرشيف المحمول لمنصتك من **[إصدارات GitHub (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**:
+نزّل المثبّت الأصلي أو الأرشيف المحمول لمنصتك من **[إصدارات GitHub (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)**:
 
 | المنصة | المعمارية | المثبّت الأصلي | الأرشيف المحمول | كيفية البدء |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 وARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | شغّل `*-setup.exe` (يضيف `hycli` إلى مسار `PATH` للمستخدم وقائمة ابدأ)، ثم افتح **Hycli** أو نفّذ `hycli open` في PowerShell. |
-| **macOS 13+** | Apple Silicon (`arm64`) وIntel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | افتح ملف `.dmg`، واسحب **Hycli.app** إلى **Applications** ثم افتحه (يربط `hycli` تلقائيًا في `~/.local/bin`). |
-| **Linux** | x64 وARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | ثبّت حزمة `.deb` (`sudo apt install ./hycli-*.deb`) أو فك ضغط `.tar.gz` وشغّل `./install.sh`، ثم نفّذ `hycli open`. |
+| **Windows 10/11** | x64 وARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | شغّل `*-setup.exe` (يضيف `hycli` إلى مسار `PATH` للمستخدم وقائمة ابدأ)، ثم افتح **Hycli** أو نفّذ `hycli open` في PowerShell. |
+| **macOS 13+** | Apple Silicon (`arm64`) وIntel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | افتح ملف `.dmg`، واسحب **Hycli.app** إلى **Applications** ثم افتحه (يربط `hycli` تلقائيًا في `~/.local/bin`). |
+| **Linux** | x64 وARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | ثبّت حزمة `.deb` (`sudo apt install ./hycli-*.deb`) أو فك ضغط `.tar.gz` وشغّل `./install.sh`، ثم نفّذ `hycli open`. |
 
 **الإصدار المنشور v0.1.0:** لا تتضمن الأرشيفات المحمولة لنظامي Windows وmacOS نصوص التثبيت. استخدم بدلًا منها مثبّت Windows بصيغة `*-setup.exe` أو مثبّت macOS بصيغة `.dmg` من الإصدار المرتبط أعلاه.
 
@@ -77,9 +77,9 @@ hycli your-website create-draft --title "مرحبًا من Hycli" --body "تمت
 **الأرشيف المحمول لنظامي Linux / macOS:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # أو على macOS: shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # أو على macOS: shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **الأرشيف المحمول لنظام Windows PowerShell:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

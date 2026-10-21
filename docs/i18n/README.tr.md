@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">İndir (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">İndir (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">GitHub üzerinden yardım alın</a> ·
   <a href="#try-it-in-30-seconds">30 saniyede deneyin</a> ·
   <a href="#get-started">Başlangıç</a> ·
@@ -59,13 +59,13 @@ Hycli, hem web sitesi motorunu hem de yerel kontrol panelini (`http://127.0.0.1:
 
 ### İndirme ve çalıştırma (Windows, macOS, Linux)
 
-Platformunuza uygun yerel yükleyiciyi veya taşınabilir arşivi **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** sayfasından indirin:
+Platformunuza uygun yerel yükleyiciyi veya taşınabilir arşivi **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)** sayfasından indirin:
 
 | Platform | Mimari | Yerel Yükleyici | Taşınabilir Arşiv | Nasıl başlatılır |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 ve ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | `*-setup.exe` dosyasını çalıştırın (kullanıcı `PATH` değişkenine ve Başlat Menüsü'ne `hycli` ekler), ardından **Hycli**'yi başlatın veya PowerShell'de `hycli open` komutunu çalıştırın. |
-| **macOS 13+** | Apple Silicon (`arm64`) ve Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` dosyasını açın, **Hycli.app** uygulamasını **Applications** klasörüne sürükleyin ve açın (`hycli` komutunu otomatik olarak `~/.local/bin` içine bağlar). |
-| **Linux** | x64 ve ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` paketini kurun (`sudo apt install ./hycli-*.deb`) veya `.tar.gz` arşivini çıkarıp `./install.sh` dosyasını çalıştırın, ardından `hycli open` komutunu çalıştırın. |
+| **Windows 10/11** | x64 ve ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | `*-setup.exe` dosyasını çalıştırın (kullanıcı `PATH` değişkenine ve Başlat Menüsü'ne `hycli` ekler), ardından **Hycli**'yi başlatın veya PowerShell'de `hycli open` komutunu çalıştırın. |
+| **macOS 13+** | Apple Silicon (`arm64`) ve Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | `.dmg` dosyasını açın, **Hycli.app** uygulamasını **Applications** klasörüne sürükleyin ve açın (`hycli` komutunu otomatik olarak `~/.local/bin` içine bağlar). |
+| **Linux** | x64 ve ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | `.deb` paketini kurun (`sudo apt install ./hycli-*.deb`) veya `.tar.gz` arşivini çıkarıp `./install.sh` dosyasını çalıştırın, ardından `hycli open` komutunu çalıştırın. |
 
 **Yayımlanmış v0.1.0 sürümü:** Windows ve macOS taşınabilir arşivleri kurulum betiklerini içermez. Bunun yerine yukarıda bağlantısı verilen sürümün Windows `*-setup.exe` veya macOS `.dmg` yükleyicisini kullanın.
 
@@ -77,9 +77,9 @@ Aşağıdaki arşiv komutları, güncel kaynak koddan derlenen paketler gibi `in
 **Linux / macOS taşınabilir arşiv:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS'ta: shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # macOS'ta: shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Windows PowerShell taşınabilir arşiv:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

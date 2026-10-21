@@ -121,7 +121,7 @@ Desktop-specific verification:
 
 ```sh
 node scripts/smoke-desktop.mjs dist/hycli --browser
-node scripts/smoke-installer.mjs dist/artifacts/hycli-0.1.0-linux-x64.deb
+node scripts/smoke-installer.mjs dist/artifacts/hycli-0.1.1-linux-x64.deb
 ```
 
 Use `.exe` for the binary on Windows and the corresponding `.dmg` or `*-setup.exe` artifact on macOS/Windows. `--browser` exercises the actual translated Quit action through Playwright; omit it for non-browser native checks. Tests cover concurrent launches, port conflicts, stale discovery records, shutdown authorization, launcher execution and saved settings across restarts. Installer checks inspect an extracted DEB, a mounted DMG or a silent per-user Windows installation. They do not replace testing the final signed installer on a clean user machine.

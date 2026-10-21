@@ -57,7 +57,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Registry, fixture and companion boundary tests
         shell: bash
-        run: node --test scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs dashboard/e2e-screenshots.test.mjs dashboard/snapshot.test.mjs dashboard/accepted-command.test.mjs dashboard/account-continuation.test.mjs dashboard/native-discovery.test.mjs
+        run: node --test scripts/check-baseline-lock.test.mjs scripts/registry.test.mjs scripts/fixture-panic.test.mjs browser-companion/site-scope.test.cjs dashboard/e2e-screenshots.test.mjs dashboard/snapshot.test.mjs dashboard/accepted-command.test.mjs dashboard/account-continuation.test.mjs dashboard/native-discovery.test.mjs
       - name: Rust toolchain
         run: |
           rustup update stable --no-self-update
@@ -160,7 +160,7 @@ jobs:
         if: matrix.browser_tests
         run: |
           test "$(git -C .cache/result-action-baseline rev-parse HEAD)" = 6ab5ffd849351e8cf4d5263913e0ffcbfc27d785
-          cmp dashboard/package-lock.json .cache/result-action-baseline/dashboard/package-lock.json
+          node scripts/check-baseline-lock.mjs dashboard .cache/result-action-baseline/dashboard
           ln -s "$GITHUB_WORKSPACE/dashboard/node_modules" .cache/result-action-baseline/dashboard/node_modules
           npm --prefix .cache/result-action-baseline/dashboard run build
           git -C .cache/result-action-baseline diff --exit-code -- dashboard
@@ -175,7 +175,7 @@ jobs:
         if: matrix.browser_tests
         run: |
           test "$(git -C .cache/native-discovery-baseline rev-parse HEAD)" = 89023c86f7823c61b55c60394ad28aab5adafec1
-          cmp dashboard/package-lock.json .cache/native-discovery-baseline/dashboard/package-lock.json
+          node scripts/check-baseline-lock.mjs dashboard .cache/native-discovery-baseline/dashboard
           ln -s "$GITHUB_WORKSPACE/dashboard/node_modules" .cache/native-discovery-baseline/dashboard/node_modules
           npm --prefix .cache/native-discovery-baseline/dashboard run build
           git -C .cache/native-discovery-baseline diff --exit-code -- dashboard

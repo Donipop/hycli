@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">下載 (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">下載 (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">在 GitHub 上取得協助</a> ·
   <a href="#try-it-in-30-seconds">30 秒快速體驗</a> ·
   <a href="#get-started">開始使用</a> ·
@@ -59,13 +59,13 @@ Hycli 將網站引擎與本機儀表板（`http://127.0.0.1:4318`）內建於單
 
 ### 下載與執行 (Windows, macOS, Linux)
 
-前往 **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** 下載適合你作業系統的原生安裝檔或可攜式壓縮檔：
+前往 **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)** 下載適合你作業系統的原生安裝檔或可攜式壓縮檔：
 
 | 作業系統 | 架構 | 原生安裝檔 | 可攜式壓縮檔 | 啟動方式 |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 及 ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | 執行 `*-setup.exe`（免系統管理員權限，自動加入使用者 `PATH` 與開始功能表），接著點選 **Hycli** 圖示或在 PowerShell 執行 `hycli open` |
-| **macOS 13+** | Apple Silicon (`arm64`) 及 Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | 開啟 `.dmg`，將 **Hycli.app** 拖曳至 **Applications** 後開啟（自動連結 `~/.local/bin/hycli`） |
-| **Linux** | x64 及 ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | 安裝 `.deb`（`sudo apt install ./hycli-*.deb`）或解壓縮 `.tar.gz` 後執行 `./install.sh`，接著執行 `hycli open` |
+| **Windows 10/11** | x64 及 ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | 執行 `*-setup.exe`（免系統管理員權限，自動加入使用者 `PATH` 與開始功能表），接著點選 **Hycli** 圖示或在 PowerShell 執行 `hycli open` |
+| **macOS 13+** | Apple Silicon (`arm64`) 及 Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | 開啟 `.dmg`，將 **Hycli.app** 拖曳至 **Applications** 後開啟（自動連結 `~/.local/bin/hycli`） |
+| **Linux** | x64 及 ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | 安裝 `.deb`（`sudo apt install ./hycli-*.deb`）或解壓縮 `.tar.gz` 後執行 `./install.sh`，接著執行 `hycli open` |
 
 **已發布的 v0.1.0：** Windows 和 macOS 可攜式壓縮檔不包含安裝指令碼。請改用上方發佈頁面中的 Windows `*-setup.exe` 或 macOS `.dmg` 安裝檔。
 
@@ -77,9 +77,9 @@ Hycli 將網站引擎與本機儀表板（`http://127.0.0.1:4318`）內建於單
 **Linux / macOS 可攜式套件安裝：**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS 請使用 shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # macOS 請使用 shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Windows PowerShell 可攜式套件安裝：**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

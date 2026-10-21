@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">ダウンロード (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">ダウンロード (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">GitHubでサポートを受ける</a> ·
   <a href="#try-it-in-30-seconds">30秒で試す</a> ·
   <a href="#get-started">はじめに</a> ·
@@ -59,13 +59,13 @@ Hycliはウェブサイトエンジンとローカルダッシュボード（`ht
 
 ### ダウンロードと実行 (Windows, macOS, Linux)
 
-お使いのプラットフォーム向けのネイティブインストーラーまたはポータブルアーカイブを **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** からダウンロードしてください:
+お使いのプラットフォーム向けのネイティブインストーラーまたはポータブルアーカイブを **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)** からダウンロードしてください:
 
 | OS | アーキテクチャ | ネイティブインストーラー | ポータブルアーカイブ | 起動方法 |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 および ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | `*-setup.exe` を実行（管理者権限不要、ユーザー `PATH` とスタートメニューに自動登録）し、**Hycli** を開くか PowerShell で `hycli open` を実行 |
-| **macOS 13+** | Apple Silicon (`arm64`) および Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` を開き、**Hycli.app** を **Applications** にドラッグして起動（`~/.local/bin/hycli` に自動リンク） |
-| **Linux** | x64 および ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` をインストール（`sudo apt install ./hycli-*.deb`）するか `.tar.gz` を展開して `./install.sh` を実行後、`hycli open` を実行 |
+| **Windows 10/11** | x64 および ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | `*-setup.exe` を実行（管理者権限不要、ユーザー `PATH` とスタートメニューに自動登録）し、**Hycli** を開くか PowerShell で `hycli open` を実行 |
+| **macOS 13+** | Apple Silicon (`arm64`) および Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | `.dmg` を開き、**Hycli.app** を **Applications** にドラッグして起動（`~/.local/bin/hycli` に自動リンク） |
+| **Linux** | x64 および ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | `.deb` をインストール（`sudo apt install ./hycli-*.deb`）するか `.tar.gz` を展開して `./install.sh` を実行後、`hycli open` を実行 |
 
 **公開済みの v0.1.0:** Windows と macOS のポータブルアーカイブにはインストールスクリプトが含まれていません。代わりに、上記のリリースから Windows 用の `*-setup.exe` または macOS 用の `.dmg` インストーラーを使用してください。
 
@@ -77,9 +77,9 @@ Hycliはウェブサイトエンジンとローカルダッシュボード（`ht
 **Linux / macOS ポータブルアーカイブ:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS では shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # macOS では shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Windows PowerShell ポータブルアーカイブ:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

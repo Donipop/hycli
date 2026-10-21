@@ -11,9 +11,9 @@ node scripts/build.mjs
 node scripts/package.mjs
 npm install --prefix .cache/mcpb --no-save "@anthropic-ai/mcpb@2.1.2"
 node scripts/mcpb.mjs
-node scripts/smoke-mcpb.mjs dist/artifacts/hycli-mcp-0.1.0-linux-x64.mcpb
+node scripts/smoke-mcpb.mjs dist/artifacts/hycli-mcp-0.1.1-linux-x64.mcpb
 node scripts/package.mjs --source
-node scripts/smoke-package.mjs dist/artifacts/hycli-0.1.0-linux-x64.tar.gz
+node scripts/smoke-package.mjs dist/artifacts/hycli-0.1.1-linux-x64.tar.gz
 ```
 
 Use the archives matching the current native platform for both smoke commands. Archives and their SHA-256 sidecars are under `dist/artifacts/`. Each archive also includes checksums for its individual files. `*.manifest.json` records the exact packaged file list. `node scripts/mcpb.mjs` wraps that archive into the MCP bundle the official registry links to; see [REGISTRY.md](REGISTRY.md) for the registry entry, the measured checks and the publish order.
