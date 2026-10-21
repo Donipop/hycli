@@ -28,6 +28,8 @@ try {
  await poll(async()=>await page.getByRole('button',{name:'Lifecycle research library',exact:true}).count()===1);
  let previous=(await state()).jobs.map(j=>j.id);
  await openSite('Lifecycle research library');await button(dialog(),'accounts.add').click();
+ const discoveryResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/browser/find'&&response.request().method()==='POST');
+ await button(dialog().locator('.auto-signin'),'accounts.autoFind').click();assert.equal((await discoveryResponse).status(),200);
  await button(dialog(),'accounts.useAccount').first().waitFor({timeout:360000});
  const resumeResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/sites/prepare'&&response.request().method()==='POST');
  await button(dialog(),'accounts.useAccount').first().click();assert.equal((await resumeResponse).status(),200);await dialog().waitFor({state:'hidden'});
