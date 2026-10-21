@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Unduh (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">Unduh (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">Dapatkan bantuan di GitHub</a> ·
   <a href="#try-it-in-30-seconds">Coba dalam 30 detik</a> ·
   <a href="#get-started">Mulai</a> ·
@@ -59,13 +59,13 @@ Hycli dikemas sebagai satu berkas biner native tunggal yang berisi mesin situs w
 
 ### Unduh dan jalankan (Windows, macOS, Linux)
 
-Unduh pemasang native atau arsip portabel untuk platform Anda dari **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**:
+Unduh pemasang native atau arsip portabel untuk platform Anda dari **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)**:
 
 | Sistem Operasi | Arsitektur | Pemasang Native | Arsip Portabel | Cara memulai |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | Jalankan `*-setup.exe` (tanpa hak admin, otomatis menambahkan `hycli` ke `PATH` pengguna dan Start Menu), lalu buka **Hycli** atau jalankan `hycli open` di PowerShell |
-| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Buka `.dmg`, seret **Hycli.app** ke **Applications**, lalu jalankan (otomatis menautkan `~/.local/bin/hycli`) |
-| **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Pasang `.deb` (`sudo apt install ./hycli-*.deb`) atau ekstrak `.tar.gz` dan jalankan `./install.sh`, lalu jalankan `hycli open` |
+| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | Jalankan `*-setup.exe` (tanpa hak admin, otomatis menambahkan `hycli` ke `PATH` pengguna dan Start Menu), lalu buka **Hycli** atau jalankan `hycli open` di PowerShell |
+| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | Buka `.dmg`, seret **Hycli.app** ke **Applications**, lalu jalankan (otomatis menautkan `~/.local/bin/hycli`) |
+| **Linux** | x64 & ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | Pasang `.deb` (`sudo apt install ./hycli-*.deb`) atau ekstrak `.tar.gz` dan jalankan `./install.sh`, lalu jalankan `hycli open` |
 
 **Rilis v0.1.0 yang dipublikasikan:** Arsip portabel Windows dan macOS tidak menyertakan skrip instalasi. Gunakan pemasang Windows `*-setup.exe` atau macOS `.dmg` dari rilis yang ditautkan di atas.
 
@@ -77,9 +77,9 @@ Perintah arsip di bawah memerlukan paket yang berisi `install.sh` (Linux/macOS) 
 **Arsip portabel Linux / macOS:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # atau di macOS: shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # atau di macOS: shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Arsip portabel Windows PowerShell:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

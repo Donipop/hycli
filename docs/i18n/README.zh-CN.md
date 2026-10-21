@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">下载 (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">下载 (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">在 GitHub 上获取帮助</a> ·
   <a href="#try-it-in-30-seconds">30 秒快速体验</a> ·
   <a href="#get-started">开始使用</a> ·
@@ -59,13 +59,13 @@ Hycli 将网站引擎与本地仪表盘（`http://127.0.0.1:4318`）打包在单
 
 ### 下载与运行 (Windows, macOS, Linux)
 
-前往 **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** 下载适合你操作系统的原生安装包或便携压缩包：
+前往 **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)** 下载适合你操作系统的原生安装包或便携压缩包：
 
 | 操作系统 | 架构 | 原生安装包 | 便携压缩包 | 启动方式 |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 及 ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | 运行 `*-setup.exe`（无需管理员权限，自动添加至用户 `PATH` 和开始菜单），然后点击 **Hycli** 图标或在 PowerShell 中运行 `hycli open` |
-| **macOS 13+** | Apple Silicon (`arm64`) 及 Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | 打开 `.dmg`，将 **Hycli.app** 拖入 **Applications** 后运行（自动链接 `~/.local/bin/hycli`） |
-| **Linux** | x64 及 ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | 安装 `.deb`（`sudo apt install ./hycli-*.deb`）或解压 `.tar.gz` 后运行 `./install.sh`，随后执行 `hycli open` |
+| **Windows 10/11** | x64 及 ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | 运行 `*-setup.exe`（无需管理员权限，自动添加至用户 `PATH` 和开始菜单），然后点击 **Hycli** 图标或在 PowerShell 中运行 `hycli open` |
+| **macOS 13+** | Apple Silicon (`arm64`) 及 Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | 打开 `.dmg`，将 **Hycli.app** 拖入 **Applications** 后运行（自动链接 `~/.local/bin/hycli`） |
+| **Linux** | x64 及 ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | 安装 `.deb`（`sudo apt install ./hycli-*.deb`）或解压 `.tar.gz` 后运行 `./install.sh`，随后执行 `hycli open` |
 
 **已发布的 v0.1.0：** Windows 和 macOS 便携压缩包不包含安装脚本。请改用上方发布页面中的 Windows `*-setup.exe` 或 macOS `.dmg` 安装包。
 
@@ -77,9 +77,9 @@ Hycli 将网站引擎与本地仪表盘（`http://127.0.0.1:4318`）打包在单
 **Linux / macOS 便携包安装：**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS 请使用 shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # macOS 请使用 shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Windows PowerShell 便携包安装：**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Herunterladen (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">Herunterladen (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">Hilfe auf GitHub erhalten</a> ·
   <a href="#try-it-in-30-seconds">In 30 Sekunden testen</a> ·
   <a href="#get-started">Erste Schritte</a> ·
@@ -59,13 +59,13 @@ Hycli wird als einzelne native Binärdatei ausgeliefert, die sowohl die Website-
 
 ### Herunterladen und starten (Windows, macOS, Linux)
 
-Lade das native Installationsprogramm oder das portable Archiv für deine Plattform unter **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)** herunter:
+Lade das native Installationsprogramm oder das portable Archiv für deine Plattform unter **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)** herunter:
 
 | Plattform | Architektur | Natives Installationsprogramm | Portables Archiv | So startest du |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | `*-setup.exe` ausführen (fügt `hycli` ohne Admin-Rechte zum Benutzer-`PATH` und Startmenü hinzu), dann **Hycli** starten oder in PowerShell `hycli open` ausführen. |
-| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg` öffnen, **Hycli.app** in **Applications** ziehen und öffnen (verknüpft `hycli` automatisch in `~/.local/bin`). |
-| **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` installieren (`sudo apt install ./hycli-*.deb`) oder `.tar.gz` entpacken und `./install.sh` starten, danach `hycli open` ausführen. |
+| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | `*-setup.exe` ausführen (fügt `hycli` ohne Admin-Rechte zum Benutzer-`PATH` und Startmenü hinzu), dann **Hycli** starten oder in PowerShell `hycli open` ausführen. |
+| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | `.dmg` öffnen, **Hycli.app** in **Applications** ziehen und öffnen (verknüpft `hycli` automatisch in `~/.local/bin`). |
+| **Linux** | x64 & ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | `.deb` installieren (`sudo apt install ./hycli-*.deb`) oder `.tar.gz` entpacken und `./install.sh` starten, danach `hycli open` ausführen. |
 
 **Veröffentlichte Version v0.1.0:** Die portablen Archive für Windows und macOS enthalten keine Installationsskripte. Verwende stattdessen das Windows-Installationsprogramm `*-setup.exe` oder das macOS-Installationsprogramm `.dmg` aus der oben verlinkten Veröffentlichung.
 
@@ -77,9 +77,9 @@ Die folgenden Archivbefehle setzen ein Paket mit `install.sh` (Linux/macOS) oder
 **Portables Archiv für Linux / macOS:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # oder unter macOS: shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # oder unter macOS: shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Portables Archiv für Windows PowerShell:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

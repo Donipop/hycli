@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Tải xuống (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">Tải xuống (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">Nhận trợ giúp trên GitHub</a> ·
   <a href="#try-it-in-30-seconds">Dùng thử trong 30 giây</a> ·
   <a href="#get-started">Bắt đầu</a> ·
@@ -59,13 +59,13 @@ Hycli được đóng gói thành một tệp thực thi gốc duy nhất chứa
 
 ### Tải xuống và chạy (Windows, macOS, Linux)
 
-Tải bộ cài đặt gốc hoặc gói nén di động (portable) cho hệ điều hành của bạn từ **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**:
+Tải bộ cài đặt gốc hoặc gói nén di động (portable) cho hệ điều hành của bạn từ **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)**:
 
 | Hệ điều hành | Kiến trúc | Bộ cài đặt gốc | Gói nén di động | Cách khởi chạy |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | Chạy `*-setup.exe` (không cần quyền quản trị, tự thêm `hycli` vào `PATH` người dùng và Start Menu), sau đó mở **Hycli** hoặc chạy `hycli open` trong PowerShell |
-| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Mở tệp `.dmg`, kéo **Hycli.app** vào **Applications** rồi mở ứng dụng (tự động liên kết `~/.local/bin/hycli`) |
-| **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Cài đặt tệp `.deb` (`sudo apt install ./hycli-*.deb`) hoặc giải nén `.tar.gz` và chạy `./install.sh`, sau đó chạy `hycli open` |
+| **Windows 10/11** | x64 & ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | Chạy `*-setup.exe` (không cần quyền quản trị, tự thêm `hycli` vào `PATH` người dùng và Start Menu), sau đó mở **Hycli** hoặc chạy `hycli open` trong PowerShell |
+| **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | Mở tệp `.dmg`, kéo **Hycli.app** vào **Applications** rồi mở ứng dụng (tự động liên kết `~/.local/bin/hycli`) |
+| **Linux** | x64 & ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | Cài đặt tệp `.deb` (`sudo apt install ./hycli-*.deb`) hoặc giải nén `.tar.gz` và chạy `./install.sh`, sau đó chạy `hycli open` |
 
 **Bản v0.1.0 đã phát hành:** Các gói nén di động cho Windows và macOS không chứa tập lệnh cài đặt. Hãy dùng bộ cài `*-setup.exe` cho Windows hoặc `.dmg` cho macOS từ bản phát hành được liên kết ở trên.
 
@@ -77,9 +77,9 @@ Các lệnh dưới đây yêu cầu gói có chứa `install.sh` (Linux/macOS) 
 **Gói di động cho Linux / macOS:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # hoặc trên macOS: shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # hoặc trên macOS: shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Gói di động cho Windows PowerShell:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

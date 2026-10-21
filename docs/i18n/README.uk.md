@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">Завантажити (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">Завантажити (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">Отримати допомогу на GitHub</a> ·
   <a href="#try-it-in-30-seconds">Спробувати за 30 секунд</a> ·
   <a href="#get-started">Початок роботи</a> ·
@@ -59,13 +59,13 @@ Hycli постачається як єдиний нативний виконув
 
 ### Завантаження та запуск (Windows, macOS, Linux)
 
-Завантажте нативний інсталятор або портативний архів для вашої платформи зі сторінки **[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**:
+Завантажте нативний інсталятор або портативний архів для вашої платформи зі сторінки **[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)**:
 
 | Платформа | Архітектура | Нативний інсталятор | Портативний архів | Як запустити |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 та ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | Запустіть `*-setup.exe` (додає `hycli` до користувацького `PATH` і меню «Пуск»), потім відкрийте **Hycli** або виконайте `hycli open` у PowerShell. |
-| **macOS 13+** | Apple Silicon (`arm64`) та Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Відкрийте `.dmg`, перетягніть **Hycli.app** у **Applications** і запустіть програму (автоматично зв'язує `hycli` у `~/.local/bin`). |
-| **Linux** | x64 та ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Встановіть `.deb` (`sudo apt install ./hycli-*.deb`) або розпакуйте `.tar.gz` і запустіть `./install.sh`, а потім виконайте `hycli open`. |
+| **Windows 10/11** | x64 та ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | Запустіть `*-setup.exe` (додає `hycli` до користувацького `PATH` і меню «Пуск»), потім відкрийте **Hycli** або виконайте `hycli open` у PowerShell. |
+| **macOS 13+** | Apple Silicon (`arm64`) та Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | Відкрийте `.dmg`, перетягніть **Hycli.app** у **Applications** і запустіть програму (автоматично зв'язує `hycli` у `~/.local/bin`). |
+| **Linux** | x64 та ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | Встановіть `.deb` (`sudo apt install ./hycli-*.deb`) або розпакуйте `.tar.gz` і запустіть `./install.sh`, а потім виконайте `hycli open`. |
 
 **Опублікована версія v0.1.0:** Портативні архіви для Windows і macOS не містять скриптів встановлення. Натомість використовуйте інсталятор Windows `*-setup.exe` або macOS `.dmg` із випуску за посиланням вище.
 
@@ -77,9 +77,9 @@ Hycli постачається як єдиний нативний виконув
 **Портативний архів Linux / macOS:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # на macOS: shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # на macOS: shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Портативний архів Windows PowerShell:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```

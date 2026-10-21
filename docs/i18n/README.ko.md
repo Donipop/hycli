@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0">다운로드 (Windows · macOS · Linux)</a> ·
+  <a href="https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1">다운로드 (Windows · macOS · Linux)</a> ·
   <a href="https://github.com/Hybirdss/Hycli/issues">GitHub에서 도움받기</a> ·
   <a href="#try-it-in-30-seconds">30초 만에 써보기</a> ·
   <a href="#get-started">시작하기</a> ·
@@ -59,13 +59,13 @@ Hycli는 웹사이트 엔진과 로컬 대시보드(`http://127.0.0.1:4318`)를 
 
 ### 다운로드 및 실행 (Windows, macOS, Linux)
 
-**[GitHub Releases (v0.1.0)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.0)**에서 운영체제에 맞는 설치 파일이나 포터블 압축 파일을 바로 다운로드하세요:
+**[GitHub Releases (v0.1.1)](https://github.com/Hybirdss/Hycli/releases/tag/v0.1.1)**에서 운영체제에 맞는 설치 파일이나 포터블 압축 파일을 바로 다운로드하세요:
 
 | 운영체제 | 아키텍처 | 네이티브 설치 파일 | 포터블 패키지 | 실행 방법 |
 | --- | --- | --- | --- | --- |
-| **Windows 10/11** | x64 및 ARM64 | `hycli-0.1.0-win32-*-setup.exe` | `hycli-0.1.0-win32-*.tar.gz` | `*-setup.exe` 실행(관리자 권한 불필요, 사용자 `PATH` 및 시작 메뉴 자동 등록) 후 **Hycli** 아이콘 클릭 또는 PowerShell에서 `hycli open` 실행 |
-| **macOS 13+** | Apple Silicon (`arm64`) 및 Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg`를 열어 **Hycli.app**을 **Applications**로 드래그 후 실행 (`~/.local/bin/hycli` 자동 연결) |
-| **Linux** | x64 및 ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` 설치(`sudo apt install ./hycli-*.deb`) 또는 `.tar.gz` 압축 해제 후 `./install.sh` 실행, 이후 `hycli open` |
+| **Windows 10/11** | x64 및 ARM64 | `hycli-0.1.1-win32-*-setup.exe` | `hycli-0.1.1-win32-*.tar.gz` | `*-setup.exe` 실행(관리자 권한 불필요, 사용자 `PATH` 및 시작 메뉴 자동 등록) 후 **Hycli** 아이콘 클릭 또는 PowerShell에서 `hycli open` 실행 |
+| **macOS 13+** | Apple Silicon (`arm64`) 및 Intel (`x64`) | `hycli-0.1.1-darwin-*.dmg` | `hycli-0.1.1-darwin-*.tar.gz` | `.dmg`를 열어 **Hycli.app**을 **Applications**로 드래그 후 실행 (`~/.local/bin/hycli` 자동 연결) |
+| **Linux** | x64 및 ARM64 | `hycli-0.1.1-linux-*.deb` | `hycli-0.1.1-linux-*.tar.gz` | `.deb` 설치(`sudo apt install ./hycli-*.deb`) 또는 `.tar.gz` 압축 해제 후 `./install.sh` 실행, 이후 `hycli open` |
 
 **배포된 v0.1.0:** Windows 및 macOS 포터블 압축 파일에는 설치 스크립트가 포함되어 있지 않습니다. 대신 위 릴리스의 Windows `*-setup.exe` 또는 macOS `.dmg` 설치 파일을 사용하세요.
 
@@ -77,9 +77,9 @@ Hycli는 웹사이트 엔진과 로컬 대시보드(`http://127.0.0.1:4318`)를 
 **Linux / macOS 포터블 패키지 설치:**
 
 ```sh
-sha256sum -c hycli-0.1.0-*.tar.gz.sha256   # macOS는 shasum -a 256 -c
-tar -xzf hycli-0.1.0-*.tar.gz
-cd hycli-0.1.0-*
+sha256sum -c hycli-0.1.1-*.tar.gz.sha256   # macOS는 shasum -a 256 -c
+tar -xzf hycli-0.1.1-*.tar.gz
+cd hycli-0.1.1-*
 ./install.sh
 hycli open
 ```
@@ -87,8 +87,8 @@ hycli open
 **Windows PowerShell 포터블 패키지 설치:**
 
 ```powershell
-tar -xzf hycli-0.1.0-win32-x64.tar.gz
-cd hycli-0.1.0-win32-x64
+tar -xzf hycli-0.1.1-win32-x64.tar.gz
+cd hycli-0.1.1-win32-x64
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 hycli open
 ```
