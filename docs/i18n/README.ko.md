@@ -67,8 +67,12 @@ Hycli는 웹사이트 엔진과 로컬 대시보드(`http://127.0.0.1:4318`)를 
 | **macOS 13+** | Apple Silicon (`arm64`) 및 Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | `.dmg`를 열어 **Hycli.app**을 **Applications**로 드래그 후 실행 (`~/.local/bin/hycli` 자동 연결) |
 | **Linux** | x64 및 ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | `.deb` 설치(`sudo apt install ./hycli-*.deb`) 또는 `.tar.gz` 압축 해제 후 `./install.sh` 실행, 이후 `hycli open` |
 
+**배포된 v0.1.0:** Windows 및 macOS 포터블 압축 파일에는 설치 스크립트가 포함되어 있지 않습니다. 대신 위 릴리스의 Windows `*-setup.exe` 또는 macOS `.dmg` 설치 파일을 사용하세요.
+
 <details>
 <summary><strong>터미널 포터블 설치 및 소스에서 빌드하기</strong></summary>
+
+아래 포터블 설치 명령은 현재 소스에서 빌드한 패키지처럼 `install.sh`(Linux/macOS) 또는 `install.ps1`(Windows)이 포함된 패키지에서만 사용할 수 있습니다.
 
 **Linux / macOS 포터블 패키지 설치:**
 

@@ -67,8 +67,12 @@ Hycli 將網站引擎與本機儀表板（`http://127.0.0.1:4318`）內建於單
 | **macOS 13+** | Apple Silicon (`arm64`) 及 Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | 開啟 `.dmg`，將 **Hycli.app** 拖曳至 **Applications** 後開啟（自動連結 `~/.local/bin/hycli`） |
 | **Linux** | x64 及 ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | 安裝 `.deb`（`sudo apt install ./hycli-*.deb`）或解壓縮 `.tar.gz` 後執行 `./install.sh`，接著執行 `hycli open` |
 
+**已發布的 v0.1.0：** Windows 和 macOS 可攜式壓縮檔不包含安裝指令碼。請改用上方發佈頁面中的 Windows `*-setup.exe` 或 macOS `.dmg` 安裝檔。
+
 <details>
 <summary><strong>終端機可攜式安裝與從原始碼建置</strong></summary>
+
+以下可攜式套件指令僅適用於包含 `install.sh`（Linux/macOS）或 `install.ps1`（Windows）的套件，例如從目前原始碼建置的套件。
 
 **Linux / macOS 可攜式套件安裝：**
 

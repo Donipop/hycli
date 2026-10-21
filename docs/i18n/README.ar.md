@@ -67,8 +67,12 @@ hycli your-website create-draft --title "مرحبًا من Hycli" --body "تمت
 | **macOS 13+** | Apple Silicon (`arm64`) وIntel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | افتح ملف `.dmg`، واسحب **Hycli.app** إلى **Applications** ثم افتحه (يربط `hycli` تلقائيًا في `~/.local/bin`). |
 | **Linux** | x64 وARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | ثبّت حزمة `.deb` (`sudo apt install ./hycli-*.deb`) أو فك ضغط `.tar.gz` وشغّل `./install.sh`، ثم نفّذ `hycli open`. |
 
+**الإصدار المنشور v0.1.0:** لا تتضمن الأرشيفات المحمولة لنظامي Windows وmacOS نصوص التثبيت. استخدم بدلًا منها مثبّت Windows بصيغة `*-setup.exe` أو مثبّت macOS بصيغة `.dmg` من الإصدار المرتبط أعلاه.
+
 <details>
 <summary><strong>التثبيت السريع من الطرفية والبناء من المصدر</strong></summary>
+
+تتطلب أوامر الأرشيف أدناه حزمة تحتوي على `install.sh` (لنظامي Linux/macOS) أو `install.ps1` (لنظام Windows)، مثل حزمة مبنية من المصدر الحالي.
 
 **الأرشيف المحمول لنظامي Linux / macOS:**
 

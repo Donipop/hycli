@@ -67,8 +67,12 @@ Unduh pemasang native atau arsip portabel untuk platform Anda dari **[GitHub Rel
 | **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Buka `.dmg`, seret **Hycli.app** ke **Applications**, lalu jalankan (otomatis menautkan `~/.local/bin/hycli`) |
 | **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Pasang `.deb` (`sudo apt install ./hycli-*.deb`) atau ekstrak `.tar.gz` dan jalankan `./install.sh`, lalu jalankan `hycli open` |
 
+**Rilis v0.1.0 yang dipublikasikan:** Arsip portabel Windows dan macOS tidak menyertakan skrip instalasi. Gunakan pemasang Windows `*-setup.exe` atau macOS `.dmg` dari rilis yang ditautkan di atas.
+
 <details>
 <summary><strong>Pemasangan portabel via terminal & bangun dari kode sumber</strong></summary>
+
+Perintah arsip di bawah memerlukan paket yang berisi `install.sh` (Linux/macOS) atau `install.ps1` (Windows), misalnya paket yang dibangun dari kode sumber saat ini.
 
 **Arsip portabel Linux / macOS:**
 

@@ -67,8 +67,12 @@ Baixe o instalador nativo ou o pacote portátil para a sua plataforma em **[GitH
 | **macOS 13+** | Apple Silicon (`arm64`) e Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Abra o `.dmg`, arraste o **Hycli.app** para **Applications** e abra-o (vincula automaticamente `hycli` em `~/.local/bin`). |
 | **Linux** | x64 e ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Instale o `.deb` (`sudo apt install ./hycli-*.deb`) ou extraia o `.tar.gz` e execute `./install.sh`; depois execute `hycli open`. |
 
+**Versão publicada v0.1.0:** Os arquivos portáteis para Windows e macOS não incluem scripts de instalação. Use o instalador `*-setup.exe` para Windows ou `.dmg` para macOS da versão vinculada acima.
+
 <details>
 <summary><strong>Instalação rápida pelo terminal e compilação a partir do código-fonte</strong></summary>
+
+Os comandos abaixo exigem um pacote que contenha `install.sh` (Linux/macOS) ou `install.ps1` (Windows), como um pacote compilado a partir do código-fonte atual.
 
 **Pacote portátil para Linux / macOS:**
 

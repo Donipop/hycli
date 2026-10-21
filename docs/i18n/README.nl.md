@@ -67,8 +67,12 @@ Download het native installatieprogramma of het draagbare archief voor jouw plat
 | **macOS 13+** | Apple Silicon (`arm64`) & Intel (`x64`) | `hycli-0.1.0-darwin-*.dmg` | `hycli-0.1.0-darwin-*.tar.gz` | Open de `.dmg`, sleep **Hycli.app** naar **Applications** en open de app (koppelt `hycli` automatisch in `~/.local/bin`). |
 | **Linux** | x64 & ARM64 | `hycli-0.1.0-linux-*.deb` | `hycli-0.1.0-linux-*.tar.gz` | Installeer het `.deb`-bestand (`sudo apt install ./hycli-*.deb`) of pak het `.tar.gz`-archief uit en voer `./install.sh` uit, gevolgd door `hycli open`. |
 
+**Gepubliceerde versie v0.1.0:** De draagbare archieven voor Windows en macOS bevatten geen installatiescripts. Gebruik in plaats daarvan het Windows-installatiebestand `*-setup.exe` of het macOS-installatiebestand `.dmg` uit de hierboven gelinkte release.
+
 <details>
 <summary><strong>Snelle terminal-installatie & bouwen vanuit broncode</strong></summary>
+
+De onderstaande archiefcommando's vereisen een pakket met `install.sh` (Linux/macOS) of `install.ps1` (Windows), bijvoorbeeld een pakket dat uit de huidige broncode is gebouwd.
 
 **Draagbaar archief voor Linux / macOS:**
 
